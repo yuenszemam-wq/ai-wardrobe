@@ -33,7 +33,7 @@ Workers Builds 自動產生的 token 沒有 D1 寫入權限，所以 migration �
 npx wrangler d1 migrations apply DB --remote
 ```
 
-（`0001_init.sql` 已於 2026-11-08 套用，並已記錄在 `d1_migrations` 表。）
+（`0001_init.sql`、`0002_upload_slots.sql` 已於 2026-11-08 套用，並已記錄在 `d1_migrations` 表。）
 
 ## 安全設計
 
@@ -84,11 +84,31 @@ GET/POST /api/outfits  GET/PATCH/DELETE /api/outfits/{id}
 
 網址：`https://<worker 網域>/mcp/<權杖>`（在 App「設定」產生）。Streamable HTTP、無狀態 JSON 回應。
 
-工具：`list_garments`、`get_garment`、`create_import_batch`、`add_garments`、`upload_garment_image`、`create_upload_link`、`update_garment`、`finalize_import_batch`、`get_import_status`。
+工具：`import_garment_files`、`create_upload_session`、`get_upload_session`（批量上傳，建議使用），以及 `list_garments`、`get_garment`、`create_import_batch`、`add_garments`、`upload_garment_image`、`create_upload_link`、`update_garment`、`finalize_import_batch`、`get_import_status`。
+
+### 批量上傳（R2 先寫、D1 後寫）
+
+每批最多 10 件。AI 先提交衣物資料，伺服器只建立「上傳槽」（`upload_slots`）並預留 `garment_id`，**不建立衣物記錄**。收到圖片後：
+
+1. 驗證實際檔案內容：去背圖（`processed`）只收 PNG／WebP，必須有透明通道；若提供 `expected_width`／`expected_height`，尺寸必須完全相同（防止途中被縮小）。
+2. SHA-256 去重：衣櫃已有同一張圖 → `duplicate`，不重複建立；同一槽重傳同一張 → 冪等回應。
+3. 原檔原樣寫入 R2（R2 以 SHA-256 校驗）。
+4. R2 成功後，在**同一個 D1 transaction** 建立 `garments`、`garment_images`、`import_jobs` 並把槽標為 `done`。D1 失敗即刪除 R2 物件，槽標為 `failed`，可用同一網址重試。
+
+同一槽同時上傳會被鎖（409），每槽最多重試 8 次。
+
+| 來源 | 做法 |
+| --- | --- |
+| ChatGPT 對話中的附件 | `import_garment_files`：`files` 為 `openai/fileParams`，ChatGPT 自動傳入 `{download_url, file_id, mime_type?, file_name?}`，伺服器下載原檔。 |
+| ChatGPT Python／sandbox 產生的去背圖 | sandbox **不能連網**，也不能把檔案直接交給工具（OpenAI 官方說明）。改用 `create_upload_session`：ChatGPT 給使用者下載檔案及 `upload_page_url`，使用者在上傳頁一次選取全部檔案，按檔名自動配對。 |
+| 可連網的程式（例如 Claude Code、curl） | 每個槽有 `put_url`：`curl -T 01_xxx.png -H 'content-type: image/png' '<put_url>'`。 |
+
+短效網址：`/api/upload/{token}`（GET 狀態）、`PUT /api/upload/{token}/{slot_id}`（原始二進位）、`PUT …/{slot_id}/thumbnail`（上傳頁產生的縮圖）。權杖只存雜湊，預設 3 小時、最長 24 小時有效；跨網域 PUT 需 CORS preflight 而本 API 不回 CORS 標頭，惡意網頁不能代為上傳；`POST` 必須帶 `X-Requested-With`。過期後以同一 `batch_id` 再呼叫 `create_upload_session`（`items` 留空）即可為未完成項目產生新連結。
+
 
 `upload_garment_image` 接受三種來源：
 
-1. `file`（`{download_url, file_id}`）——ChatGPT 對話檔案；工具已標記 `_meta["openai/fileParams"] = ["file"]`。
+1. `file`（`{download_url, file_id, mime_type?, file_name?}`）——ChatGPT 對話檔案；工具已標記 `_meta["openai/fileParams"] = ["file"]`。
 2. `image_url`——https 下載連結。
 3. `image_base64`——備用。
 
@@ -110,4 +130,10 @@ npx wrangler dev          # 本機（需 wrangler 登入）
 
 ```bash
 npm i -D esbuild sharp && node test/e2e.mjs
+```
+
+`test/upload-slots.mjs`（54 項）測試批量上傳槽：1122×1402 透明 PNG／WebP 逐位元保留、R2 先寫 D1 後寫的次序、D1 失敗回滾及重試、縮小／JPEG／無透明的圖被拒、去重、並發鎖、進度、連結續期、ChatGPT `openai/fileParams`（模擬 download_url）。
+
+```bash
+node test/upload-slots.mjs
 ```

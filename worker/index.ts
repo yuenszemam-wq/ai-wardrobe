@@ -3,6 +3,7 @@ import { createGarment, deleteGarment, getGarment, listGarments, stats, updateGa
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
 import { handleMcp } from "./mcp";
+import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
 
@@ -27,7 +28,7 @@ export default {
 
 function logRequest(req: Request, url: URL, status: number, started: number, err?: unknown) {
   // 不記錄 MCP 網址中的權杖
-  const path = url.pathname.startsWith("/mcp/") ? "/mcp/***" : url.pathname.replace(/^\/api\/public\/upload\/[^/]+/, "/api/public/upload/***");
+  const path = url.pathname.startsWith("/mcp/") ? "/mcp/***" : url.pathname.replace(/^\/api\/(public\/upload|upload)\/[^/]+/, "/api/$1/***");
   const line = { m: req.method, p: path, s: status, ms: Date.now() - started };
   if (status >= 500) console.error(JSON.stringify({ ...line, err: String(err) }));
   else console.log(JSON.stringify(line));
@@ -51,6 +52,9 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   // 公開的短效上傳連結（不需登入，但需有效連結）
   const pub = path.match(/^\/api\/public\/upload\/([A-Za-z0-9_-]{20,80})(?:\/(\d+))?$/);
   if (pub) return handlePublicUpload(req, env, pub[1], pub[2]);
+  // 批量二進位上傳槽（R2 先寫、D1 後寫）
+  const slotUp = path.match(/^\/api\/upload\/([A-Za-z0-9_-]{20,80})(?:\/(slt_[a-z2-7]+)(?:\/(thumbnail))?)?$/);
+  if (slotUp) return handleSlotUpload(req, env, slotUp[1], slotUp[2], slotUp[3]);
 
   const actor = await authenticate(req, env);
   if (!actor) throw new HttpError(401, "unauthorized", "請先登入");
@@ -191,6 +195,17 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     const body = await readJson<{ action?: string }>(req);
     if (body.action === "reject") requireSession(actor);
     return json(await actOnJob(env, actor, m[1], String(body.action || "")));
+  }
+  if (path === "/api/upload-sessions" && method === "POST") {
+    requireScope(actor, "import");
+    const { _token, ...out } = await createUploadSession(env, actor, url.origin, await readJson(req));
+    void _token;
+    return json(out, 201);
+  }
+  m = path.match(/^\/api\/upload-sessions\/([\w-]+)$/);
+  if (m && method === "GET") {
+    requireScope(actor, "read");
+    return json(await getUploadSession(env, m[1]));
   }
   if (path === "/api/upload-links" && method === "POST") {
     requireScope(actor, "import");

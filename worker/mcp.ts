@@ -8,14 +8,23 @@ import { authenticateToken, meterCall } from "./auth";
 import { getGarment, listGarments, updateGarment } from "./garments";
 import { ImageType, Owner, maxUploadBytes, storeImage } from "./images";
 import { addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, onImageStored } from "./imports";
+import { createUploadSession, downloadHttps, getUploadSession, importGarmentFiles } from "./uploads";
 import { Actor, Env, HttpError, json, requireScope } from "./util";
 
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.2.0";
 const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS = `你正在操作使用者的私人「AI Wardrobe 智能電子衣櫃」。
-流程：create_import_batch（可用 client_ref 跨對話續做同一批）→ add_garments（每件衣物一個 client_key）→ upload_garment_image（每件上傳去背圖 processed，可另傳原圖 original）→ get_import_status 核實 → finalize_import_batch。
-如果無法把圖片檔案內容傳給工具，請呼叫 create_upload_link，把連結交給使用者，由使用者在手機選相上傳。
+const INSTRUCTIONS = `你正在操作使用者的私人「AI Wardrobe 智能電子衣櫃」。圖片一律以原始二進位存入私人 R2，成功後才建立衣物記錄。
+【首選流程，最多 10 件一批】
+A. 圖片是使用者在對話中附上的檔案：呼叫 import_garment_files，把檔案放入 files（伺服器會用 download_url 下載原檔），並在 items 提供每件衣物資料、file_name、expected_width／expected_height。
+B. 圖片是你在 Python／程式碼環境（sandbox，例如 /mnt/data）產生的去背圖：sandbox 不能連網，也不能把檔案直接交給工具。請：
+   1) 用程式讀出每張圖的實際寬高，並以 01_名稱.png 這類檔名儲存為 PNG／WebP（保留透明，不要縮小）；
+   2) 呼叫 create_upload_session，items 填衣物資料、file_name、expected_width、expected_height；
+   3) 把每個檔案的下載連結及 upload_page_url 交給使用者：使用者下載後在上傳頁一次選取全部檔案，系統按檔名自動配對；
+   4) 呼叫 get_upload_session 核實；有失敗項目可叫使用者在同一頁重試，連結過期就用同一 batch_id 再呼叫 create_upload_session（items 留空）取得新連結；
+   5) 全部完成後 finalize_import_batch。
+不要自稱已上傳；以 get_upload_session 的 status=done 為準。expected_width／expected_height 一經提供，尺寸不符會被拒絕，以防圖片被縮小。
+舊流程（create_import_batch → add_garments → upload_garment_image／create_upload_link）仍可用。
 分類規則：category 只可用 ${CATEGORIES.join("、")}；Lolita 子類 ${LOLITA_SUBCATEGORIES.join("、")}；style 只可用 ${STYLES.join("、")}。
 不確定的欄位請留空並列入 uncertain_fields，或設 needs_review=true，不要猜測。
 若相片是真人整套穿搭，請用 kind="outfit" 保存為穿搭待覆核，不要假裝已拆成單品。
@@ -37,17 +46,81 @@ const garmentProps = {
   ai_note: { type: "string", description: "AI 判斷的理由或疑問" },
 };
 
-const fileParam = {
+// 依 OpenAI Apps SDK 規格：download_url、file_id 必填；mime_type、file_name 可選
+const fileObject = {
   type: "object",
-  description: "對話中使用者上傳或 AI 產生的圖片檔案",
   properties: {
     download_url: { type: "string" },
     file_id: { type: "string" },
     mime_type: { type: "string" },
+    file_name: { type: "string" },
   },
+  required: ["download_url", "file_id"],
+};
+const fileParam = { ...fileObject, description: "對話中的圖片檔案（ChatGPT 會自動填入 download_url 及 file_id）" };
+
+const slotItem = {
+  type: "object",
+  properties: {
+    client_key: { type: "string", description: "此批次內唯一，例如 01 或相片檔名；重複提交不會重複建立" },
+    label: { type: "string", description: "顯示用名稱，例如「第1件 黑色JSK」" },
+    file_name: { type: "string", description: "對應圖片的檔名，例如 01_black_jsk.png；上傳頁會按檔名自動配對" },
+    image_type: { type: "string", enum: ["processed", "original"], default: "processed", description: "processed＝透明去背圖（PNG／WebP）" },
+    expected_width: { type: "integer", description: "圖片實際寬度（像素）；提供後尺寸不符會被拒絕" },
+    expected_height: { type: "integer", description: "圖片實際高度（像素）" },
+    needs_review: { type: "boolean" },
+    garment: { type: "object", properties: garmentProps },
+  },
+  required: ["client_key"],
 };
 
 const TOOLS = [
+  {
+    name: "import_garment_files",
+    title: "匯入對話中的圖片檔",
+    description:
+      "一次匯入最多 10 個對話中的圖片檔（openai/fileParams）。伺服器下載原檔 → 驗證 PNG／WebP、尺寸及透明通道 → 先寫 R2 → 成功後才建立衣物記錄。按 file_name 配對 items，否則按次序。失敗的項目會回傳上傳頁連結讓使用者補傳。",
+    scope: "upload",
+    _meta: { "openai/fileParams": ["files"] },
+    inputSchema: {
+      type: "object",
+      properties: {
+        files: { type: "array", maxItems: 10, items: fileObject, description: "對話中的圖片檔案" },
+        items: { type: "array", maxItems: 10, items: slotItem },
+        batch_id: { type: "string" },
+        client_ref: { type: "string", description: "自訂批次識別碼，可跨對話續用" },
+        source: { type: "string", description: "chatgpt 或 claude" },
+        note: { type: "string" },
+      },
+      required: ["files"],
+    },
+  },
+  {
+    name: "create_upload_session",
+    title: "建立批量上傳",
+    description:
+      "為最多 10 件衣物建立上傳槽，回傳 upload_page_url（使用者一次選取多張相，按檔名配對）及每件的 put_url（任何可連網的程式可用 HTTP PUT 上傳原始 PNG／WebP 二進位）。此時不會建立衣物記錄；圖片寫入 R2 成功後才建立。items 留空並提供 batch_id 可為未完成項目重新產生連結（重試）。",
+    scope: "import",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", maxItems: 10, items: slotItem },
+        batch_id: { type: "string", description: "續用或重試既有批次" },
+        client_ref: { type: "string", description: "自訂批次識別碼，例如 2026-11-08-lolita-1" },
+        source: { type: "string", description: "chatgpt 或 claude" },
+        note: { type: "string" },
+        minutes: { type: "integer", minimum: 5, maximum: 1440, description: "連結有效分鐘，預設 180" },
+      },
+    },
+  },
+  {
+    name: "get_upload_session",
+    title: "上傳進度",
+    description: "讀取批次中每個上傳槽的狀態（pending／uploading／done／duplicate／failed）、實際解像度、透明通道及錯誤訊息。",
+    scope: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: "object", properties: { batch_id: { type: "string" } }, required: ["batch_id"] },
+  },
   {
     name: "list_garments",
     title: "列出衣物",
@@ -280,6 +353,26 @@ async function callTool(env: Env, actor: Actor, name: string, a: Record<string, 
     return String(v);
   };
   switch (name) {
+    case "import_garment_files": {
+      const metered = async (url: string, max: number) => {
+        const b = await downloadHttps(url, max);
+        await meterCall(env, actor, b.byteLength);
+        return b;
+      };
+      return await importGarmentFiles(env, actor, origin, { ...a, source: a.source ?? actor.label }, metered);
+    }
+    case "create_upload_session": {
+      const { _token, ...out } = await createUploadSession(env, actor, origin, { ...a, source: a.source ?? actor.label });
+      void _token;
+      return {
+        ...out,
+        next_step: out.upload_page_url
+          ? "把 upload_page_url 交給使用者（可一次選取全部圖片，按檔名配對）；可連網的程式亦可對每個 put_url 以 HTTP PUT 上傳原始 PNG／WebP。完成後用 get_upload_session 核實。"
+          : "全部項目已完成，毋須上傳。",
+      };
+    }
+    case "get_upload_session":
+      return await getUploadSession(env, need("batch_id"));
     case "list_garments": {
       const p = new URLSearchParams();
       for (const k of ["q", "category", "style", "color", "status", "limit", "offset"]) if (a[k] !== undefined) p.set(k, String(a[k]));
@@ -366,37 +459,7 @@ async function obtainBytes(env: Env, a: Record<string, unknown>): Promise<Uint8A
   const urlStr = file?.download_url || (typeof a.image_url === "string" ? a.image_url : "");
   if (urlStr) {
     if (urlStr.startsWith("data:")) return decodeBase64(urlStr, max);
-    let u: URL;
-    try {
-      u = new URL(urlStr);
-    } catch {
-      throw new HttpError(400, "bad_url", "圖片網址格式錯誤");
-    }
-    if (u.protocol !== "https:") throw new HttpError(400, "bad_url", "只接受 https 圖片網址");
-    const res = await fetch(u.toString(), { redirect: "follow" });
-    if (!res.ok || !res.body) throw new HttpError(502, "download_failed", `下載圖片失敗（HTTP ${res.status}）`);
-    const declared = Number(res.headers.get("content-length") || "0");
-    if (declared > max) throw new HttpError(413, "file_too_large", "圖片超過上傳上限");
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > max) {
-        await reader.cancel();
-        throw new HttpError(413, "file_too_large", "圖片超過上傳上限");
-      }
-      chunks.push(value);
-    }
-    const out = new Uint8Array(total);
-    let off = 0;
-    for (const c of chunks) {
-      out.set(c, off);
-      off += c.byteLength;
-    }
-    return out;
+    return downloadHttps(urlStr, max);
   }
   if (typeof a.image_base64 === "string" && a.image_base64) return decodeBase64(a.image_base64, max);
   throw new HttpError(400, "no_image", "請提供 file、image_url 或 image_base64；如無法傳送圖片，請改用 create_upload_link");

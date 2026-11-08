@@ -143,11 +143,15 @@ export async function failJob(env: Env, jobId: string, message: string) {
 export async function recomputeBatch(env: Env, batchId: string) {
   await env.DB.prepare(
     `UPDATE import_batches SET
-       total_images    = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1),
-       processed_count = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1 AND status != 'awaiting_image'),
-       success_count   = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1 AND status = 'done'),
+       total_images    = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1)
+                       + (SELECT COUNT(*) FROM upload_slots WHERE batch_id = ?1 AND job_id IS NULL),
+       processed_count = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1 AND status != 'awaiting_image')
+                       + (SELECT COUNT(*) FROM upload_slots WHERE batch_id = ?1 AND job_id IS NULL AND status IN ('failed','duplicate')),
+       success_count   = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1 AND status = 'done')
+                       + (SELECT COUNT(*) FROM upload_slots WHERE batch_id = ?1 AND job_id IS NULL AND status = 'duplicate'),
        review_count    = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1 AND status = 'review'),
-       failed_count    = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1 AND status = 'failed'),
+       failed_count    = (SELECT COUNT(*) FROM import_jobs WHERE batch_id = ?1 AND status = 'failed')
+                       + (SELECT COUNT(*) FROM upload_slots WHERE batch_id = ?1 AND job_id IS NULL AND status = 'failed'),
        updated_at = ?2
      WHERE id = ?1`,
   )
@@ -162,6 +166,12 @@ export async function finalizeBatch(env: Env, actor: Actor, batchId: string) {
       "UPDATE import_jobs SET status = 'failed', error_message = '完成批次時仍未收到圖片', updated_at = ? WHERE batch_id = ? AND status = 'awaiting_image'",
     )
       .bind(nowIso(), batchId)
+      .run();
+    await env.DB.prepare(
+      `UPDATE upload_slots SET status = 'failed', lock_until = NULL, error_message = '完成批次時仍未收到圖片', updated_at = ?
+       WHERE batch_id = ? AND (status = 'pending' OR (status = 'uploading' AND lock_until < ?))`,
+    )
+      .bind(nowIso(), batchId, nowIso())
       .run();
     await recomputeBatch(env, batchId);
     await env.DB.prepare("UPDATE import_batches SET status = 'finalized', updated_at = ? WHERE id = ?").bind(nowIso(), batchId).run();
@@ -187,7 +197,15 @@ export async function getBatch(env: Env, batchId: string) {
   )
     .bind(batchId)
     .all();
-  return { batch, jobs };
+  // 上傳槽：仍在等待圖片（或失敗、重複）的項目，尚未有 garments 記錄
+  const { results: slots } = await env.DB.prepare(
+    `SELECT id AS slot_id, position, client_key, label, file_name, image_type, status, attempts, error_message AS error,
+       expected_width, expected_height, width, height, has_alpha, garment_id, duplicate_of, job_id
+     FROM upload_slots WHERE batch_id = ? ORDER BY position`,
+  )
+    .bind(batchId)
+    .all();
+  return { batch, jobs, slots };
 }
 
 export async function listBatches(env: Env, limit = 30) {

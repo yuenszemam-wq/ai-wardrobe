@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { ProgressBar } from "../components/ui";
 import { makeThumbnail, prepareForUpload } from "../imageProcessing";
+import SlotUpload, { type SlotSession } from "./SlotUpload";
 
 interface Target {
   index: number;
@@ -10,8 +11,22 @@ interface Target {
   uploaded: boolean;
 }
 
-/** AI 產生的短效上傳連結頁：不需登入，只能上傳到指定的衣物 */
+/** 上傳連結頁：新式（批量上傳槽）或舊式（逐件衣物）自動判斷 */
 export default function PublicUpload({ token }: { token: string }) {
+  const [slots, setSlots] = useState<SlotSession | null | undefined>(undefined);
+  useEffect(() => {
+    fetch(`/api/upload/${token}`, { cache: "no-store" })
+      .then(async (r) => (r.ok ? ((await r.json()) as SlotSession) : null))
+      .then((s) => setSlots(s && s.slots.length ? s : null))
+      .catch(() => setSlots(null));
+  }, [token]);
+  if (slots === undefined) return <div className="min-h-screen bg-lace" />;
+  if (slots) return <SlotUpload token={token} initial={slots} />;
+  return <LegacyUpload token={token} />;
+}
+
+/** 舊式：AI 產生的短效上傳連結頁，不需登入，只能上傳到指定的衣物 */
+function LegacyUpload({ token }: { token: string }) {
   const [info, setInfo] = useState<{ expires_at: string; targets: Target[] } | null>(null);
   const [err, setErr] = useState("");
   const [state, setState] = useState<Record<number, { p: number; msg?: string; tone?: "ok" | "err" }>>({});

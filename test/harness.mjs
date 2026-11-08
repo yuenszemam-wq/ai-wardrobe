@@ -102,6 +102,7 @@ export class FakeR2 {
 export function makeEnv() {
   const DB = new FakeD1();
   DB.migrate(new URL("../migrations/0001_init.sql", import.meta.url));
+  DB.migrate(new URL("../migrations/0002_upload_slots.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),
