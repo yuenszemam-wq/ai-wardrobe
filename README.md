@@ -33,7 +33,91 @@ Workers Builds 自動產生的 token 沒有 D1 寫入權限，所以 migration �
 npx wrangler d1 migrations apply DB --remote
 ```
 
-（`0001_init.sql`、`0002_upload_slots.sql`、`0003_import_staging.sql` 已於 2026-11-08 套用，並已記錄在 `d1_migrations` 表。）
+（`0001_init.sql`、`0002_upload_slots.sql`、`0003_import_staging.sql` 已於 2026-11-08 套用；`0004_ai_workflow.sql` 已於 2026-11-09 經 Cloudflare D1 API 套用；全部已記錄在 `d1_migrations` 表。）
+
+## V2：批量上傳 × AI 待整理
+
+```
+App 選相（最多 30 張，同時 3 張）→ /api/intake → R2 原檔 + D1「待整理衣物 NNN」（ai_status = pending_ai）
+→ 使用者在 Claude／ChatGPT 發出一次「整理待處理衣物」指令
+→ AI 讀清單及圖片 → 提交 ai_suggestions（不直接改 garments）→ Worker 驗證 → pending_review
+→ App「AI 待整理」對比，接受全部／部分欄位／手動修改／保留原資料／重新處理 → 正式寫入
+```
+
+**圖片自動上傳 ≠ AI 自動分析。** App 不會自行辨認圖片（沒有使用任何付費 AI API）；分析要由使用者在 Claude／ChatGPT 對話中觸發。
+
+### 上傳（`POST /api/intake`，multipart）
+
+| 欄位 | 內容 |
+| --- | --- |
+| `file` | 原檔，原樣寫入 R2（不縮小、不重新壓縮）。HEIC／HEIF 原檔亦保留（`originals/{garment_id}/{image_id}.heic`） |
+| `sha256` | 瀏覽器計算的原檔 SHA-256；與伺服器不符即 422 |
+| `preview` | HEIC 的原尺寸 JPEG 預覽（`variant = 'preview'`，設為主圖） |
+| `thumbnail` | 480px WebP 縮圖，只供列表 |
+| `analysis` | 約 1600px 辨認圖（`image_type = 'thumbnail'`、`variant = 'analysis'`），由原圖縮小、未經 AI 改動 |
+
+- 一張相＝一件衣物，名稱「待整理衣物 NNN」（`display_no`，`name_is_placeholder = 1`），UUID 不會作顯示名稱。
+- 冪等：衣物 `client_key = intake:{sha256}`；同一張相重傳、同時送出兩次都只會有一件。衣櫃已有同一張相 → 200 `duplicate`。
+- 已去背的透明 PNG／WebP 直接存為 `processed`。
+- 寫入後**讀回驗證**：R2 `head()` 的大小及 SHA-256 必須一致，否則回滾。主圖失敗會刪除剛建立、仍無圖片的衣物記錄。
+
+### AI 狀態（`garments.ai_status`）
+
+| 值 | App 顯示 |
+| --- | --- |
+| `pending_ai` | 待 AI 辨認 |
+| `ai_processing` | AI 整理中（30 分鐘租約，逾時由 cron 退回） |
+| `pending_review` | 待人工確認 |
+| `done` | 已完成 |
+| `failed` | 辨認失敗 |
+| `needs_rework` | 需要重新處理 |
+| `NULL` | 舊資料（不在 AI 流程內） |
+
+### 防止覆寫
+
+- App 使用者修改過的欄位記入 `locked_fields`；AI 的 `update_garment` 會略過這些欄位，「接受全部」亦不會覆寫。
+- 每次修改 `version + 1`；AI 建議必須附上讀取時的 `base_version`，不符即拒絕（409）。
+- `ai_suggestions.idempotency_key` 唯一：重試不會重複建立。
+- 必須 `vision_checked = true`（AI 已實際查看圖片像素）才接受辨認結果；只看到 metadata 要用 `outcome = "failed"`。
+- 品牌分級 `confirmed`／`likely`／`unconfirmed`：只有 `confirmed` 並附來源連結才會寫入 `brand`；證據來自 AI 生成／去背圖的會自動降為 `likely`。其餘只記入 `ai_note` 作候選。
+
+### API
+
+```
+POST /api/intake                         批量上傳（一張相＝一件待整理衣物）
+GET  /api/ai/queue?limit=10              待整理清單（含 version、locked_fields、短效簽名圖片網址）
+POST /api/ai/claim                       {garment_ids} 標記 AI 整理中
+POST /api/ai/suggestions                 提交建議（update 權限）
+GET  /api/ai/review?ai_status=…          確認中心（含最新建議）
+POST /api/ai/garments/{id}/decide        {action: accept_all|accept_fields|keep_original|mark_unconfirmed|rework, fields?, edits?, version?}（只限登入使用者）
+POST /api/ai/decide-bulk                 批量接受
+POST /api/ai/status                      {garment_ids, ai_status}
+GET  /api/ai-image/{image_id}?exp&sig    短效簽名圖片網址（HMAC，60 分鐘，不需登入）
+```
+
+MCP 新工具：`list_pending_garments`、`get_garment_image`（回傳 MCP image content，AI 真正看到像素）、`claim_garments`、`submit_ai_suggestion`。
+
+### ChatGPT 經 Cloudflare 連接器（只能執行 D1 SQL）
+
+Worker 每分鐘為待整理衣物把短效簽名網址寫入 `ai_image_links`（需要使用者在部署後最少開過一次 App，Worker 才知道公開網址）。
+
+```sql
+-- 1. 讀取待整理清單及圖片網址
+SELECT g.id AS garment_id, g.version, g.name, g.ai_status, g.locked_fields,
+       l.purpose, l.image_id, l.url, l.width, l.height, l.mime_type, l.expires_at
+FROM garments g JOIN ai_image_links l ON l.garment_id = g.id
+WHERE g.ai_status IN ('pending_ai','needs_rework','failed') AND l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+ORDER BY g.display_no, l.purpose LIMIT 60;
+
+-- 2. 每件提交一行建議（payload 為欄位 JSON）；Worker 一分鐘內驗證
+INSERT INTO ai_suggestions (garment_id, idempotency_key, base_version, source, image_id, vision_checked, payload)
+VALUES (?, ?, ?, 'chatgpt', ?, 1, ?);
+
+-- 3. 核實
+SELECT id, garment_id, status, error_message FROM ai_suggestions WHERE idempotency_key IN (?, ?) ;
+```
+
+`status` 為 `valid` 即已放入「AI 待整理」；`invalid` 會在 `error_message` 說明原因（例如 `stale_version`、`vision_required`）。ChatGPT 是否能真正開啟網址並查看像素**未驗證**，須以實測為準。
 
 ## 安全設計
 
@@ -156,4 +240,5 @@ npm i -D esbuild sharp && node test/e2e.mjs
 ```bash
 node test/upload-slots.mjs
 node test/staging.mjs      # D1 暫存匯入（22 項：分段、SHA-256、截斷、縮小、JPEG、去重）
+node test/ai-intake.mjs    # V2 批量上傳及 AI 待整理（63 項：10 張上傳、逐位元／SHA-256、HEIC、去重、並發、簽名網址、MCP 讀圖、建議驗證、版本、鎖定欄位、品牌分級、D1 提交、確認、批量）
 ```

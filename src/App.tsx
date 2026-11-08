@@ -5,6 +5,7 @@ import { match, usePath } from "./router";
 import GarmentDetail from "./pages/GarmentDetail";
 import Home from "./pages/Home";
 import ImportCenter from "./pages/ImportCenter";
+import AiReview from "./pages/AiReview";
 import BatchDetail from "./pages/BatchDetail";
 import Login from "./pages/Login";
 import Outfits from "./pages/Outfits";
@@ -49,6 +50,7 @@ export default function App() {
   else if (match("/wardrobe", path)) page = <Wardrobe />;
   else if ((p = match("/g/:id", path))) page = <GarmentDetail id={p.id} />;
   else if (match("/import", path)) page = <ImportCenter />;
+  else if (match("/review", path)) page = <AiReview />;
   else if ((p = match("/import/:id", path))) page = <BatchDetail id={p.id} />;
   else if (match("/outfits", path)) page = <Outfits />;
   else if (match("/outfits/new", path)) page = <OutfitStudio />;
@@ -64,7 +66,7 @@ export default function App() {
             ✝ 電子衣櫃
           </Link>
           <Link to="/import" className="rounded-full bg-velvet px-3 py-1 text-[13px] text-rose">
-            ＋ 新增
+            ＋ 上傳
           </Link>
         </div>
       </header>
@@ -78,7 +80,8 @@ export default function App() {
 const TABS = [
   { to: "/", label: "首頁", icon: "⌂", test: (p: string) => p === "/" },
   { to: "/wardrobe", label: "衣櫃", icon: "♛", test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
-  { to: "/import", label: "匯入", icon: "✚", test: (p: string) => p.startsWith("/import") },
+  { to: "/import", label: "上傳", icon: "✚", test: (p: string) => p.startsWith("/import") },
+  { to: "/review", label: "待整理", icon: "✧", test: (p: string) => p.startsWith("/review") },
   { to: "/outfits", label: "穿搭", icon: "❦", test: (p: string) => p.startsWith("/outfits") },
   { to: "/settings", label: "設定", icon: "⚙", test: (p: string) => p.startsWith("/settings") },
 ];
@@ -87,7 +90,7 @@ function TabBar({ path }: { path: string }) {
   const clean = path.split("?")[0];
   return (
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 bg-ink/95 backdrop-blur" aria-label="主選單">
-      <div className="mx-auto grid max-w-5xl grid-cols-5">
+      <div className="mx-auto grid max-w-5xl grid-cols-6">
         {TABS.map((t) => {
           const active = t.test(clean);
           return (

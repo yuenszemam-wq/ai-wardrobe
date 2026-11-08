@@ -19,6 +19,14 @@ export default function Wardrobe() {
   const color = params.get("color") || "";
   const status = params.get("status") || "";
   const favorite = params.get("favorite") === "1";
+  const brand = params.get("brand") || "";
+  const identified = params.get("identified") || "";
+  const [brands, setBrands] = useState<string[]>([]);
+  useEffect(() => {
+    api<{ garments: Garment[] }>("/api/garments?limit=200&status=all")
+      .then((r) => setBrands([...new Set(r.garments.map((g) => g.brand).filter((b): b is string => Boolean(b)))].sort()))
+      .catch(() => undefined);
+  }, []);
 
   function setParam(key: string, value: string) {
     const p = new URLSearchParams(params);
@@ -55,7 +63,7 @@ export default function Wardrobe() {
     setLoadingMore(false);
   }
 
-  const activeFilters = [style, color, status, favorite ? "收藏" : ""].filter(Boolean).length;
+  const activeFilters = [style, color, status, brand, identified, favorite ? "收藏" : ""].filter(Boolean).length;
 
   return (
     <div>
@@ -105,6 +113,14 @@ export default function Wardrobe() {
               allLabel="未封存"
               labels={STATUS_LABEL}
             />
+          </div>
+          <div>
+            <p className="mb-1 text-[13px] text-mauve">品牌</p>
+            <Chips options={["__none__", ...brands] as string[]} value={brand} onChange={(v) => setParam("brand", v)} labels={{ __none__: "未有品牌" }} />
+          </div>
+          <div>
+            <p className="mb-1 text-[13px] text-mauve">是否已辨認</p>
+            <Chips options={["1", "0"] as const} value={identified as never} onChange={(v) => setParam("identified", v)} labels={{ "1": "已辨認", "0": "未辨認" }} />
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={favorite} onChange={(e) => setParam("favorite", e.target.checked ? "1" : "")} className="h-5 w-5 accent-amethyst" />

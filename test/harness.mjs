@@ -85,6 +85,11 @@ export class FakeR2 {
     this.objects.set(key, { bytes: new Uint8Array(bytes), httpMetadata: opts.httpMetadata, customMetadata: opts.customMetadata, uploaded: new Date() });
     return { key, size: bytes.byteLength };
   }
+  async head(key) {
+    const o = this.objects.get(key);
+    if (!o) return null;
+    return { key, size: o.bytes.byteLength, httpMetadata: o.httpMetadata, customMetadata: o.customMetadata, uploaded: o.uploaded };
+  }
   async get(key) {
     const o = this.objects.get(key);
     if (!o) return null;
@@ -104,6 +109,7 @@ export function makeEnv() {
   DB.migrate(new URL("../migrations/0001_init.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0002_upload_slots.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0003_import_staging.sql", import.meta.url));
+  DB.migrate(new URL("../migrations/0004_ai_workflow.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),

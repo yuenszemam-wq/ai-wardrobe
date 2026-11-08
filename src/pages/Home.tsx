@@ -8,6 +8,9 @@ interface Stats {
   favorites: number;
   missing_image: number;
   open_batches: number;
+  ai_todo: number;
+  ai_review: number;
+  ai_done: number;
   by_category: { category: string; n: number }[];
   recent: Garment[];
   favorite_items: Garment[];
@@ -44,15 +47,27 @@ export default function Home() {
             </div>
           </div>
         </div>
-        <div className="mt-6 grid grid-cols-2 gap-3">
+        <div className="mt-5 grid grid-cols-4 gap-2 text-center">
+          <Stat to="/wardrobe" n={s.total} label="衣物總數" />
+          <Stat to="/review?tab=pending_ai" n={s.ai_todo} label="待整理" hot={s.ai_todo > 0} />
+          <Stat to="/review?tab=pending_review" n={s.ai_review} label="待確認" hot={s.ai_review > 0} />
+          <Stat to="/review?tab=done" n={s.ai_done} label="已完成" />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3">
           <Link to="/import" className="rounded-2xl bg-amethyst px-4 py-3 text-center text-[15px] font-medium text-white">
-            快速新增
+            批量上傳
           </Link>
           <Link to="/outfits/new" className="rounded-2xl bg-velvet px-4 py-3 text-center text-[15px] text-rose">
             配搭一套
           </Link>
         </div>
       </section>
+
+      {s.ai_review > 0 && (
+        <Link to="/review?tab=pending_review" className="mt-4 block rounded-2xl bg-rose-soft px-4 py-3 text-sm">
+          AI 已整理好 {s.ai_review} 件，等你確認 →
+        </Link>
+      )}
 
       {s.open_batches > 0 && (
         <Link to="/import" className="mt-4 block rounded-2xl bg-rose-soft px-4 py-3 text-sm">
@@ -92,6 +107,15 @@ export default function Home() {
         </Section>
       )}
     </div>
+  );
+}
+
+function Stat({ to, n, label, hot }: { to: string; n: number; label: string; hot?: boolean }) {
+  return (
+    <Link to={to} className={`rounded-2xl px-1 py-2.5 ${hot ? "bg-amethyst text-white" : "bg-velvet text-rose"}`}>
+      <div className="font-serif text-[22px] font-bold leading-none">{n}</div>
+      <div className={`mt-1 text-[11px] ${hot ? "text-white/85" : "text-mauve"}`}>{label}</div>
+    </Link>
   );
 }
 

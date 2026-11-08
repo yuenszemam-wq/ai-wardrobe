@@ -1,5 +1,5 @@
 import { ButtonHTMLAttributes, ReactNode, useEffect, useState } from "react";
-import { Garment, imageUrl } from "../api";
+import { AI_STATUS_LABEL, displayName, Garment, imageUrl } from "../api";
 import { navigate } from "../router";
 
 export function Link({ to, className, children, onClick }: { to: string; className?: string; children: ReactNode; onClick?: () => void }) {
@@ -49,17 +49,19 @@ export function GarmentTile({ g, size = "md", selected, onSelect }: { g: Garment
     <>
       <div className={`arch relative aspect-[3/4] overflow-hidden ${selected ? "ring-2 ring-amethyst ring-offset-2 ring-offset-lace" : ""}`}>
         {src ? (
-          <img src={src} alt={g.name} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-[8%] pt-[14%]" />
+          <img src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-[8%] pt-[14%]" />
         ) : (
           <div className="absolute inset-0 grid place-items-center text-sm text-mauve">未有圖片</div>
         )}
-        {g.status === "review" && (
-          <span className="absolute bottom-2 left-2 rounded-full bg-ink/85 px-2 py-0.5 text-[11px] text-rose">待確認</span>
+        {g.ai_status && g.ai_status !== "done" ? (
+          <span className="absolute bottom-2 left-2 rounded-full bg-ink/85 px-2 py-0.5 text-[11px] text-rose">{AI_STATUS_LABEL[g.ai_status]}</span>
+        ) : (
+          g.status === "review" && <span className="absolute bottom-2 left-2 rounded-full bg-ink/85 px-2 py-0.5 text-[11px] text-rose">待確認</span>
         )}
         {g.is_favorite && <span className="absolute bottom-2 right-2 text-[15px] text-amethyst" aria-label="已收藏">♥</span>}
         {selected && <span className="absolute right-2 top-[18%] grid h-6 w-6 place-items-center rounded-full bg-amethyst text-xs text-white">✓</span>}
       </div>
-      <div className={`mt-1.5 truncate ${size === "sm" ? "text-[12px]" : "text-[13px]"} font-medium`}>{g.name}</div>
+      <div className={`mt-1.5 truncate ${size === "sm" ? "text-[12px]" : "text-[13px]"} font-medium`}>{displayName(g)}</div>
       {size === "md" && (
         <div className="truncate text-[11px] text-mauve">{[g.subcategory || g.category, g.style].filter(Boolean).join("｜") || "未分類"}</div>
       )}

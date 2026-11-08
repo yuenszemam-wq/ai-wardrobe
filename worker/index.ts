@@ -3,6 +3,7 @@ import { createGarment, deleteGarment, getGarment, listGarments, stats, updateGa
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
 import { handleMcp } from "./mcp";
+import { aiMaintenance, aiQueue, claimGarments, decide, intakeUpload, recordOrigin, reviewList, serveSignedImage, setAiStatus, submitSuggestion } from "./ai";
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
@@ -32,12 +33,21 @@ export default {
         if (r.length) console.log(JSON.stringify({ staging: r }));
       }),
     );
+    // AI 待整理：釋放逾時租約、驗證 D1 直接提交的建議、更新短效圖片網址
+    ctx.waitUntil(
+      aiMaintenance(env)
+        .then((r) => {
+          if (r.released || r.validated || r.links_refreshed) console.log(JSON.stringify({ ai: r }));
+        })
+        .catch((e) => console.error("aiMaintenance", e)),
+    );
   },
 } satisfies ExportedHandler<Env>;
 
 function logRequest(req: Request, url: URL, status: number, started: number, err?: unknown) {
   // 不記錄 MCP 網址中的權杖
   const path = url.pathname.startsWith("/mcp/") ? "/mcp/***" : url.pathname.replace(/^\/api\/(public\/upload|upload)\/[^/]+/, "/api/$1/***");
+  // 簽名圖片網址的 sig 不寫入日誌（url.pathname 本身不含 query）
   const line = { m: req.method, p: path, s: status, ms: Date.now() - started };
   if (status >= 500) console.error(JSON.stringify({ ...line, err: String(err) }));
   else console.log(JSON.stringify(line));
@@ -62,6 +72,9 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   const pub = path.match(/^\/api\/public\/upload\/([A-Za-z0-9_-]{20,80})(?:\/(\d+))?$/);
   if (pub) return handlePublicUpload(req, env, pub[1], pub[2]);
   // 批量二進位上傳槽（R2 先寫、D1 後寫）
+  // AI 短效簽名圖片網址（不需登入，網址過期即失效）
+  const aiImg = path.match(/^\/api\/ai-image\/(img_[a-z2-7]+)$/);
+  if (aiImg && (method === "GET" || method === "HEAD")) return serveSignedImage(env, aiImg[1], url);
   const slotUp = path.match(/^\/api\/upload\/([A-Za-z0-9_-]{20,80})(?:\/(slt_[a-z2-7]+)(?:\/(thumbnail))?)?$/);
   if (slotUp) return handleSlotUpload(req, env, slotUp[1], slotUp[2], slotUp[3]);
 
@@ -69,6 +82,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (!actor) throw new HttpError(401, "unauthorized", "請先登入");
   checkCsrf(req, actor);
   await meterCall(env, actor);
+  if (actor.kind === "session") await recordOrigin(env, url.origin);
 
   if (path.startsWith("/api/tokens")) return handleTokens(req, env, actor, path);
 
@@ -99,8 +113,8 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     }
     if (method === "PATCH") {
       requireScope(actor, "update");
-      await updateGarment(env, actor, id, await readJson(req));
-      return json(await getGarment(env, id));
+      const r = await updateGarment(env, actor, id, await readJson(req));
+      return json({ ...(await getGarment(env, id)), skipped_locked: r.skipped_locked });
     }
     if (method === "DELETE") {
       requireSession(actor);
@@ -163,6 +177,61 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (m && method === "POST") {
     requireScope(actor, "update");
     return setPrimary(env, m[1]);
+  }
+
+  // ───── App 批量上傳（一張相＝一件待整理衣物） ─────
+  if (path === "/api/intake" && method === "POST") {
+    requireScope(actor, "upload");
+    const r = await intakeUpload(req, env, actor);
+    await meterCall(env, actor, r.image.file_size);
+    return json(r, r.duplicate ? 200 : 201);
+  }
+
+  // ───── AI 待整理 ─────
+  if (path === "/api/ai/queue" && method === "GET") {
+    requireScope(actor, "read");
+    const ids = url.searchParams.get("garment_ids");
+    return json(await aiQueue(env, url.origin, { limit: Number(url.searchParams.get("limit")) || 10, garment_ids: ids ? ids.split(",") : undefined, include_review: url.searchParams.get("include_review") === "1" }));
+  }
+  if (path === "/api/ai/claim" && method === "POST") {
+    requireScope(actor, "update");
+    const body = await readJson<{ garment_ids?: string[]; claimed_by?: string }>(req);
+    return json(await claimGarments(env, actor, body.garment_ids ?? [], body.claimed_by));
+  }
+  if (path === "/api/ai/suggestions" && method === "POST") {
+    requireScope(actor, "update");
+    return json(await submitSuggestion(env, actor, await readJson(req)), 201);
+  }
+  if (path === "/api/ai/review" && method === "GET") {
+    requireScope(actor, "read");
+    return json(await reviewList(env, url.searchParams));
+  }
+  m = path.match(/^\/api\/ai\/garments\/([\w-]+)\/decide$/);
+  if (m && method === "POST") {
+    requireSession(actor);
+    return json(await decide(env, actor, m[1], await readJson(req)));
+  }
+  if (path === "/api/ai/decide-bulk" && method === "POST") {
+    requireSession(actor);
+    const body = await readJson<{ items?: { garment_id: string; suggestion_id?: number; version?: number }[]; action?: string }>(req);
+    const results = [];
+    for (const it of (body.items ?? []).slice(0, 100)) {
+      try {
+        results.push({ ok: true, ...(await decide(env, actor, String(it.garment_id), { suggestion_id: it.suggestion_id, version: it.version, action: body.action || "accept_all" })) });
+      } catch (e) {
+        results.push({ ok: false, garment_id: it.garment_id, error: e instanceof HttpError ? e.message : "失敗" });
+      }
+    }
+    return json({ results });
+  }
+  if (path === "/api/ai/status" && method === "POST") {
+    requireSession(actor);
+    const body = await readJson<{ garment_ids?: string[]; ai_status?: string }>(req);
+    return json(await setAiStatus(env, actor, body.garment_ids ?? [], String(body.ai_status || "")));
+  }
+  if (path === "/api/ai/maintenance" && method === "POST") {
+    requireSession(actor);
+    return json(await aiMaintenance(env));
   }
 
   // ───── 匯入 ─────

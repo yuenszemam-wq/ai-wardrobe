@@ -9,12 +9,20 @@ import { getGarment, listGarments, updateGarment } from "./garments";
 import { ImageType, Owner, maxUploadBytes, storeImage } from "./images";
 import { addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, onImageStored } from "./imports";
 import { createUploadSession, downloadHttps, getUploadSession, importGarmentFiles } from "./uploads";
+import { aiQueue, claimGarments, submitSuggestion } from "./ai";
 import { Actor, Env, HttpError, json, requireScope } from "./util";
 
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS = `你正在操作使用者的私人「AI Wardrobe 智能電子衣櫃」。圖片一律以原始二進位存入私人 R2，成功後才建立衣物記錄。
+const INSTRUCTIONS = `你正在操作使用者的私人「AI Wardrobe 智能電子衣櫃」。
+【整理待處理衣物（使用者說「整理待處理衣物」時）】
+1) list_pending_garments 取得待整理清單（每件有 garment_id、version、locked_fields）。
+2) 對每件呼叫 get_garment_image 取得圖片內容，親眼查看像素後才分析；看不到圖片就不可聲稱已辨認。
+3) 用 submit_ai_suggestion 提交：garment_id、base_version（清單中的 version）、idempotency_key（例如 garment_id-YYYYMMDD-1）、image_id、vision_checked=true 及欄位。不清楚的欄位留空並列入 uncertain_fields；無法辨認就 outcome="failed" 並寫 failure_reason。
+4) 品牌：只有找到品牌官方或可靠來源、款式可對應時才 brand_confidence="confirmed" 並附 source_urls；印花系列一致但版本未能區分用 "likely"；只是風格相似用 "unconfirmed"。未確認的品牌不會寫入 brand。證據來自 AI 生成或去背圖時設 brand_evidence_from_generated_image=true。
+5) 建議只會放入 App 的「AI 待整理」等使用者確認，不會直接改正式資料；不要用 update_garment 改待整理衣物。
+圖片一律以原始二進位存入私人 R2，成功後才建立衣物記錄。
 【首選流程，最多 10 件一批】
 A. 圖片是使用者在對話中附上的檔案：呼叫 import_garment_files，把檔案放入 files（伺服器會用 download_url 下載原檔），並在 items 提供每件衣物資料、file_name、expected_width／expected_height。
 B. 圖片是你在 Python／程式碼環境（sandbox，例如 /mnt/data）產生的去背圖：sandbox 不能連網，也不能把檔案直接交給工具。請：
@@ -74,7 +82,90 @@ const slotItem = {
   required: ["client_key"],
 };
 
+const suggestionFields = {
+  name: { type: "string", description: "描述性名稱，例如「黑色十字架印花 JSK」" },
+  category: { type: "string", enum: [...CATEGORIES] },
+  subcategory: { type: "string", description: `Lolita 子類：${LOLITA_SUBCATEGORIES.join("、")}` },
+  style: { type: "string", enum: [...STYLES] },
+  primary_color: { type: "string", description: `主色，建議使用：${COLORS.join("、")}` },
+  secondary_colors: { type: "array", items: { type: "string" } },
+  pattern: { type: "string", description: "印花主題" },
+  details: { type: "string", description: "裝飾細節，例如 蕾絲、蝴蝶結、珍珠扣" },
+  season: { type: "string", description: SEASONS.join("、") },
+  is_full_outfit: { type: "boolean", description: "相片是否整套穿搭" },
+  has_multiple_items: { type: "boolean", description: "相片是否包含多件獨立衣服" },
+  needs_review: { type: "boolean" },
+  uncertain_fields: { type: "array", items: { type: "string" } },
+  ai_note: { type: "string", description: "判斷理由或疑問" },
+  brand: { type: "string" },
+  brand_confidence: { type: "string", enum: ["confirmed", "likely", "unconfirmed"] },
+  official_name: { type: "string", description: "官方款式名稱" },
+  series_name: { type: "string" },
+  release_year: { type: "integer" },
+  source_urls: { type: "array", items: { type: "string" }, description: "可驗證的來源連結" },
+  source_type: { type: "string", description: "官網／Lolibrary／官方社交媒體／二手交易／其他" },
+  brand_note: { type: "string" },
+  brand_evidence_from_generated_image: { type: "boolean" },
+};
+
 const TOOLS = [
+  {
+    scope: "read",
+    name: "list_pending_garments",
+    title: "列出待整理衣物",
+    description: "取得 App 上傳後等待 AI 辨認的衣物（含 version、目前資料、鎖定欄位及圖片資料）。分析前必須再用 get_garment_image 實際查看圖片。",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 30, default: 10 },
+        garment_ids: { type: "array", items: { type: "string" }, description: "只取指定衣物" },
+      },
+    },
+  },
+  {
+    scope: "read",
+    name: "get_garment_image",
+    title: "查看衣物圖片",
+    description: "回傳圖片本身（image content），讓你實際查看像素。預設給約 1600px 的辨認用圖；size=original 給未經改動的原圖（較大，只限 4 MB 以下）。",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        garment_id: { type: "string" },
+        image_id: { type: "string", description: "可選；不填就自動揀選" },
+        size: { type: "string", enum: ["analysis", "original"], default: "analysis" },
+      },
+      required: ["garment_id"],
+    },
+  },
+  {
+    scope: "update",
+    name: "claim_garments",
+    title: "標記 AI 整理中",
+    description: "把衣物標記為「AI 整理中」（30 分鐘租約，逾時自動退回）。可選用，避免兩個 AI 同時處理同一件。",
+    inputSchema: { type: "object", properties: { garment_ids: { type: "array", items: { type: "string" } } }, required: ["garment_ids"] },
+  },
+  {
+    scope: "update",
+    name: "submit_ai_suggestion",
+    title: "提交 AI 整理建議",
+    description: "提交一件衣物的辨認結果。只會建立待使用者確認的建議，不會直接修改正式資料。同一 idempotency_key 重試不會重複建立。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        garment_id: { type: "string" },
+        base_version: { type: "integer", description: "list_pending_garments 給的 version" },
+        idempotency_key: { type: "string" },
+        image_id: { type: "string", description: "你實際查看的圖片" },
+        vision_checked: { type: "boolean", description: "已實際查看圖片像素才可為 true" },
+        outcome: { type: "string", enum: ["suggestion", "failed"], default: "suggestion" },
+        failure_reason: { type: "string" },
+        ...suggestionFields,
+      },
+      required: ["garment_id", "base_version", "idempotency_key", "vision_checked"],
+    },
+  },
   {
     name: "import_garment_files",
     title: "匯入對話中的圖片檔",
@@ -328,6 +419,10 @@ async function handleRpc(env: Env, actor: Actor, msg: Rpc, origin: string) {
           requireScope(actor, tool.scope);
           await meterCall(env, actor);
           const data = await callTool(env, actor, name, args, origin);
+          if (Array.isArray(data.__content)) {
+            const { __content, ...meta } = data;
+            return rpcResult(msg.id, { content: [...(__content as unknown[]), { type: "text", text: JSON.stringify(meta) }], structuredContent: meta });
+          }
           return rpcResult(msg.id, { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data });
         } catch (err) {
           const message = err instanceof HttpError ? `${err.message}（${err.code}）` : "工具執行失敗";
@@ -373,6 +468,27 @@ async function callTool(env: Env, actor: Actor, name: string, a: Record<string, 
     }
     case "get_upload_session":
       return await getUploadSession(env, need("batch_id"));
+    case "list_pending_garments": {
+      const ids = Array.isArray(a.garment_ids) ? (a.garment_ids as unknown[]).map(String) : undefined;
+      const q = await aiQueue(env, origin, { limit: Number(a.limit) || 10, garment_ids: ids });
+      return {
+        ...q,
+        next_step: q.count
+          ? "逐件呼叫 get_garment_image 查看圖片，分析後用 submit_ai_suggestion 提交（附 base_version 及 idempotency_key）。"
+          : "目前沒有待整理衣物。",
+      };
+    }
+    case "get_garment_image":
+      return await mcpImage(env, need("garment_id"), a.image_id ? String(a.image_id) : null, a.size === "original" ? "original" : "analysis");
+    case "claim_garments":
+      return await claimGarments(env, actor, (a.garment_ids as string[]) ?? [], actor.label);
+    case "submit_ai_suggestion": {
+      const { garment_id, base_version, idempotency_key, image_id, vision_checked, outcome, failure_reason, source, ...fields } = a;
+      return await submitSuggestion(env, actor, {
+        garment_id, base_version, idempotency_key, image_id, vision_checked, outcome, failure_reason,
+        source: source ?? actor.label, fields,
+      });
+    }
     case "list_garments": {
       const p = new URLSearchParams();
       for (const k of ["q", "category", "style", "color", "status", "limit", "offset"]) if (a[k] !== undefined) p.set(k, String(a[k]));
@@ -404,8 +520,8 @@ async function callTool(env: Env, actor: Actor, name: string, a: Record<string, 
       const id = need("garment_id");
       const { garment_id, ...rest } = a;
       void garment_id;
-      await updateGarment(env, actor, id, rest);
-      return await getGarment(env, id);
+      const r = await updateGarment(env, actor, id, rest);
+      return { ...(await getGarment(env, id)), skipped_locked: r.skipped_locked };
     }
     case "finalize_import_batch":
       return await finalizeBatch(env, actor, need("batch_id"));
@@ -477,4 +593,45 @@ function decodeBase64(input: string, max: number): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+const MCP_IMAGE_MAX = 4 * 1024 * 1024;
+
+/** 把圖片以 MCP image content 回傳，讓 AI 真正看到像素 */
+async function mcpImage(env: Env, garmentId: string, imageId: string | null, size: "analysis" | "original"): Promise<Record<string, unknown>> {
+  const { results } = await env.DB.prepare(
+    "SELECT id, image_type, variant, r2_key, mime_type, width, height, file_size FROM garment_images WHERE garment_id = ? ORDER BY created_at",
+  )
+    .bind(garmentId)
+    .all<{ id: string; image_type: string; variant: string | null; r2_key: string; mime_type: string; width: number; height: number; file_size: number }>();
+  if (!results.length) throw new HttpError(404, "no_image", "這件衣物沒有圖片");
+  const viewable = (i: (typeof results)[number]) => /^image\/(jpeg|png|webp)$/.test(i.mime_type) && i.file_size <= MCP_IMAGE_MAX;
+  let img = imageId ? results.find((i) => i.id === imageId) : undefined;
+  if (imageId && !img) throw new HttpError(404, "image_not_found", "image_id 不屬於這件衣物");
+  if (!img) {
+    const order =
+      size === "original"
+        ? [(i: (typeof results)[number]) => i.image_type === "original" && !i.variant, (i: (typeof results)[number]) => i.variant === "preview", (i: (typeof results)[number]) => i.image_type === "processed", (i: (typeof results)[number]) => i.variant === "analysis"]
+        : [(i: (typeof results)[number]) => i.variant === "analysis", (i: (typeof results)[number]) => i.variant === "preview", (i: (typeof results)[number]) => i.image_type === "original" && !i.variant, (i: (typeof results)[number]) => i.image_type === "processed", (i: (typeof results)[number]) => i.image_type === "thumbnail"];
+    for (const f of order) {
+      img = results.find((i) => f(i) && viewable(i));
+      if (img) break;
+    }
+  }
+  if (!img || !viewable(img)) throw new HttpError(413, "image_not_viewable", "沒有可直接查看的圖片（HEIC 或超過 4 MB）；請改用 size=analysis");
+  const obj = await env.IMAGES.get(img.r2_key);
+  if (!obj) throw new HttpError(404, "object_missing", "R2 找不到圖片檔案");
+  const bytes = new Uint8Array(await new Response(obj.body).arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return {
+    __content: [{ type: "image", data: btoa(bin), mimeType: img.mime_type }],
+    garment_id: garmentId,
+    image_id: img.id,
+    image_type: img.image_type,
+    variant: img.variant,
+    width: img.width,
+    height: img.height,
+    note: img.variant === "analysis" ? "約 1600px 縮小版（由原圖縮小，未經 AI 改動）" : img.image_type === "processed" ? "去背圖：品牌辨認請以原圖為準" : "原圖",
+  };
 }

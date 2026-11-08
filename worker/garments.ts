@@ -25,6 +25,9 @@ export interface NormalizedGarment {
   uncertain: string[];
 }
 
+export const AI_STATUSES = ["pending_ai", "ai_processing", "pending_review", "done", "failed", "needs_rework"] as const;
+export type AiStatus = (typeof AI_STATUSES)[number];
+
 const LOLITA_SUBS = new Set<string>(LOLITA_SUBCATEGORIES);
 const CATEGORY_SET = new Set<string>(CATEGORIES);
 const STYLE_SET = new Set<string>(STYLES);
@@ -109,17 +112,20 @@ export function garmentToJson(r: Record<string, unknown>) {
     ...r,
     secondary_colors: parseJsonArray(r.secondary_colors),
     uncertain_fields: parseJsonArray(r.uncertain_fields),
+    locked_fields: parseJsonArray(r.locked_fields),
     is_favorite: Number(r.is_favorite) === 1,
+    name_is_placeholder: Number(r.name_is_placeholder) === 1,
   };
 }
 
 const LIST_SELECT = `
   SELECT g.*,
     (SELECT p.id FROM garment_images p WHERE p.garment_id = g.id AND p.is_primary = 1 LIMIT 1) AS primary_image_id,
-    (SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail'
+    (SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail' AND t.variant IS NULL
        ORDER BY CASE WHEN t.derived_from IN (SELECT p2.id FROM garment_images p2 WHERE p2.garment_id = g.id AND p2.is_primary = 1) THEN 0 ELSE 1 END,
                 t.created_at DESC LIMIT 1) AS thumb_image_id,
-    (SELECT COUNT(*) FROM garment_images c WHERE c.garment_id = g.id AND c.image_type != 'thumbnail') AS image_count
+    (SELECT COUNT(*) FROM garment_images c WHERE c.garment_id = g.id AND c.image_type != 'thumbnail' AND c.variant IS NULL) AS image_count,
+    EXISTS (SELECT 1 FROM garment_images x WHERE x.garment_id = g.id AND x.image_type = 'processed') AS has_processed
   FROM garments g`;
 
 export async function createGarment(env: Env, actor: Actor, input: GarmentInput, opts: { source: string; clientKey?: string | null }) {
@@ -150,21 +156,46 @@ export async function createGarment(env: Env, actor: Actor, input: GarmentInput,
   return { id, deduplicated: false };
 }
 
-export async function updateGarment(env: Env, actor: Actor, id: string, input: GarmentInput) {
+/**
+ * 更新衣物。
+ * - App 使用者（session）修改的資料欄位會加入 locked_fields，之後 AI 不可覆寫。
+ * - AI 權杖不可修改 locked_fields 內的欄位（會略過並回報）。
+ * - 每次修改 version + 1。
+ */
+export async function updateGarment(env: Env, actor: Actor, id: string, input: GarmentInput): Promise<{ skipped_locked: string[] }> {
   const cur = await env.DB.prepare("SELECT * FROM garments WHERE id = ?").bind(id).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
   const { values, uncertain } = normalizeGarment(input, true);
+  const locked = new Set(parseJsonArray(cur.locked_fields));
+  const skipped: string[] = [];
+  if (actor.kind !== "session") {
+    for (const k of Object.keys(values)) {
+      if (locked.has(k)) {
+        skipped.push(k);
+        delete values[k];
+      }
+    }
+  }
   const sets: string[] = [];
   const binds: unknown[] = [];
+  const dataFields: string[] = [];
   for (const [k, v] of Object.entries(values)) {
     if (k === "name" && !v) continue; // 不允許清空名稱
     sets.push(`${k} = ?`);
     binds.push(v);
+    if ((GARMENT_FIELDS as readonly string[]).includes(k)) dataFields.push(k);
+  }
+  if (values.name) sets.push("name_is_placeholder = 0");
+  if (actor.kind === "session" && dataFields.length) {
+    const next = [...new Set([...locked, ...dataFields])];
+    sets.push("locked_fields = ?");
+    binds.push(JSON.stringify(next));
   }
   // 人工確認：清除不確定標記並轉為正式
   if (input.confirm) {
     sets.push("uncertain_fields = NULL");
     if (!("status" in values)) sets.push("status = 'active'");
+    if (actor.kind === "session" && cur.ai_status) sets.push("ai_status = 'done'", "ai_claimed_at = NULL", "ai_claimed_by = NULL");
   } else {
     const explicit = Object.prototype.hasOwnProperty.call(input, "uncertain_fields");
     const prev = parseJsonArray(cur.uncertain_fields);
@@ -176,11 +207,12 @@ export async function updateGarment(env: Env, actor: Actor, id: string, input: G
       binds.push(merged.length ? JSON.stringify(merged) : null);
     }
   }
-  if (!sets.length) return;
-  sets.push("updated_at = ?");
+  if (!sets.length) return { skipped_locked: skipped };
+  sets.push("updated_at = ?", "version = version + 1");
   binds.push(nowIso());
   await env.DB.prepare(`UPDATE garments SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id).run();
-  await audit(env, actor, "garment.update", id, Object.keys(values));
+  await audit(env, actor, "garment.update", id, { fields: Object.keys(values), skipped_locked: skipped });
+  return { skipped_locked: skipped };
 }
 
 export async function getGarment(env: Env, id: string) {
@@ -227,6 +259,23 @@ export async function listGarments(env: Env, params: URLSearchParams) {
     where.push("(g.primary_color = ? OR g.secondary_colors LIKE ?)");
     binds.push(color, `%"${color}"%`);
   }
+  const brand = params.get("brand");
+  if (brand === "__none__") where.push("(g.brand IS NULL OR g.brand = '')");
+  else if (brand) {
+    where.push("g.brand = ?");
+    binds.push(brand);
+  }
+  const aiStatus = params.get("ai_status");
+  if (aiStatus) {
+    const list = aiStatus.split(",").filter((x) => AI_STATUSES.includes(x as AiStatus));
+    if (list.length) {
+      where.push(`g.ai_status IN (${list.map(() => "?").join(",")})`);
+      binds.push(...list);
+    }
+  }
+  const identified = params.get("identified");
+  if (identified === "1") where.push("(g.ai_status IS NULL OR g.ai_status = 'done')");
+  else if (identified === "0") where.push("g.ai_status IS NOT NULL AND g.ai_status != 'done'");
   if (params.get("favorite") === "1") where.push("g.is_favorite = 1");
   if (params.get("needs_image") === "1") where.push("NOT EXISTS (SELECT 1 FROM garment_images x WHERE x.garment_id = g.id)");
   const q = params.get("q")?.trim();
@@ -271,6 +320,11 @@ export async function stats(env: Env) {
     env.DB.prepare(`${LIST_SELECT} WHERE g.is_favorite = 1 AND g.status != 'archived' ORDER BY g.updated_at DESC LIMIT 12`),
     env.DB.prepare("SELECT COUNT(*) AS open_batches FROM import_batches WHERE status = 'open'"),
   ]);
+  const { results: aiRows } = await env.DB.prepare(
+    "SELECT ai_status, COUNT(*) AS n FROM garments WHERE ai_status IS NOT NULL AND status != 'archived' GROUP BY ai_status",
+  ).all<{ ai_status: string; n: number }>();
+  const ai: Record<string, number> = Object.fromEntries(AI_STATUSES.map((s) => [s, 0]));
+  for (const r of aiRows) ai[r.ai_status] = r.n;
   const c = (counts.results[0] || {}) as Record<string, number>;
   const { results: byCat } = await env.DB.prepare(
     "SELECT COALESCE(category, '未分類') AS category, COUNT(*) AS n FROM garments WHERE status != 'archived' GROUP BY category ORDER BY n DESC",
@@ -281,6 +335,10 @@ export async function stats(env: Env) {
     favorites: c.favorites ?? 0,
     missing_image: c.missing_image ?? 0,
     open_batches: ((batches.results[0] || {}) as Record<string, number>).open_batches ?? 0,
+    ai,
+    ai_todo: ai.pending_ai + ai.ai_processing + ai.needs_rework + ai.failed,
+    ai_review: ai.pending_review,
+    ai_done: ai.done,
     by_category: byCat,
     recent: (recent.results as Record<string, unknown>[]).map(garmentToJson),
     favorite_items: (favs.results as Record<string, unknown>[]).map(garmentToJson),

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CATEGORIES, COLORS, LOLITA_SUBCATEGORIES, SEASONS, STYLES, SUBCATEGORY_HINT } from "../../shared/taxonomy";
-import { api, formatBytes, formatDate, Garment, GarmentImage, STATUS_LABEL, uploadImage } from "../api";
+import { AI_STATUS_LABEL, api, displayName, formatBytes, formatDate, Garment, GarmentImage, STATUS_LABEL, uploadImage } from "../api";
 import { Button, Field, inputCls, Link, ProgressBar, Spinner, toast } from "../components/ui";
 import { makeThumbnail, prepareForUpload } from "../imageProcessing";
 import { navigate } from "../router";
@@ -44,7 +44,9 @@ export default function GarmentDetail({ id }: { id: string }) {
   if (err) return <p className="py-10 text-center text-wine">{err}</p>;
   if (!g) return <Spinner />;
 
-  const fullImages = (g.images || []).filter((i) => i.image_type !== "thumbnail");
+  // HEIC 原檔已保存，但以 JPEG 預覽顯示（大部分瀏覽器不能直接顯示 HEIC）
+  const heicOriginal = (g.images || []).find((i) => /heic|heif/.test(i.mime_type));
+  const fullImages = (g.images || []).filter((i) => i.image_type !== "thumbnail" && !/heic|heif/.test(i.mime_type));
   const shown = fullImages.find((i) => i.id === viewId) || fullImages.find((i) => i.is_primary) || fullImages[0];
 
   async function patch(body: Record<string, unknown>, msg = "已儲存") {
@@ -88,7 +90,7 @@ export default function GarmentDetail({ id }: { id: string }) {
             {shown ? (
               <img
                 src={shown.url}
-                alt={g.name}
+                alt={displayName(g)}
                 className={`absolute inset-0 h-full w-full object-contain ${checker ? "p-2" : "p-[6%] pt-[12%]"}`}
                 decoding="async"
               />
@@ -99,8 +101,10 @@ export default function GarmentDetail({ id }: { id: string }) {
           {shown && (
             <div className="mt-2 flex items-center justify-between text-[12px] text-mauve">
               <span>
-                {shown.image_type === "processed" ? "去背圖" : "原始照片"}｜{shown.width}×{shown.height}｜{formatBytes(shown.file_size)}
+                {shown.image_type === "processed" ? "去背圖" : shown.variant === "preview" ? "HEIC 原檔預覽" : "原始照片"}｜{shown.width}×{shown.height}｜{formatBytes(shown.file_size)}
                 {shown.has_alpha ? "｜透明" : ""}
+                {heicOriginal ? `｜HEIC 原檔 ${formatBytes(heicOriginal.file_size)} 已保存` : ""}
+                {!(g.images || []).some((i) => i.image_type === "processed") ? "｜等待去背" : ""}
               </span>
               <button type="button" className="text-amethyst-deep" onClick={() => setChecker((v) => !v)}>
                 {checker ? "一般背景" : "檢查透明"}
@@ -161,7 +165,7 @@ export default function GarmentDetail({ id }: { id: string }) {
 
         <div className="mt-6 lg:mt-0">
           <div className="flex items-start justify-between gap-3">
-            <h1 className="font-serif text-[24px] font-bold leading-snug">{g.name}</h1>
+            <h1 className="font-serif text-[24px] font-bold leading-snug">{displayName(g)}</h1>
             <button
               type="button"
               aria-label={g.is_favorite ? "取消收藏" : "收藏"}
@@ -172,8 +176,17 @@ export default function GarmentDetail({ id }: { id: string }) {
             </button>
           </div>
           <p className="mt-1 text-[13px] text-mauve">
-            {STATUS_LABEL[g.status]}｜{formatDate(g.created_at)} 加入{g.source ? `｜來源：${g.source}` : ""}
+            {STATUS_LABEL[g.status]}
+            {g.ai_status && g.ai_status !== "done" ? `｜${AI_STATUS_LABEL[g.ai_status]}` : ""}｜{formatDate(g.created_at)} 加入{g.source ? `｜來源：${g.source}` : ""}
           </p>
+          {g.ai_status === "pending_review" && (
+            <Link to="/review?tab=pending_review" className="mt-3 block rounded-2xl bg-ink px-4 py-3 text-[14px] text-rose">
+              AI 已提交整理建議，按此到「AI 待整理」對比及確認 →
+            </Link>
+          )}
+          {g.locked_fields && g.locked_fields.length > 0 && (
+            <p className="mt-1 text-[12px] text-mauve">已人工修正（AI 不會覆寫）：{g.locked_fields.map((f) => FIELD_LABEL[f] || f).join("、")}</p>
+          )}
 
           {g.status === "review" && (
             <div className="mt-4 rounded-2xl bg-rose-soft p-4 text-sm">
@@ -327,7 +340,13 @@ function EditForm({ g, onSave, onCancel }: { g: Garment; onSave: (b: Record<stri
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        await onSave({ ...f, secondary_colors: f.secondary_colors });
+        // 只送出有改動的欄位：被改動的欄位會被鎖定，AI 之後不會覆寫
+        const initial: Record<string, string> = {
+          name: g.name, category: g.category || "", subcategory: g.subcategory || "", brand: g.brand || "", style: g.style || "",
+          primary_color: g.primary_color || "", secondary_colors: g.secondary_colors.join("、"), pattern: g.pattern || "", season: g.season || "", notes: g.notes || "",
+        };
+        const changed = Object.fromEntries(Object.entries(f).filter(([k, v]) => v !== (initial[k] ?? "")));
+        await onSave(changed);
         setBusy(false);
       }}
     >

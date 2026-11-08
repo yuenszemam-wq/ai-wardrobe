@@ -11,6 +11,70 @@ export interface GarmentImage {
   r2_key: string;
   url: string;
   created_at: string;
+  variant?: "preview" | "analysis" | null;
+  sha256?: string;
+}
+
+export type AiStatus = "pending_ai" | "ai_processing" | "pending_review" | "done" | "failed" | "needs_rework";
+
+export const AI_STATUS_LABEL: Record<AiStatus, string> = {
+  pending_ai: "待 AI 辨認",
+  ai_processing: "AI 整理中",
+  pending_review: "待人工確認",
+  done: "已完成",
+  failed: "辨認失敗",
+  needs_rework: "需要重新處理",
+};
+
+export const BRAND_CONFIDENCE_LABEL: Record<string, string> = {
+  confirmed: "已確認",
+  likely: "高度可能",
+  unconfirmed: "未確認",
+};
+
+export interface AiNormalized {
+  name: string | null;
+  category: string | null;
+  subcategory: string | null;
+  style: string | null;
+  primary_color: string | null;
+  secondary_colors: string[] | null;
+  pattern: string | null;
+  season: string | null;
+  details: string | null;
+  is_full_outfit: boolean | null;
+  has_multiple_items: boolean | null;
+  needs_review: boolean;
+  uncertain_fields: string[];
+  ai_note: string | null;
+  brand: string | null;
+  brand_candidate: string | null;
+  brand_confidence: "confirmed" | "likely" | "unconfirmed";
+  official_name: string | null;
+  series_name: string | null;
+  release_year: number | null;
+  source_urls: string[];
+  source_type: string | null;
+  brand_note: string | null;
+  brand_evidence_from_generated_image: boolean;
+  warnings?: string[];
+}
+
+export interface AiSuggestion {
+  suggestion_id: number;
+  status: string;
+  source: string;
+  base_version: number;
+  image_id: string | null;
+  vision_checked: boolean;
+  normalized: AiNormalized | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ReviewItem extends Garment {
+  has_processed: boolean;
+  suggestion: AiSuggestion | null;
 }
 
 export interface Garment {
@@ -27,6 +91,13 @@ export interface Garment {
   notes: string | null;
   status: "active" | "review" | "archived";
   is_favorite: boolean;
+  ai_status?: AiStatus | null;
+  display_no?: number | null;
+  name_is_placeholder?: boolean;
+  locked_fields?: string[];
+  version?: number;
+  ai_error?: string | null;
+  has_processed?: number | boolean;
   uncertain_fields: string[];
   ai_note: string | null;
   source: string | null;
@@ -130,6 +201,60 @@ export function uploadImage(
     const fd = new FormData();
     for (const [k, v] of Object.entries(fields)) fd.set(k, v);
     fd.set("file", file, filename);
+    xhr.send(fd);
+  });
+}
+
+/** 不把 UUID 當名稱顯示 */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function displayName(g: Pick<Garment, "name" | "display_no">): string {
+  if (!g.name || UUID_RE.test(g.name.trim())) return g.display_no ? `待整理衣物 ${String(g.display_no).padStart(3, "0")}` : "待整理衣物";
+  return g.name;
+}
+
+export interface IntakeResult {
+  garment_id: string;
+  name: string;
+  display_no: number | null;
+  duplicate: boolean;
+  verified: boolean;
+  image: { id: string; width: number; height: number; file_size: number; sha256: string; mime_type: string; image_type: string };
+  warnings: string[];
+}
+
+/** 批量上傳：一張相＝一件待整理衣物（multipart，附進度） */
+export function intakeUpload(
+  parts: { file: Blob; filename: string; sha256: string; preview?: Blob | null; thumbnail?: Blob | null; analysis?: Blob | null },
+  onProgress?: (ratio: number) => void,
+  signal?: AbortSignal,
+): Promise<IntakeResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/intake");
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("x-requested-with", "ai-wardrobe");
+    xhr.timeout = 10 * 60_000;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      const data = safeJson(xhr.responseText);
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else {
+        if (xhr.status === 401) window.dispatchEvent(new Event("aw:unauthorized"));
+        reject(new ApiError(xhr.status, data?.error?.code || "upload_failed", data?.error?.message || `上傳失敗（${xhr.status}）`));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network", "網絡中斷，請重試"));
+    xhr.ontimeout = () => reject(new ApiError(0, "timeout", "上傳逾時，請重試"));
+    xhr.onabort = () => reject(new ApiError(0, "aborted", "已取消"));
+    signal?.addEventListener("abort", () => xhr.abort());
+    const fd = new FormData();
+    fd.set("sha256", parts.sha256);
+    fd.set("file", parts.file, parts.filename);
+    if (parts.preview) fd.set("preview", parts.preview, "preview.jpg");
+    if (parts.thumbnail) fd.set("thumbnail", parts.thumbnail, "thumb");
+    if (parts.analysis) fd.set("analysis", parts.analysis, "analysis");
     xhr.send(fd);
   });
 }

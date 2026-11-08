@@ -4,8 +4,8 @@ export type ImageType = "original" | "processed" | "thumbnail";
 export type Owner = "garment" | "outfit";
 
 export interface ParsedImage {
-  mime: "image/png" | "image/jpeg" | "image/webp";
-  ext: "png" | "jpg" | "webp";
+  mime: "image/png" | "image/jpeg" | "image/webp" | "image/heic" | "image/heif";
+  ext: "png" | "jpg" | "webp" | "heic" | "heif";
   width: number;
   height: number;
   hasAlpha: boolean;
@@ -14,8 +14,37 @@ export interface ParsedImage {
 const MAX_DIMENSION = 16384;
 export const LOW_RES_PIXELS = 300 * 300;
 
+/** HEIC／HEIF：從 ispe（image spatial extent）box 讀尺寸；可能有多個（縮圖、格狀子圖），取面積最大者 */
+export function parseHeif(b: Uint8Array): ParsedImage | null {
+  if (b.length < 16) return null;
+  const ascii = (o: number, n: number) => String.fromCharCode(...b.subarray(o, o + n));
+  if (ascii(4, 4) !== "ftyp") return null;
+  const brand = ascii(8, 4);
+  if (!/^(heic|heix|hevc|hevx|heim|heis|mif1|msf1|heif)$/.test(brand)) return null;
+  const isHeic = /^(heic|heix|hevc|hevx|heim|heis)$/.test(brand) || ascii(8, Math.min(64, b.length - 8)).includes("heic");
+  let width = 0;
+  let height = 0;
+  const end = Math.min(b.length - 20, 4 * 1024 * 1024); // meta box 一般在檔案開頭
+  for (let i = 4; i < end; i++) {
+    if (b[i] === 0x69 && b[i + 1] === 0x73 && b[i + 2] === 0x70 && b[i + 3] === 0x65) {
+      // [size(4)][ispe][version+flags(4)][width(4)][height(4)]
+      const o = i + 8;
+      const w = ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+      const h = ((b[o + 4] << 24) | (b[o + 5] << 16) | (b[o + 6] << 8) | b[o + 7]) >>> 0;
+      if (w > 0 && h > 0 && w <= 65535 && h <= 65535 && w * h > width * height) {
+        width = w;
+        height = h;
+      }
+    }
+  }
+  if (!width) throw new HttpError(415, "bad_image", "HEIC 檔案讀不到尺寸");
+  return isHeic
+    ? { mime: "image/heic", ext: "heic", width, height, hasAlpha: false }
+    : { mime: "image/heif", ext: "heif", width, height, hasAlpha: false };
+}
+
 /** 根據實際檔案內容（magic bytes）判斷格式及尺寸，不信任副檔名或 Content-Type */
-export function parseImage(buf: Uint8Array): ParsedImage {
+export function parseImage(buf: Uint8Array, opts: { allowHeif?: boolean } = {}): ParsedImage {
   const b = buf;
   const u32be = (o: number) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
   const ascii = (o: number, n: number) => String.fromCharCode(...b.subarray(o, o + n));
@@ -100,7 +129,11 @@ export function parseImage(buf: Uint8Array): ParsedImage {
     } else throw new HttpError(415, "bad_image", "不支援的 WebP 格式");
   }
   // HEIC / HEIF
-  else if (b.length > 12 && ascii(4, 4) === "ftyp" && /^(heic|heix|hevc|mif1|msf1|heif)/.test(ascii(8, 4))) {
+  else if (b.length > 12 && ascii(4, 4) === "ftyp" && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1|heif)/.test(ascii(8, 4))) {
+    if (opts.allowHeif) {
+      const h = parseHeif(b);
+      if (h) return h;
+    }
     throw new HttpError(415, "heic_not_supported", "HEIC 圖片請先轉為 JPEG、PNG 或 WebP（App 上傳會自動轉換）");
   }
 
@@ -136,6 +169,10 @@ export interface StoreOptions {
   isPrimary?: boolean;
   derivedFrom?: string | null;
   actor: Actor;
+  /** 只限 App 上傳的原檔：保留 HEIC／HEIF 原檔（另需 JPEG 預覽） */
+  allowHeif?: boolean;
+  /** 'preview'＝HEIC 的 JPEG 預覽；'analysis'＝給 AI 辨認用的中尺寸圖（image_type 必須是 thumbnail） */
+  variant?: "preview" | "analysis" | null;
 }
 
 function tableFor(owner: Owner) {
@@ -167,8 +204,13 @@ export async function storeImage(env: Env, opt: StoreOptions): Promise<StoredIma
   if (bytes.byteLength > maxUploadBytes(env)) {
     throw new HttpError(413, "file_too_large", `檔案超過 ${intVar(env.MAX_UPLOAD_MB, 25)} MB 上限`);
   }
-  const info = parseImage(bytes);
+  const info = parseImage(bytes, { allowHeif: Boolean(opt.allowHeif) && imageType === "original" && owner === "garment" });
   const { table, fk, parent } = tableFor(owner);
+  const variant = owner === "garment" ? opt.variant ?? null : null;
+  if (variant === "preview" && (imageType !== "original" || info.mime !== "image/jpeg")) {
+    throw new HttpError(400, "bad_preview", "HEIC 預覽圖必須是 JPEG");
+  }
+  if (variant === "analysis" && imageType !== "thumbnail") throw new HttpError(400, "bad_variant", "analysis 圖必須以 thumbnail 類型儲存");
 
   const parentRow = await env.DB.prepare(`SELECT id FROM ${parent} WHERE id = ?`).bind(ownerId).first();
   if (!parentRow) throw new HttpError(404, "owner_not_found", owner === "garment" ? "找不到這件衣物" : "找不到這套穿搭");
@@ -181,7 +223,7 @@ export async function storeImage(env: Env, opt: StoreOptions): Promise<StoredIma
 
   const sha = await sha256Hex(bytes);
   const warnings: string[] = [];
-  if (info.width * info.height < LOW_RES_PIXELS && imageType !== "thumbnail") {
+  if (info.width * info.height < LOW_RES_PIXELS && imageType !== "thumbnail" && !variant) {
     warnings.push(`解像度偏低（${info.width}×${info.height}），建議上傳更清晰的原圖`);
   }
   if (imageType === "processed" && !info.hasAlpha) {
@@ -230,11 +272,11 @@ export async function storeImage(env: Env, opt: StoreOptions): Promise<StoredIma
     if (owner === "garment") {
       stmts.push(
         env.DB.prepare(
-          `INSERT INTO garment_images (id, garment_id, image_type, r2_key, mime_type, width, height, file_size, sha256, has_alpha, is_primary, derived_from, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO garment_images (id, garment_id, image_type, r2_key, mime_type, width, height, file_size, sha256, has_alpha, is_primary, derived_from, created_at, variant)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         ).bind(
           imageId, ownerId, imageType, key, info.mime, info.width, info.height, bytes.byteLength, sha,
-          info.hasAlpha ? 1 : 0, makePrimary ? 1 : 0, opt.derivedFrom ?? null, createdAt,
+          info.hasAlpha ? 1 : 0, makePrimary ? 1 : 0, opt.derivedFrom ?? null, createdAt, variant,
         ),
       );
       stmts.push(env.DB.prepare("UPDATE garments SET updated_at = ? WHERE id = ?").bind(createdAt, ownerId));
@@ -262,7 +304,15 @@ export async function storeImage(env: Env, opt: StoreOptions): Promise<StoredIma
     throw new HttpError(500, "db_write_failed", "資料庫寫入失敗，圖片已回滾，請重試");
   }
 
-  await audit(env, opt.actor, "image.upload", imageId, { owner, ownerId, imageType, size: bytes.byteLength, w: info.width, h: info.height });
+  // 讀回驗證：R2 物件大小及 SHA-256 必須與上傳內容一致
+  const head = await env.IMAGES.head(key);
+  if (!head || head.size !== bytes.byteLength || (head.customMetadata?.sha256 && head.customMetadata.sha256 !== sha)) {
+    await env.DB.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(imageId).run().catch(() => undefined);
+    await env.IMAGES.delete(key).catch(() => undefined);
+    throw new HttpError(500, "readback_failed", "圖片寫入後讀回驗證失敗，已回滾，請重試");
+  }
+
+  await audit(env, opt.actor, "image.upload", imageId, { owner, ownerId, imageType, variant, size: bytes.byteLength, w: info.width, h: info.height });
 
   return {
     id: imageId,
