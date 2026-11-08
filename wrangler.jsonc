@@ -6,6 +6,9 @@
   "workers_dev": true,
   "observability": { "enabled": true },
 
+  // 每分鐘處理 D1 暫存匯入（import_staging → R2）
+  "triggers": { "crons": ["* * * * *"] },
+
   // 前端 (Vite build) 由 Static Assets 提供；/api 及 /mcp 先交給 Worker 處理
   "assets": {
     "directory": "./dist",

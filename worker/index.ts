@@ -4,6 +4,7 @@ import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveIma
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
 import { handleMcp } from "./mcp";
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
+import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
 
@@ -23,6 +24,14 @@ export default {
       logRequest(req, url, res.status, started, err);
       return withSecurityHeaders(res);
     }
+  },
+  // 每分鐘處理 D1 暫存匯入（import_staging）
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      processStaging(env).then((r) => {
+        if (r.length) console.log(JSON.stringify({ staging: r }));
+      }),
+    );
   },
 } satisfies ExportedHandler<Env>;
 
@@ -245,6 +254,19 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     requireSession(actor);
     const body = await readJson<{ delete?: boolean }>(req);
     return cleanupOrphans(env, actor, Boolean(body.delete));
+  }
+  if (path === "/api/staging/process" && method === "POST") {
+    requireSession(actor);
+    return json({ processed: await processStaging(env) });
+  }
+  if (path === "/api/staging" && method === "GET") {
+    requireSession(actor);
+    const { results } = await env.DB.prepare(
+      `SELECT client_ref, client_key, MAX(part_count) AS part_count, COUNT(*) AS parts, MIN(status) AS status, MAX(error_message) AS error,
+         MAX(garment_id) AS garment_id, MIN(created_at) AS created_at, MAX(processed_at) AS processed_at
+       FROM import_staging GROUP BY client_ref, client_key ORDER BY created_at DESC LIMIT 50`,
+    ).all();
+    return json({ staging: results });
   }
   if (path === "/api/usage" && method === "GET") {
     requireSession(actor);

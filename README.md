@@ -33,7 +33,7 @@ Workers Builds 自動產生的 token 沒有 D1 寫入權限，所以 migration �
 npx wrangler d1 migrations apply DB --remote
 ```
 
-（`0001_init.sql`、`0002_upload_slots.sql` 已於 2026-11-08 套用，並已記錄在 `d1_migrations` 表。）
+（`0001_init.sql`、`0002_upload_slots.sql`、`0003_import_staging.sql` 已於 2026-11-08 套用，並已記錄在 `d1_migrations` 表。）
 
 ## 安全設計
 
@@ -116,6 +116,25 @@ GET/POST /api/outfits  GET/PATCH/DELETE /api/outfits/{id}
 
 AI 不確定的分類會留空並列入 `uncertain_fields`，衣物狀態為「待確認」；真人穿搭照以 `kind: "outfit"` 保存為待整理穿搭，不會假裝已拆成單品。
 
+## ChatGPT 經 Cloudflare 連接器匯入（D1 暫存 → R2）
+
+適用於不能加自訂連接器、但可以用 Cloudflare 連接器執行 D1 SQL 的 ChatGPT。
+
+1. ChatGPT 把去背圖 Base64 寫入 `ai-wardrobe-db` 的 `import_staging`，同時提交**它自己計算的原檔 SHA-256**。每段建議 ≤ 1,000,000 字元（D1 每行上限 2 MB），大圖用 `part_no`／`part_count` 分段。
+2. Worker 每分鐘（cron）處理已收齊的項目：接回分段 → 解碼 → **SHA-256 必須一致** → 沿用上傳槽流程（PNG／WebP、尺寸、透明檢查 → 先寫 R2 → 成功後才寫衣物記錄）→ 清空暫存 Base64。
+3. 結果寫回 `import_staging`：`status`（done／duplicate／failed）、`error_message`、`garment_id`。失敗後可用 `INSERT OR REPLACE` 重寫同一 `client_ref`＋`client_key`＋`part_no`。
+
+```sql
+INSERT OR REPLACE INTO import_staging
+  (client_ref, client_key, part_no, part_count, data, sha256, file_name, image_type, expected_width, expected_height, garment_json)
+VALUES (?, ?, 1, 1, ?, ?, ?, 'processed', ?, ?, ?);
+
+-- 一分鐘後核實
+SELECT client_key, status, error_message, garment_id FROM import_staging WHERE client_ref = ? GROUP BY client_key;
+```
+
+`garment_json` 例：`{"name":"黑色十字架 JSK","category":"連身裙","subcategory":"JSK","style":"Gothic Lolita","primary_color":"黑","needs_review":true}`。App 內 `GET /api/staging` 可查看，`POST /api/staging/process` 可即時處理（只限已登入）。
+
 ## 開發
 
 ```bash
@@ -136,4 +155,5 @@ npm i -D esbuild sharp && node test/e2e.mjs
 
 ```bash
 node test/upload-slots.mjs
+node test/staging.mjs      # D1 暫存匯入（22 項：分段、SHA-256、截斷、縮小、JPEG、去重）
 ```
