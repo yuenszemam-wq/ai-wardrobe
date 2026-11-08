@@ -1,0 +1,17 @@
+{
+  "name": "AI 電子衣櫃",
+  "short_name": "電子衣櫃",
+  "description": "私人 Lolita 衣物電子衣櫃",
+  "lang": "zh-Hant-HK",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a1320",
+  "theme_color": "#1a1320",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

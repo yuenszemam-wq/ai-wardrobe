@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #1a1320;       /* 絲絨黑紫：外框 */
+  --color-velvet: #2c2036;    /* 深紫：卡片於深色底 */
+  --color-amethyst: #8e5bb8;  /* 紫：主要動作 */
+  --color-amethyst-deep: #6b3f93;
+  --color-rose: #f6d7e3;      /* 淡粉：衣物襯紙 */
+  --color-rose-soft: #fbeaf1;
+  --color-lace: #fffafc;      /* 蕾絲白：內容底色 */
+  --color-mauve: #8a7896;     /* 次要文字 */
+  --color-wine: #9b2c4d;      /* 錯誤／刪除 */
+  --font-serif: "Noto Serif TC", "Songti TC", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--color-lace);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 拱窗形衣物框：整個 App 唯一的裝飾性造型 */
+.arch {
+  border-radius: 50% 50% 14px 14px / 30% 30% 14px 14px;
+  background:
+    radial-gradient(120% 70% at 50% 0%, #fff 0%, var(--color-rose-soft) 55%, var(--color-rose) 100%);
+  box-shadow: inset 0 0 0 1px rgb(142 91 184 / 0.14);
+}
+.arch-dark {
+  border-radius: 50% 50% 14px 14px / 30% 30% 14px 14px;
+  background: var(--color-velvet);
+}
+
+/* 透明圖片的棋盤底，用於檢查去背 */
+.checker {
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #f1e4ea 25%, transparent 25%),
+    linear-gradient(-45deg, #f1e4ea 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f1e4ea 75%),
+    linear-gradient(-45deg, transparent 75%, #f1e4ea 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+
+.safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+}
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-amethyst);
+  outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px; /* 防止 iPhone 自動放大 */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+}
