@@ -3,10 +3,11 @@ import { createGarment, deleteGarment, getGarment, listGarments, stats, updateGa
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
 import { handleMcp } from "./mcp";
-import { aiMaintenance, aiQueue, claimGarments, decide, intakeUpload, recordOrigin, reviewList, serveSignedImage, setAiStatus, submitSuggestion } from "./ai";
+import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload, recordOrigin, reviewList, serveSignedImage, setAiStatus, submitSuggestion } from "./ai";
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
+import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
 
 export default {
@@ -15,6 +16,7 @@ export default {
     const started = Date.now();
     try {
       let res: Response;
+      if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mcp")) await ensureTaxonomy(env);
       if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) res = await handleMcp(req, env, url);
       else if (url.pathname.startsWith("/api/")) res = await handleApi(req, env, url);
       else return env.ASSETS.fetch(req);
@@ -28,6 +30,7 @@ export default {
   },
   // 每分鐘處理 D1 暫存匯入（import_staging）
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    await ensureTaxonomy(env);
     ctx.waitUntil(
       processStaging(env).then((r) => {
         if (r.length) console.log(JSON.stringify({ staging: r }));
@@ -120,6 +123,41 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       requireSession(actor);
       await deleteGarment(env, actor, id);
       return json({ ok: true });
+    }
+  }
+
+  // ───── 批量入庫：把選取的待整理衣物一次轉為正式衣物 ─────
+  if (path === "/api/garments/bulk-intake" && method === "POST") {
+    requireSession(actor);
+    const body = await readJson<{ garment_ids?: string[]; set?: Record<string, unknown>; use_ai?: boolean }>(req);
+    return json(await bulkIntake(env, actor, body.garment_ids ?? [], body.set ?? {}, body.use_ai !== false));
+  }
+
+  // ───── 分類字典 ─────
+  if (path === "/api/taxonomy") {
+    if (method === "GET") {
+      requireScope(actor, "read");
+      return json(await getTaxonomy(env, url.searchParams.get("usage") === "1"));
+    }
+    if (method === "POST") {
+      requireSession(actor);
+      return json(await createTaxNode(env, actor, await readJson(req)), 201);
+    }
+  }
+  if (path === "/api/taxonomy/reorder" && method === "POST") {
+    requireSession(actor);
+    const body = await readJson<{ ids?: unknown }>(req);
+    return json(await reorderTaxNodes(env, actor, body.ids));
+  }
+  m = path.match(/^\/api\/taxonomy\/([\w-]+)$/);
+  if (m) {
+    if (method === "PATCH") {
+      requireSession(actor);
+      return json(await updateTaxNode(env, actor, m[1], await readJson(req)));
+    }
+    if (method === "DELETE") {
+      requireSession(actor);
+      return json(await deleteTaxNode(env, actor, m[1]));
     }
   }
 

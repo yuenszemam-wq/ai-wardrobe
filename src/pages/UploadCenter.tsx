@@ -127,8 +127,8 @@ export default function UploadCenter() {
       const ok = cur.filter((i) => i.state === "done").length;
       if (failed) toast(`${failed} 張未能上傳，其他已保存；可按「重試失敗項目」`, "err");
       else if (ok) {
-        toast(`已保存 ${ok} 件，已加入 AI 待整理`);
-        setTimeout(() => navigate("/review"), 900);
+        toast(`已保存 ${ok} 件，已加入主頁「待整理」`);
+        setTimeout(() => navigate("/?tab=pending_ai#todo"), 900);
       } else toast("這些相片衣櫃已經有了");
     } finally {
       runningRef.current = false;
@@ -152,7 +152,7 @@ export default function UploadCenter() {
     <section className="rounded-3xl bg-rose-soft p-4">
       <h2 className="font-serif text-lg font-bold">上傳中心</h2>
       <p className="mt-1 text-[13px] text-mauve">
-        一張相＝一件衣物。原檔完整保存（HEIC 亦保留），系統另外產生縮圖。上傳後自動放入「AI 待整理」，再請 ChatGPT／Claude 一次整理。
+        一張相＝一件衣物。原檔完整保存（HEIC 亦保留），系統另外產生縮圖。上傳後自動放入主頁「待整理」，再請 ChatGPT／Claude 一次整理。
       </p>
 
       <label
@@ -222,8 +222,8 @@ export default function UploadCenter() {
               {running ? `上傳中（${finished}/${total}）` : failed && pending === failed ? `重試失敗項目（${failed}）` : `開始上傳 ${pending} 張`}
             </Button>
             {finished > 0 && !running && (
-              <Link to="/review" className="text-[14px] text-amethyst-deep underline underline-offset-4">
-                前往 AI 待整理
+              <Link to="/?tab=todo#todo" className="text-[14px] text-amethyst-deep underline underline-offset-4">
+                前往主頁「待整理」
               </Link>
             )}
           </div>

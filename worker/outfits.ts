@@ -6,7 +6,7 @@ interface OutfitInput {
   style?: unknown;
   is_favorite?: unknown;
   status?: unknown;
-  items?: { garment_id: string; position?: number; layer_order?: number }[];
+  items?: { garment_id: string; position?: number; layer_order?: number; x?: number; y?: number; w?: number; h?: number }[];
 }
 
 export async function listOutfits(env: Env, params: URLSearchParams) {
@@ -24,7 +24,7 @@ export async function listOutfits(env: Env, params: URLSearchParams) {
   const out = [];
   for (const o of results) {
     const { results: items } = await env.DB.prepare(
-      `SELECT i.garment_id, i.position, i.layer_order, g.name, g.category,
+      `SELECT i.garment_id, i.position, i.layer_order, i.x, i.y, i.w, i.h, g.name, g.category,
          COALESCE((SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail' ORDER BY t.created_at DESC LIMIT 1),
                   (SELECT p.id FROM garment_images p WHERE p.garment_id = g.id AND p.is_primary = 1 LIMIT 1)) AS image_id
        FROM outfit_items i JOIN garments g ON g.id = i.garment_id WHERE i.outfit_id = ? ORDER BY i.layer_order, i.position LIMIT 12`,
@@ -40,7 +40,7 @@ export async function getOutfit(env: Env, id: string) {
   const o = await env.DB.prepare("SELECT * FROM outfits WHERE id = ?").bind(id).first<Record<string, unknown>>();
   if (!o) throw new HttpError(404, "outfit_not_found", "找不到這套穿搭");
   const { results: items } = await env.DB.prepare(
-    `SELECT i.garment_id, i.position, i.layer_order, g.name, g.category, g.subcategory, g.style,
+    `SELECT i.garment_id, i.position, i.layer_order, i.x, i.y, i.w, i.h, g.name, g.category, g.subcategory, g.style,
        (SELECT p.id FROM garment_images p WHERE p.garment_id = g.id AND p.is_primary = 1 LIMIT 1) AS image_id,
        (SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail' ORDER BY t.created_at DESC LIMIT 1) AS thumb_image_id
      FROM outfit_items i JOIN garments g ON g.id = i.garment_id WHERE i.outfit_id = ? ORDER BY i.layer_order, i.position`,
@@ -55,6 +55,13 @@ export async function getOutfit(env: Env, id: string) {
   return { ...o, is_favorite: Number(o.is_favorite) === 1, items, images };
 }
 
+/** 畫布位置（佔畫布百分比）；沒有提供時為 null，App 會按類別放在預設位置 */
+function pct(v: unknown, min: number, max: number): number | null {
+  const n = Number(v);
+  if (v === null || v === undefined || v === "" || !Number.isFinite(n)) return null;
+  return Math.round(Math.min(max, Math.max(min, n)) * 100) / 100;
+}
+
 async function writeItems(env: Env, outfitId: string, items: OutfitInput["items"]) {
   if (!items) return;
   if (!Array.isArray(items) || items.length > 30) throw new HttpError(400, "bad_items", "items 格式錯誤（最多 30 件）");
@@ -65,8 +72,9 @@ async function writeItems(env: Env, outfitId: string, items: OutfitInput["items"
     if (!gid || seen.has(gid)) return;
     seen.add(gid);
     stmts.push(
-      env.DB.prepare("INSERT INTO outfit_items (outfit_id, garment_id, position, layer_order) VALUES (?,?,?,?)").bind(
+      env.DB.prepare("INSERT INTO outfit_items (outfit_id, garment_id, position, layer_order, x, y, w, h) VALUES (?,?,?,?,?,?,?,?)").bind(
         outfitId, gid, Number.isFinite(it.position) ? Number(it.position) : i, Number.isFinite(it.layer_order) ? Number(it.layer_order) : i,
+        pct(it.x, -50, 150), pct(it.y, -50, 150), pct(it.w, 2, 300), pct(it.h, 2, 300),
       ),
     );
   });

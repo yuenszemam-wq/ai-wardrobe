@@ -11,7 +11,7 @@ export interface OutfitSummary {
   is_favorite: boolean;
   item_count: number;
   image_id: string | null;
-  items: { garment_id: string; name: string; image_id: string | null; layer_order: number }[];
+  items: { garment_id: string; name: string; image_id: string | null; layer_order: number; x: number | null; y: number | null; w: number | null; h: number | null }[];
 }
 
 export default function Outfits() {
@@ -45,6 +45,23 @@ export default function Outfits() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {list.map((o) => (
             <Link key={o.id} to={`/outfits/${o.id}`} className="block rounded-3xl bg-rose-soft p-2">
+              {!o.image_id && o.items.some((it) => it.x !== null) ? (
+                // 已排版的穿搭：按儲存的位置縮小顯示
+                <div className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-white">
+                  {o.items.map((it, i) =>
+                    it.image_id && it.x !== null ? (
+                      <img
+                        key={it.garment_id}
+                        src={imageUrl(it.image_id)}
+                        alt=""
+                        loading="lazy"
+                        className="absolute object-contain"
+                        style={{ left: `${it.x}%`, top: `${it.y}%`, width: `${it.w}%`, height: `${it.h}%`, zIndex: i + 1 }}
+                      />
+                    ) : null,
+                  )}
+                </div>
+              ) : (
               <div className="grid aspect-square grid-cols-2 gap-1 overflow-hidden rounded-2xl bg-white">
                 {o.image_id ? (
                   <img src={imageUrl(o.image_id)} alt="" loading="lazy" className="col-span-2 row-span-2 h-full w-full object-cover" />
@@ -56,6 +73,7 @@ export default function Outfits() {
                   ))
                 )}
               </div>
+              )}
               <div className="mt-2 flex items-center justify-between px-1">
                 <span className="truncate text-[14px] font-medium">{o.name}</span>
                 {o.is_favorite && <span className="text-amethyst">♥</span>}

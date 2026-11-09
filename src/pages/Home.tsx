@@ -1,6 +1,8 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import { api, Garment } from "../api";
 import { Empty, GarmentTile, Link, Spinner } from "../components/ui";
+import { navigate } from "../router";
+import ReviewPanel from "./AiReview";
 
 interface Stats {
   total: number;
@@ -19,9 +21,14 @@ interface Stats {
 export default function Home() {
   const [s, setS] = useState<Stats | null>(null);
   const [err, setErr] = useState("");
-  useEffect(() => {
+  const loadStats = useCallback(() => {
     api<Stats>("/api/stats").then(setS).catch((e) => setErr(e.message));
   }, []);
+  useEffect(() => {
+    loadStats();
+    // 從其他頁面連到「待整理」時捲到該區
+    if (location.hash === "#todo" || new URLSearchParams(location.search).get("tab")) setTimeout(() => document.getElementById("todo")?.scrollIntoView({ behavior: "smooth" }), 300);
+  }, [loadStats]);
   if (err) return <p className="py-10 text-center text-wine">{err}</p>;
   if (!s) return <Spinner />;
 
@@ -49,9 +56,9 @@ export default function Home() {
         </div>
         <div className="mt-5 grid grid-cols-4 gap-2 text-center">
           <Stat to="/wardrobe" n={s.total} label="衣物總數" />
-          <Stat to="/review?tab=pending_ai" n={s.ai_todo} label="待整理" hot={s.ai_todo > 0} />
-          <Stat to="/review?tab=pending_review" n={s.ai_review} label="待確認" hot={s.ai_review > 0} />
-          <Stat to="/review?tab=done" n={s.ai_done} label="已完成" />
+          <Stat tab="pending_ai" n={s.ai_todo} label="待整理" hot={s.ai_todo > 0} />
+          <Stat tab="pending_review" n={s.ai_review} label="待確認" hot={s.ai_review > 0} />
+          <Stat tab="done" n={s.ai_done} label="已完成" />
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3">
           <Link to="/import" className="rounded-2xl bg-amethyst px-4 py-3 text-center text-[15px] font-medium text-white">
@@ -64,9 +71,9 @@ export default function Home() {
       </section>
 
       {s.ai_review > 0 && (
-        <Link to="/review?tab=pending_review" className="mt-4 block rounded-2xl bg-rose-soft px-4 py-3 text-sm">
+        <button type="button" onClick={() => goTab("pending_review")} className="mt-4 block w-full rounded-2xl bg-rose-soft px-4 py-3 text-left text-sm">
           AI 已整理好 {s.ai_review} 件，等你確認 →
-        </Link>
+        </button>
       )}
 
       {s.open_batches > 0 && (
@@ -74,6 +81,8 @@ export default function Home() {
           有 {s.open_batches} 個匯入批次仍在進行中，按此查看
         </Link>
       )}
+
+      <ReviewPanel onChanged={loadStats} />
 
       <Section title="最近加入" more="/wardrobe">
         {s.recent.length ? (
@@ -110,11 +119,29 @@ export default function Home() {
   );
 }
 
-function Stat({ to, n, label, hot }: { to: string; n: number; label: string; hot?: boolean }) {
-  return (
-    <Link to={to} className={`rounded-2xl px-1 py-2.5 ${hot ? "bg-amethyst text-white" : "bg-velvet text-rose"}`}>
+/** 切換主頁「待整理」區的分頁並捲到該區 */
+function goTab(tab: string) {
+  navigate(`/?tab=${tab}`, true, false);
+  setTimeout(() => document.getElementById("todo")?.scrollIntoView({ behavior: "smooth" }), 50);
+}
+
+function Stat({ to, tab, n, label, hot }: { to?: string; tab?: string; n: number; label: string; hot?: boolean }) {
+  const cls = `rounded-2xl px-1 py-2.5 ${hot ? "bg-amethyst text-white" : "bg-velvet text-rose"}`;
+  const inner = (
+    <>
       <div className="font-serif text-[22px] font-bold leading-none">{n}</div>
       <div className={`mt-1 text-[11px] ${hot ? "text-white/85" : "text-mauve"}`}>{label}</div>
+    </>
+  );
+  if (tab)
+    return (
+      <button type="button" onClick={() => goTab(tab)} className={cls}>
+        {inner}
+      </button>
+    );
+  return (
+    <Link to={to!} className={cls}>
+      {inner}
     </Link>
   );
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CATEGORIES, LOLITA_SUBCATEGORIES, STYLES } from "../../shared/taxonomy";
+import { Taxonomy } from "../../shared/taxonomy";
 import { AI_STATUS_LABEL, AiNormalized, AiStatus, api, BRAND_CONFIDENCE_LABEL, displayName, formatDate, imageUrl, ReviewItem } from "../api";
-import { Button, Empty, inputCls, Link, PageTitle, Spinner, toast } from "../components/ui";
+import { Button, Empty, inputCls, Link, PickChips, Spinner, toast } from "../components/ui";
 import { usePath, navigate } from "../router";
+import { optionNames, useTaxonomy } from "../taxonomy";
 import { AI_COMMAND, CopyBlock } from "./ImportCenter";
 
 const TABS: { key: string; label: string; statuses: AiStatus[] }[] = [
@@ -42,8 +43,11 @@ interface ReviewData {
   counts: Record<AiStatus, number>;
 }
 
-export default function AiReview() {
+/** 待整理（嵌入主頁）：分頁、多選、批量入庫、AI 建議對比 */
+export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
   const path = usePath();
+  const tax = useTaxonomy();
+  const [intakeOpen, setIntakeOpen] = useState(false);
   const params = useMemo(() => new URLSearchParams(path.split("?")[1] || ""), [path]);
   const tab = TABS.find((t) => t.key === params.get("tab")) ?? TABS[0];
   const sort = params.get("sort") || "newest";
@@ -55,7 +59,9 @@ export default function AiReview() {
   const load = useCallback(async () => {
     const r = await api<ReviewData>(`/api/ai/review?ai_status=${tab.statuses.join(",")}&sort=${sort}`);
     setData(r);
+    onChanged?.();
     setSelected((cur) => new Set([...cur].filter((id) => r.items.some((i) => i.id === id))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, sort]);
 
   useEffect(() => {
@@ -67,7 +73,7 @@ export default function AiReview() {
     const p = new URLSearchParams(params);
     if (v) p.set(k, v);
     else p.delete(k);
-    navigate(`/review${p.toString() ? `?${p}` : ""}`, true);
+    navigate(`/${p.toString() ? `?${p}` : ""}`, true, false);
   }
 
   const items = data?.items ?? [];
@@ -100,19 +106,38 @@ export default function AiReview() {
     }
   }
 
+  async function bulkIntake(set: Record<string, string>, useAi: boolean) {
+    if (!selectedItems.length || busy) return;
+    setBusy(true);
+    try {
+      const r = await api<{ results: { ok: boolean; mode?: string; error?: string }[] }>("/api/garments/bulk-intake", {
+        method: "POST",
+        json: { garment_ids: selectedItems.map((i) => i.id), set, use_ai: useAi },
+      });
+      const ok = r.results.filter((x) => x.ok);
+      const bad = r.results.length - ok.length;
+      const ai = ok.filter((x) => x.mode === "ai").length;
+      toast(bad ? `已入庫 ${ok.length} 件，${bad} 件失敗：${r.results.find((x) => !x.ok)?.error ?? ""}` : `已入庫 ${ok.length} 件${ai ? `（${ai} 件採用 AI 建議）` : ""}`, bad ? "err" : "ok");
+      setSelected(new Set());
+      setIntakeOpen(false);
+      await load();
+    } catch (e) {
+      toast((e as Error).message, "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <div>
-      <PageTitle
-        action={
-          <select className="rounded-full bg-white px-3 py-1.5 text-[13px] ring-1 ring-ink/10" value={sort} onChange={(e) => setParam("sort", e.target.value === "newest" ? "" : e.target.value)} aria-label="排序">
-            <option value="newest">最新上傳</option>
-            <option value="oldest">最舊上傳</option>
-            <option value="number">按編號</option>
-          </select>
-        }
-      >
-        AI 待整理
-      </PageTitle>
+    <section id="todo" className="mt-7 scroll-mt-14">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="font-serif text-lg font-bold">待整理</h2>
+        <select className="rounded-full bg-white px-3 py-1.5 text-[13px] ring-1 ring-ink/10" value={sort} onChange={(e) => setParam("sort", e.target.value === "newest" ? "" : e.target.value)} aria-label="排序">
+          <option value="newest">最新上傳</option>
+          <option value="oldest">最舊上傳</option>
+          <option value="number">按編號</option>
+        </select>
+      </div>
 
       <div className="scrollbar-none -mx-4 flex gap-2 overflow-x-auto px-4 py-1">
         {TABS.map((t) => {
@@ -153,8 +178,11 @@ export default function AiReview() {
           <span className="text-[13px] text-mauve">已選 {selected.size}</span>
           {selected.size > 0 && (
             <>
-              <Button className="min-h-9 px-4 text-[13px]" disabled={busy || !acceptable.length} onClick={() => bulk("accept_all")}>
-                接受 AI 建議（{acceptable.length}）
+              <Button className="min-h-9 px-4 text-[13px]" disabled={busy} onClick={() => setIntakeOpen((v) => !v)}>
+                批量入庫（{selected.size}）
+              </Button>
+              <Button variant="soft" className="min-h-9 px-4 text-[13px]" disabled={busy || !acceptable.length} onClick={() => bulk("accept_all")}>
+                只接受 AI 建議（{acceptable.length}）
               </Button>
               <Button variant="ghost" className="min-h-9 px-4 text-[13px]" disabled={busy} onClick={() => bulk("rework")}>
                 重新處理
@@ -164,6 +192,10 @@ export default function AiReview() {
         </div>
       )}
 
+      {intakeOpen && selected.size > 0 && (
+        <BulkIntakeSheet tax={tax} count={selected.size} withAi={acceptable.length} busy={busy} onCancel={() => setIntakeOpen(false)} onConfirm={bulkIntake} />
+      )}
+
       <div className="mt-3">
         {!data ? (
           <Spinner />
@@ -171,7 +203,7 @@ export default function AiReview() {
           <Empty title={tab.key === "todo" ? "沒有待整理的衣物" : "這裡沒有衣物"}>
             {todoCount === 0 ? (
               <>
-                到 <Link to="/import" className="text-amethyst-deep underline">上傳中心</Link> 選相上傳，新衣物會自動出現在這裡。
+                按右上角「＋ 上傳」選相，新衣物會自動出現在這裡。
               </>
             ) : (
               "可切換其他分頁查看。"
@@ -200,6 +232,61 @@ export default function AiReview() {
           </ul>
         )}
       </div>
+    </section>
+  );
+}
+
+function BulkIntakeSheet({
+  tax,
+  count,
+  withAi,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  tax: Taxonomy;
+  count: number;
+  withAi: number;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (set: Record<string, string>, useAi: boolean) => void;
+}) {
+  const [category, setCategory] = useState("");
+  const [sub, setSub] = useState("");
+  const [useAi, setUseAi] = useState(true);
+  const subs = tax.categories.find((c) => c.name === category)?.subs.map((s) => s.name) ?? [];
+  return (
+    <div className="mt-3 space-y-3 rounded-3xl bg-rose-soft p-4">
+      <p className="text-[14px]">
+        把已選的 <b>{count}</b> 件轉為正式衣物。可以同時為全部指定分類（不選就保留各自的分類）。
+      </p>
+      <div>
+        <p className="mb-1.5 text-[13px] text-mauve">主分類（可不選）</p>
+        <PickChips options={tax.categories.map((c) => c.name)} value={category ? [category] : []} onChange={(v) => { setCategory(v[0] ?? ""); setSub(""); }} />
+      </div>
+      {subs.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[13px] text-mauve">子分類（可不選）</p>
+          <PickChips options={subs} value={sub ? [sub] : []} onChange={(v) => setSub(v[0] ?? "")} />
+        </div>
+      )}
+      {withAi > 0 && (
+        <label className="flex items-start gap-2 text-[14px]">
+          <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} className="mt-0.5 h-5 w-5 accent-amethyst" />
+          <span>
+            其中 {withAi} 件有 AI 建議：同時接受 AI 建議
+            <span className="block text-[12px] text-mauve">未確認的品牌不會寫入；上面指定的分類會優先。</span>
+          </span>
+        </label>
+      )}
+      <div className="flex gap-2">
+        <Button disabled={busy} onClick={() => onConfirm({ ...(category ? { category } : {}), ...(sub ? { subcategory: sub } : {}) }, useAi)}>
+          {busy ? "入庫中…" : `確認入庫 ${count} 件`}
+        </Button>
+        <Button variant="ghost" disabled={busy} onClick={onCancel}>
+          取消
+        </Button>
+      </div>
     </div>
   );
 }
@@ -212,6 +299,7 @@ function brandBadge(n: AiNormalized | null | undefined) {
 }
 
 function ReviewCard({ g, selected, onToggle, open, onOpen, onChanged }: { g: ReviewItem; selected: boolean; onToggle: () => void; open: boolean; onOpen: () => void; onChanged: () => Promise<void> }) {
+  const tax = useTaxonomy();
   const st = (g.ai_status || "pending_ai") as AiStatus;
   const n = g.suggestion?.status === "valid" ? g.suggestion.normalized : null;
   const brand = brandBadge(n);
@@ -252,7 +340,7 @@ function ReviewCard({ g, selected, onToggle, open, onOpen, onChanged }: { g: Rev
           )}
         </div>
       </div>
-      {open && n && g.suggestion && <Compare g={g} n={n} suggestionId={g.suggestion.suggestion_id} onDone={onChanged} />}
+      {open && n && g.suggestion && <Compare g={g} n={n} suggestionId={g.suggestion.suggestion_id} onDone={onChanged} tax={tax} />}
     </li>
   );
 }
@@ -263,7 +351,7 @@ function fmt(v: unknown): string {
   return String(v);
 }
 
-function Compare({ g, n, suggestionId, onDone }: { g: ReviewItem; n: AiNormalized; suggestionId: number; onDone: () => Promise<void> }) {
+function Compare({ g, n, suggestionId, onDone, tax }: { g: ReviewItem; n: AiNormalized; suggestionId: number; onDone: () => Promise<void>; tax: Taxonomy }) {
   const locked = new Set(g.locked_fields ?? []);
   const original: Record<FieldKey, unknown> = {
     name: g.name_is_placeholder ? null : g.name,
@@ -370,7 +458,7 @@ function Compare({ g, n, suggestionId, onDone }: { g: ReviewItem; n: AiNormalize
                       {uncertain && <span className="ml-1 text-[10px]">（AI 不確定）</span>}
                     </>
                   )}
-                  {editing && <EditField field={f} value={edits[f] ?? ""} onChange={(v) => setEdits((e) => ({ ...e, [f]: v }))} />}
+                  {editing && <EditField tax={tax} category={edits.category || (n.category ?? g.category)} field={f} value={edits[f] ?? ""} onChange={(v) => setEdits((e) => ({ ...e, [f]: v }))} />}
                 </td>
               </tr>
             );
@@ -424,8 +512,10 @@ function Compare({ g, n, suggestionId, onDone }: { g: ReviewItem; n: AiNormalize
   );
 }
 
-function EditField({ field, value, onChange }: { field: FieldKey; value: string; onChange: (v: string) => void }) {
-  const options = field === "category" ? CATEGORIES : field === "style" ? STYLES : field === "subcategory" ? LOLITA_SUBCATEGORIES : null;
+function EditField({ tax, category, field, value, onChange }: { tax: Taxonomy; category: string | null; field: FieldKey; value: string; onChange: (v: string) => void }) {
+  const subs = tax.categories.find((c) => c.name === category)?.subs.map((s) => s.name) ?? [...new Set(tax.categories.flatMap((c) => c.subs.map((s) => s.name)))];
+  const options =
+    field === "category" ? tax.categories.map((c) => c.name) : field === "style" ? optionNames(tax, "style") : field === "subcategory" ? subs : field === "primary_color" ? optionNames(tax, "primary_color") : null;
   if (options)
     return (
       <select className={`${inputCls} mt-1 px-2 py-1.5 text-[13px]`} value={value} onChange={(e) => onChange(e.target.value)}>

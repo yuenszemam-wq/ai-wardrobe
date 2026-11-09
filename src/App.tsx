@@ -1,17 +1,17 @@
 import { ReactElement, useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { Link, Spinner, Toast } from "./components/ui";
-import { match, usePath } from "./router";
+import { match, navigate, usePath } from "./router";
 import GarmentDetail from "./pages/GarmentDetail";
 import Home from "./pages/Home";
 import ImportCenter from "./pages/ImportCenter";
-import AiReview from "./pages/AiReview";
 import BatchDetail from "./pages/BatchDetail";
 import Login from "./pages/Login";
 import Outfits from "./pages/Outfits";
 import OutfitStudio from "./pages/OutfitStudio";
 import PublicUpload from "./pages/PublicUpload";
 import Settings from "./pages/Settings";
+import TaxonomyManager from "./pages/TaxonomyManager";
 import Wardrobe from "./pages/Wardrobe";
 
 interface AuthState {
@@ -50,7 +50,12 @@ export default function App() {
   else if (match("/wardrobe", path)) page = <Wardrobe />;
   else if ((p = match("/g/:id", path))) page = <GarmentDetail id={p.id} />;
   else if (match("/import", path)) page = <ImportCenter />;
-  else if (match("/review", path)) page = <AiReview />;
+  else if (match("/review", path)) {
+    // 「待整理」已搬到主頁
+    const qs = path.split("?")[1];
+    setTimeout(() => navigate(`/${qs ? `?${qs}` : "?tab=todo"}#todo`, true), 0);
+    page = <Spinner />;
+  } else if (match("/taxonomy", path)) page = <TaxonomyManager />;
   else if ((p = match("/import/:id", path))) page = <BatchDetail id={p.id} />;
   else if (match("/outfits", path)) page = <Outfits />;
   else if (match("/outfits/new", path)) page = <OutfitStudio />;
@@ -81,16 +86,15 @@ const TABS = [
   { to: "/", label: "首頁", icon: "⌂", test: (p: string) => p === "/" },
   { to: "/wardrobe", label: "衣櫃", icon: "♛", test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
   { to: "/import", label: "上傳", icon: "✚", test: (p: string) => p.startsWith("/import") },
-  { to: "/review", label: "待整理", icon: "✧", test: (p: string) => p.startsWith("/review") },
   { to: "/outfits", label: "穿搭", icon: "❦", test: (p: string) => p.startsWith("/outfits") },
-  { to: "/settings", label: "設定", icon: "⚙", test: (p: string) => p.startsWith("/settings") },
+  { to: "/settings", label: "設定", icon: "⚙", test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
 ];
 
 function TabBar({ path }: { path: string }) {
   const clean = path.split("?")[0];
   return (
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 bg-ink/95 backdrop-blur" aria-label="主選單">
-      <div className="mx-auto grid max-w-5xl grid-cols-6">
+      <div className="mx-auto grid max-w-5xl grid-cols-5">
         {TABS.map((t) => {
           const active = t.test(clean);
           return (

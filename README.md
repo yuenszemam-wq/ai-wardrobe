@@ -33,7 +33,19 @@ Workers Builds 自動產生的 token 沒有 D1 寫入權限，所以 migration �
 npx wrangler d1 migrations apply DB --remote
 ```
 
-（`0001_init.sql`、`0002_upload_slots.sql`、`0003_import_staging.sql` 已於 2026-11-08 套用；`0004_ai_workflow.sql` 已於 2026-11-09 經 Cloudflare D1 API 套用；全部已記錄在 `d1_migrations` 表。）
+（`0001_init.sql`、`0002_upload_slots.sql`、`0003_import_staging.sql` 已於 2026-11-08 套用；`0004_ai_workflow.sql`、`0005_taxonomy_layout.sql` 已於 2026-11-09 經 Cloudflare D1 API 套用；全部已記錄在 `d1_migrations` 表。）
+
+## V3：分類字典 × 批量入庫 × 穿搭排版
+
+- **分類字典**（D1 `taxonomy`）：主分類 → 子分類，以及屬性（袖長、裙長、材質…）→ 選項。固定 ID、顯示名稱可改。預設值在 `shared/taxonomy.ts`，首次讀取時寫入（`app_settings.taxonomy_seeded`），之後全部在 App「設定 → 分類管理」增加／改名／刪除／拖拉排序。
+  - 改名會連帶更新已入庫衣物；刪除只移除字典項目，衣物保留原文字。
+  - 屬性可設單選／多選、多選上限、只在某些主分類顯示（例如裙長只在連身裙、半身裙）。
+  - 風格、主要顏色（最多 2 個）、季節沿用原欄位，多選以「、」分隔；次要顏色沿用 `secondary_colors`；其他屬性存 `garments.attributes`（JSON，鍵為屬性 ID）。
+  - 0005 會映射舊值：Petticoat→內搭與裙撐／裙撐、Headbow→蝴蝶結、KC→髮箍、Cape→外套／斗篷／披肩、酒紅→紅、淺藍→藍、米白→米色、四季→春、夏、秋、冬。
+  - MCP 新增 `list_taxonomy`。
+- **待整理**搬到主頁（`/review` 會轉到 `/?tab=…`）。多選後「批量入庫」（`POST /api/garments/bulk-intake`）：有 AI 建議的可同時接受，其餘保留原資料入庫，並可一次指定主分類／子分類。
+- **衣櫃**每排 2｜3｜4｜5 張，記在瀏覽器。
+- **穿搭**：單品可拖動、雙指／角位把手縮放，圖層清單拖拉排序；位置存 `outfit_items.x/y/w/h`（畫布百分比）。
 
 ## V2：批量上傳 × AI 待整理
 

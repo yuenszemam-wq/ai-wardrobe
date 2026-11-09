@@ -10,6 +10,7 @@ import { ImageType, Owner, maxUploadBytes, storeImage } from "./images";
 import { addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, onImageStored } from "./imports";
 import { createUploadSession, downloadHttps, getUploadSession, importGarmentFiles } from "./uploads";
 import { aiQueue, claimGarments, submitSuggestion } from "./ai";
+import { getTaxonomy } from "./taxonomy";
 import { Actor, Env, HttpError, json, requireScope } from "./util";
 
 const SERVER_VERSION = "0.3.0";
@@ -33,21 +34,21 @@ B. 圖片是你在 Python／程式碼環境（sandbox，例如 /mnt/data）產�
    5) 全部完成後 finalize_import_batch。
 不要自稱已上傳；以 get_upload_session 的 status=done 為準。expected_width／expected_height 一經提供，尺寸不符會被拒絕，以防圖片被縮小。
 舊流程（create_import_batch → add_garments → upload_garment_image／create_upload_link）仍可用。
-分類規則：category 只可用 ${CATEGORIES.join("、")}；Lolita 子類 ${LOLITA_SUBCATEGORIES.join("、")}；style 只可用 ${STYLES.join("、")}。
+分類規則：以使用者在 App「分類管理」設定的分類字典為準（可用 list_taxonomy 讀取最新版本）。預設主分類：${CATEGORIES.join("、")}；每件衣物只選一個主分類及一個子分類；style 可多個（以「、」分隔），預設：${STYLES.join("、")}；primary_color 最多 2 個。
 不確定的欄位請留空並列入 uncertain_fields，或設 needs_review=true，不要猜測。
 若相片是真人整套穿搭，請用 kind="outfit" 保存為穿搭待覆核，不要假裝已拆成單品。
 不要把圖片縮小；請上傳最高解像度的版本。`;
 
 const garmentProps = {
   name: { type: "string", description: "衣物名稱（可含系列名）" },
-  category: { type: "string", enum: [...CATEGORIES], description: "主類別；不確定請留空" },
-  subcategory: { type: "string", description: `Lolita 子類（${LOLITA_SUBCATEGORIES.join("/")}）或其他子類` },
+  category: { type: "string", description: `主分類（以分類字典為準，預設：${CATEGORIES.join("、")}）；不確定請留空` },
+  subcategory: { type: "string", description: `子分類（以分類字典為準，例如 ${LOLITA_SUBCATEGORIES.join("/")}）` },
   brand: { type: "string" },
-  style: { type: "string", enum: [...STYLES] },
-  primary_color: { type: "string", description: `主色，建議使用：${COLORS.join("、")}` },
+  style: { type: "string", description: `風格，可多個以「、」分隔：${STYLES.join("、")}` },
+  primary_color: { type: "string", description: `主要顏色，最多 2 個以「、」分隔：${COLORS.join("、")}` },
   secondary_colors: { type: "array", items: { type: "string" } },
   pattern: { type: "string", description: "圖案／印花，如 十字架、蝴蝶結、格紋" },
-  season: { type: "string", description: SEASONS.join("、") },
+  season: { type: "string", description: `可多個以「、」分隔：${SEASONS.join("、")}` },
   notes: { type: "string" },
   uncertain_fields: { type: "array", items: { type: "string" }, description: "AI 不確定的欄位名稱" },
   needs_review: { type: "boolean", description: "需要人工確認" },
@@ -84,14 +85,14 @@ const slotItem = {
 
 const suggestionFields = {
   name: { type: "string", description: "描述性名稱，例如「黑色十字架印花 JSK」" },
-  category: { type: "string", enum: [...CATEGORIES] },
-  subcategory: { type: "string", description: `Lolita 子類：${LOLITA_SUBCATEGORIES.join("、")}` },
-  style: { type: "string", enum: [...STYLES] },
-  primary_color: { type: "string", description: `主色，建議使用：${COLORS.join("、")}` },
+  category: { type: "string", description: `主分類（以分類字典為準，預設：${CATEGORIES.join("、")}）` },
+  subcategory: { type: "string", description: `子分類（以分類字典為準，例如 ${LOLITA_SUBCATEGORIES.join("、")}）` },
+  style: { type: "string", description: `風格，可多個以「、」分隔：${STYLES.join("、")}` },
+  primary_color: { type: "string", description: `主要顏色，最多 2 個以「、」分隔：${COLORS.join("、")}` },
   secondary_colors: { type: "array", items: { type: "string" } },
   pattern: { type: "string", description: "印花主題" },
   details: { type: "string", description: "裝飾細節，例如 蕾絲、蝴蝶結、珍珠扣" },
-  season: { type: "string", description: SEASONS.join("、") },
+  season: { type: "string", description: `可多個以「、」分隔：${SEASONS.join("、")}` },
   is_full_outfit: { type: "boolean", description: "相片是否整套穿搭" },
   has_multiple_items: { type: "boolean", description: "相片是否包含多件獨立衣服" },
   needs_review: { type: "boolean" },
@@ -211,6 +212,14 @@ const TOOLS = [
     scope: "read",
     annotations: { readOnlyHint: true },
     inputSchema: { type: "object", properties: { batch_id: { type: "string" } }, required: ["batch_id"] },
+  },
+  {
+    name: "list_taxonomy",
+    title: "分類字典",
+    description: "讀取使用者目前的分類字典：主分類及其子分類、屬性（例如袖長、裙長）及可選值、每個屬性適用的主分類。辨認衣物前先讀取，只使用字典內的名稱。",
+    scope: "read",
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "list_garments",
@@ -488,6 +497,18 @@ async function callTool(env: Env, actor: Actor, name: string, a: Record<string, 
         garment_id, base_version, idempotency_key, image_id, vision_checked, outcome, failure_reason,
         source: source ?? actor.label, fields,
       });
+    }
+    case "list_taxonomy": {
+      const t = await getTaxonomy(env, false);
+      return {
+        categories: t.categories.map((c) => ({ name: c.name, subcategories: c.subs.map((x) => x.name) })),
+        attributes: t.attributes.map((x) => ({
+          id: x.id, name: x.name, multi: x.multi, max_select: x.max_select,
+          only_for_categories: x.show_for?.map((id) => t.categories.find((c) => c.id === id)?.name).filter(Boolean) ?? null,
+          options: x.options.map((o) => o.name),
+        })),
+        note: "style、primary_color、secondary_colors、season 對應衣物原有欄位；其他屬性目前只可由使用者在 App 填寫。",
+      };
     }
     case "list_garments": {
       const p = new URLSearchParams();

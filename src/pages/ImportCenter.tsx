@@ -21,11 +21,11 @@ export default function ImportCenter() {
       <section className="mt-6 rounded-3xl bg-ink p-4 text-rose">
         <h2 className="font-serif text-lg font-bold">請 AI 整理待處理衣物</h2>
         <p className="mt-1 text-[13px] text-rose/80">
-          上傳完成後，在已連接 AI Wardrobe 的 Claude（或 ChatGPT）對話中貼上以下指令。AI 只會提交建議，要你在「AI 待整理」確認後才正式寫入。
+          上傳完成後，在已連接 AI Wardrobe 的 Claude（或 ChatGPT）對話中貼上以下指令。AI 只會提交建議，要你在主頁「待整理」確認後才正式寫入。
         </p>
         <CopyBlock text={AI_COMMAND} />
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[14px]">
-          <Link to="/review" className="text-rose underline decoration-amethyst underline-offset-4">前往 AI 待整理</Link>
+          <Link to="/?tab=todo#todo" className="text-rose underline decoration-amethyst underline-offset-4">前往主頁「待整理」</Link>
           <Link to="/settings" className="text-rose underline decoration-amethyst underline-offset-4">設定 AI 連接</Link>
         </div>
       </section>

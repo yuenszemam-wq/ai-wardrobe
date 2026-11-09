@@ -166,3 +166,98 @@ export function ProgressBar({ value }: { value: number }) {
 export function Spinner() {
   return <div className="py-12 text-center text-sm text-mauve">載入中…</div>;
 }
+
+/** 選擇標籤（自動換行）：單選再按一次可取消；多選可設上限 */
+export function PickChips({
+  options,
+  value,
+  onChange,
+  multi = false,
+  max,
+  extra,
+}: {
+  options: string[];
+  value: string[];
+  onChange: (v: string[]) => void;
+  multi?: boolean;
+  max?: number | null;
+  /** 衣物現有但已不在字典內的值，照樣顯示以免被誤刪 */
+  extra?: boolean;
+}) {
+  const shown = extra ? [...options, ...value.filter((v) => !options.includes(v))] : options;
+  const full = multi && max ? value.length >= max : false;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {shown.map((o) => {
+        const on = value.includes(o);
+        const legacy = !options.includes(o);
+        return (
+          <button
+            key={o}
+            type="button"
+            aria-pressed={on}
+            disabled={!on && full}
+            onClick={() => {
+              if (!multi) onChange(on ? [] : [o]);
+              else onChange(on ? value.filter((x) => x !== o) : [...value, o]);
+            }}
+            className={`rounded-full px-3 py-1.5 text-[13px] transition-colors disabled:opacity-35 ${
+              on ? "bg-ink text-rose" : "bg-white text-ink ring-1 ring-ink/10"
+            } ${legacy ? "italic" : ""}`}
+            title={legacy ? "已不在分類字典內" : undefined}
+          >
+            {o}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 每排張數切換（2｜3｜4｜5），記住選擇 */
+export function useColumns(key: string, initial = 3): [number, (n: number) => void] {
+  const [n, setN] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem(key));
+      return v >= 2 && v <= 5 ? v : initial;
+    } catch {
+      return initial;
+    }
+  });
+  return [
+    n,
+    (v: number) => {
+      setN(v);
+      try {
+        localStorage.setItem(key, String(v));
+      } catch {
+        /* 私密瀏覽等情況忽略 */
+      }
+    },
+  ];
+}
+
+export function ColumnSwitch({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  return (
+    <div className="inline-flex items-center rounded-full bg-white p-0.5 ring-1 ring-ink/10" role="group" aria-label="每排張數">
+      {[2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          aria-pressed={value === n}
+          onClick={() => onChange(n)}
+          className={`h-7 min-w-7 rounded-full px-2 text-[13px] ${value === n ? "bg-ink text-rose" : "text-mauve"}`}
+        >
+          {n}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export const GRID_COLS: Record<number, string> = {
+  2: "grid-cols-2 gap-x-3 gap-y-5",
+  3: "grid-cols-3 gap-x-2.5 gap-y-4",
+  4: "grid-cols-4 gap-x-2 gap-y-3",
+  5: "grid-cols-5 gap-x-1.5 gap-y-3",
+};

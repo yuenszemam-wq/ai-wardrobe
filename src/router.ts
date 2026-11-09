@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 
-export function navigate(to: string, replace = false) {
+export function navigate(to: string, replace = false, scroll = true) {
   if (replace) history.replaceState(null, "", to);
   else history.pushState(null, "", to);
   window.dispatchEvent(new Event("aw:navigate"));
-  window.scrollTo({ top: 0 });
+  if (scroll) window.scrollTo({ top: 0 });
 }
 
 export function usePath(): string {

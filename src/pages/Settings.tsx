@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, Garment, formatBytes, formatDate, uploadImage } from "../api";
-import { Button, Field, inputCls, PageTitle, toast } from "../components/ui";
+import { Button, Field, inputCls, Link, PageTitle, toast } from "../components/ui";
 import { makeThumbnail } from "../imageProcessing";
 import { CopyBlock } from "./ImportCenter";
 
@@ -66,6 +66,14 @@ export default function Settings({ username, onLogout }: { username: string | nu
   return (
     <div>
       <PageTitle>設定</PageTitle>
+
+      <Link to="/taxonomy" className="mb-4 flex items-center justify-between rounded-3xl bg-white px-4 py-4 ring-1 ring-ink/5">
+        <span>
+          <span className="block font-serif text-lg font-bold">分類管理</span>
+          <span className="block text-[13px] text-mauve">主分類、子分類、屬性及選項：自由增加、改名、刪除、排序</span>
+        </span>
+        <span className="text-mauve">›</span>
+      </Link>
 
       <section className="rounded-3xl bg-ink p-4 text-rose">
         <h2 className="font-serif text-lg font-bold">連接 ChatGPT／Claude</h2>

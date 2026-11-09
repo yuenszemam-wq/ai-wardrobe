@@ -89,6 +89,7 @@ export interface Garment {
   pattern: string | null;
   season: string | null;
   notes: string | null;
+  attributes?: Record<string, string | string[]>;
   status: "active" | "review" | "archived";
   is_favorite: boolean;
   ai_status?: AiStatus | null;

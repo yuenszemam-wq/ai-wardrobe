@@ -137,7 +137,7 @@ for (let i = 0; i < 9; i++) {
       name: `測試衣物 ${i + 1}`,
       category: i % 3 === 0 ? "連身裙" : i % 3 === 1 ? "頭飾" : "上衣",
       subcategory: i % 3 === 0 ? "jsk" : i % 3 === 1 ? "KC" : "Blouse",
-      style: i === 4 ? "Punk Lolita" : "Gothic Lolita",
+      style: i === 4 ? "Visual Kei" : "Gothic Lolita",
       primary_color: "黑",
       secondary_colors: ["白", "紫"],
       uncertain_fields: i === 2 ? ["brand"] : undefined,

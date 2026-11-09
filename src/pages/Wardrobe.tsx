@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CATEGORIES, COLORS, STYLES } from "../../shared/taxonomy";
 import { api, Garment, STATUS_LABEL } from "../api";
-import { Button, Chips, Empty, GarmentTile, PageTitle, Spinner, inputCls } from "../components/ui";
+import { Button, Chips, ColumnSwitch, Empty, GarmentTile, GRID_COLS, Link, PageTitle, Spinner, inputCls, useColumns } from "../components/ui";
 import { navigate, usePath } from "../router";
+import { optionNames, useTaxonomy } from "../taxonomy";
 
 export default function Wardrobe() {
   const path = usePath();
@@ -13,8 +13,12 @@ export default function Wardrobe() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const debounce = useRef<number>();
+  const tax = useTaxonomy();
+  const [cols, setCols] = useColumns("aw:wardrobe-cols", 3);
 
   const category = params.get("category") || "";
+  const subcategory = params.get("subcategory") || "";
+  const season = params.get("season") || "";
   const style = params.get("style") || "";
   const color = params.get("color") || "";
   const status = params.get("status") || "";
@@ -32,6 +36,7 @@ export default function Wardrobe() {
     const p = new URLSearchParams(params);
     if (value) p.set(key, value);
     else p.delete(key);
+    if (key === "category") p.delete("subcategory");
     const qs = p.toString();
     navigate(`/wardrobe${qs ? `?${qs}` : ""}`, true);
   }
@@ -63,7 +68,8 @@ export default function Wardrobe() {
     setLoadingMore(false);
   }
 
-  const activeFilters = [style, color, status, brand, identified, favorite ? "收藏" : ""].filter(Boolean).length;
+  const activeFilters = [style, color, season, status, brand, identified, favorite ? "收藏" : ""].filter(Boolean).length;
+  const subs = tax.categories.find((c) => c.name === category)?.subs.map((x) => x.name) ?? [];
 
   return (
     <div>
@@ -91,18 +97,27 @@ export default function Wardrobe() {
       />
 
       <div className="mt-3">
-        <Chips options={CATEGORIES} value={category as never} onChange={(v) => setParam("category", v)} />
+        <Chips options={tax.categories.map((c) => c.name)} value={category} onChange={(v) => setParam("category", v)} />
       </div>
+      {subs.length > 0 && (
+        <div className="mt-1">
+          <Chips options={subs} value={subcategory} onChange={(v) => setParam("subcategory", v)} allLabel={`全部${category}`} />
+        </div>
+      )}
 
       {showFilters && (
         <div className="mt-3 space-y-3 rounded-3xl bg-rose-soft p-4">
           <div>
             <p className="mb-1 text-[13px] text-mauve">風格</p>
-            <Chips options={STYLES} value={style as never} onChange={(v) => setParam("style", v)} />
+            <Chips options={optionNames(tax, "style")} value={style} onChange={(v) => setParam("style", v)} />
           </div>
           <div>
             <p className="mb-1 text-[13px] text-mauve">顏色</p>
-            <Chips options={COLORS} value={color as never} onChange={(v) => setParam("color", v)} />
+            <Chips options={optionNames(tax, "primary_color")} value={color} onChange={(v) => setParam("color", v)} />
+          </div>
+          <div>
+            <p className="mb-1 text-[13px] text-mauve">季節</p>
+            <Chips options={optionNames(tax, "season")} value={season} onChange={(v) => setParam("season", v)} />
           </div>
           <div>
             <p className="mb-1 text-[13px] text-mauve">狀態</p>
@@ -126,19 +141,30 @@ export default function Wardrobe() {
             <input type="checkbox" checked={favorite} onChange={(e) => setParam("favorite", e.target.checked ? "1" : "")} className="h-5 w-5 accent-amethyst" />
             只看收藏
           </label>
+          <Link to="/taxonomy" className="inline-block text-[13px] text-amethyst-deep underline underline-offset-4">
+            管理分類
+          </Link>
         </div>
       )}
 
-      <div className="mt-5">
+      <div className="mt-4 flex items-center justify-between">
+        <span className="text-[13px] text-mauve">{items ? `${items.length}${next !== null ? "+" : ""} 件` : ""}</span>
+        <div className="flex items-center gap-2 text-[13px] text-mauve">
+          <span aria-hidden>每排</span>
+          <ColumnSwitch value={cols} onChange={setCols} />
+        </div>
+      </div>
+
+      <div className="mt-3">
         {!items ? (
           <Spinner />
         ) : items.length === 0 ? (
           <Empty title="沒有符合的衣物">試試清除篩選，或到「匯入」新增衣物。</Empty>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
+            <div className={`grid ${GRID_COLS[cols]}`}>
               {items.map((g) => (
-                <GarmentTile key={g.id} g={g} />
+                <GarmentTile key={g.id} g={g} size={cols >= 4 ? "sm" : "md"} />
               ))}
             </div>
             {next !== null && (

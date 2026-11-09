@@ -321,9 +321,9 @@ check("接受全部不覆寫人工鎖定的欄位（name、style）", r.status =
 r = await call("POST", `/api/ai/garments/${gids[3]}/decide`, { body: { action: "accept_all" } });
 let g3 = await env.DB.prepare("SELECT * FROM garments WHERE id = ?").bind(gids[3]).first();
 check("接受全部：品牌只屬「高度可能」→ 不寫入 brand，記錄於 ai_note", g3.brand === null && g3.name === "粉紅草莓 OP" && /高度可能/.test(g3.ai_note) && g3.name_is_placeholder === 0, g3);
-r = await call("POST", `/api/ai/garments/${gids[0]}/decide`, { body: { action: "accept_fields", fields: ["name", "category", "subcategory", "details"], edits: { primary_color: "酒紅" } } });
+r = await call("POST", `/api/ai/garments/${gids[0]}/decide`, { body: { action: "accept_fields", fields: ["name", "category", "subcategory", "details"], edits: { primary_color: "紫" } } });
 let g0 = await env.DB.prepare("SELECT * FROM garments WHERE id = ?").bind(gids[0]).first();
-check("只接受部分欄位＋手動修改", g0.name === "黑色十字架印花 JSK" && g0.subcategory === "JSK" && g0.style === null && g0.brand === null && g0.primary_color === "酒紅" && /裝飾細節/.test(g0.notes) && JSON.parse(g0.locked_fields).includes("primary_color"), g0);
+check("只接受部分欄位＋手動修改", g0.name === "黑色十字架印花 JSK" && g0.subcategory === "JSK" && g0.style === null && g0.brand === null && g0.primary_color === "紫" && /裝飾細節/.test(g0.notes) && JSON.parse(g0.locked_fields).includes("primary_color"), g0);
 check("建議標記為部分接受", (await env.DB.prepare("SELECT status FROM ai_suggestions WHERE id = ?").bind(sFinal0).first()).status === "partially_accepted");
 
 // 批量接受
@@ -332,7 +332,7 @@ for (const i of [6, 7, 8]) {
 }
 r = await call("POST", "/api/ai/decide-bulk", { body: { action: "accept_all", items: [6, 7, 8].map((i) => ({ garment_id: gids[i] })) } });
 b = await j(r);
-check("多選批量接受", b.results.every((x) => x.ok) && (await env.DB.prepare("SELECT COUNT(*) AS n FROM garments WHERE ai_status = 'done' AND subcategory = 'KC'").first()).n === 3, b);
+check("多選批量接受", b.results.every((x) => x.ok) && (await env.DB.prepare("SELECT COUNT(*) AS n FROM garments WHERE ai_status = 'done' AND subcategory = '髮箍'").first()).n === 3, b);
 await tool(TOKEN, "submit_ai_suggestion", { garment_id: gids[9], base_version: 1, idempotency_key: "k9", vision_checked: true, name: "AI 名 9" });
 r = await call("POST", `/api/ai/garments/${gids[9]}/decide`, { body: { action: "keep_original" } });
 check("保留原資料", (await env.DB.prepare("SELECT name, ai_status FROM garments WHERE id = ?").bind(gids[9]).first()).name === "待整理衣物 010");

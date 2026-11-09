@@ -10,7 +10,8 @@
  *  注意：AI 分析本身由使用者在 ChatGPT／Claude 對話中觸發，Worker 不會自行辨認圖片。
  */
 import { CATEGORIES, LOLITA_SUBCATEGORIES, STYLES } from "../shared/taxonomy";
-import { AI_STATUSES, AiStatus, garmentToJson, normalizeGarment } from "./garments";
+import { AI_STATUSES, AiStatus, garmentToJson, normalizeGarment, updateGarment } from "./garments";
+import { currentTaxonomy } from "./taxonomy";
 import { maxUploadBytes, parseImage, storeImage, StoredImage } from "./images";
 import { Actor, Env, HttpError, audit, intVar, newId, nowIso, parseJsonArray, sha256Hex, str, strArray, toBase64Url } from "./util";
 
@@ -470,7 +471,7 @@ export function normalizeSuggestion(fields: Record<string, unknown>) {
     true,
   );
   const sub = values.subcategory as string | null | undefined;
-  if (sub && !(LOLITA_SUBCATEGORIES as readonly string[]).includes(sub)) warnings.push(`子類別「${sub}」不在 Lolita 子類清單內，已照錄，請人工確認`);
+  if (sub && !currentTaxonomy().categories.some((c) => c.subs.some((x) => x.name === sub))) warnings.push(`子類別「${sub}」不在分類字典內，已照錄，請人工確認`);
 
   let conf = (str(fields.brand_confidence, 20) ?? "unconfirmed") as BrandConfidence;
   if (!BRAND_CONFIDENCE.includes(conf)) {
@@ -838,6 +839,14 @@ export async function decide(env: Env, actor: Actor, garmentId: string, input: D
     sets.push("ai_note = ?");
     binds.push(noteParts.join("；").slice(0, 1000));
   }
+  // 品牌已確認並寫入：同步「品牌確認」屬性
+  if (patch.brand && chosen.includes("brand") && norm.brand_confidence === "confirmed") {
+    const opt = currentTaxonomy().attributes.find((a) => a.id === "brand_confidence")?.options[0]?.name;
+    if (opt) {
+      sets.push("attributes = json_set(COALESCE(attributes, '{}'), '$.brand_confidence', ?)");
+      binds.push(opt);
+    }
+  }
   const uncertain = action === "mark_unconfirmed" ? ["brand"] : [];
   sets.push("uncertain_fields = ?");
   binds.push(uncertain.length ? JSON.stringify(uncertain) : null);
@@ -865,6 +874,41 @@ export async function decide(env: Env, actor: Actor, garmentId: string, input: D
   await audit(env, actor, "ai.accept", garmentId, { action, applied, suggestion_id: s?.id ?? null });
   const after = await env.DB.prepare("SELECT id, name, category, subcategory, style, brand, ai_status, status, version FROM garments WHERE id = ?").bind(garmentId).first();
   return { garment_id: garmentId, ai_status: "done", applied, skipped_locked: action === "accept_all" ? [...locked] : [], garment: after };
+}
+
+/**
+ * 批量入庫：選取的衣物一次轉為正式衣物（status = active、ai_status = done）。
+ * - 有 AI 建議（待人工確認）的，預設接受 AI 建議（未確認品牌不會寫入）；
+ * - 其他的保留現有資料直接入庫；
+ * - set 可同時為全部衣物指定主分類／子分類等（會覆蓋 AI 建議並鎖定，AI 之後不會改動）。
+ */
+export async function bulkIntake(env: Env, actor: Actor, ids: string[], set: Record<string, unknown>, useAi: boolean) {
+  const list = [...new Set((ids || []).map(String))].slice(0, 200);
+  if (!list.length) throw new HttpError(400, "missing_ids", "請先選取衣物");
+  const allowed = ["category", "subcategory", "style", "season", "primary_color"];
+  const edits = Object.fromEntries(Object.entries(set || {}).filter(([k, v]) => allowed.includes(k) && v !== null && v !== undefined && String(v).trim() !== ""));
+  const results: { garment_id: string; ok: boolean; mode?: string; error?: string }[] = [];
+  for (const id of list) {
+    try {
+      const g = await env.DB.prepare("SELECT id, ai_status FROM garments WHERE id = ?").bind(id).first<{ id: string; ai_status: string | null }>();
+      if (!g) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
+      const s = useAi && g.ai_status === "pending_review"
+        ? await env.DB.prepare("SELECT id FROM ai_suggestions WHERE garment_id = ? AND status = 'valid' ORDER BY id DESC LIMIT 1").bind(id).first<{ id: number }>()
+        : null;
+      if (s) {
+        await decide(env, actor, id, { action: "accept_all", suggestion_id: s.id, edits: Object.keys(edits).length ? edits : undefined });
+        results.push({ garment_id: id, ok: true, mode: "ai" });
+      } else {
+        await updateGarment(env, actor, id, { ...edits, confirm: true });
+        await env.DB.prepare("UPDATE ai_suggestions SET status = 'rejected', decided_at = ? WHERE garment_id = ? AND status = 'valid'").bind(nowIso(), id).run();
+        results.push({ garment_id: id, ok: true, mode: "as_is" });
+      }
+    } catch (e) {
+      results.push({ garment_id: id, ok: false, error: e instanceof HttpError ? e.message : "失敗" });
+    }
+  }
+  await audit(env, actor, "garment.bulk_intake", undefined, { count: list.length, ok: results.filter((r) => r.ok).length, set: Object.keys(edits) });
+  return { results };
 }
 
 export async function setAiStatus(env: Env, actor: Actor, ids: string[], status: string) {
