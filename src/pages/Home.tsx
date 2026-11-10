@@ -64,7 +64,7 @@ export default function Home() {
         </button>
         <div className="relative px-4 pb-1" style={{ paddingTop: bg ? `max(1.75rem, calc(${bg.ratio}cqw - 11.5rem))` : "1.75rem" }}>
           <div className="flex items-end gap-4">
-            <div className="arch-dark bow grid h-36 w-28 shrink-0 place-items-center">
+            <div className="arch-dark grid h-36 w-28 shrink-0 place-items-center">
               <div className="text-center">
                 <div className="font-serif text-[46px] font-bold leading-none text-gold-soft">{s.total}</div>
                 <div className="mt-1.5 text-[12px] text-mauve">件</div>
@@ -86,7 +86,7 @@ export default function Home() {
       {editBg && <HomeBgEditor current={bg} onClose={() => setEditBg(false)} />}
 
       {/* 衣櫃總價 */}
-      <Link to="/analysis" className="frame pat-argyle mt-5 flex items-center justify-between gap-3 px-4 py-3.5">
+      <Link to="/analysis" className="frame mt-5 flex items-center justify-between gap-3 px-4 py-3.5">
         <div className="min-w-0">
           <div className="text-[12px] tracking-[0.12em] text-mauve">衣櫃總價</div>
           <div className="mt-0.5 font-serif text-[30px] font-bold leading-none text-gold-soft">
@@ -153,7 +153,7 @@ function AnalysisSummary({ an }: { an: AnalysisData }) {
   const colors = an.by_color.slice(0, 7);
   const styles = an.by_style.filter((x) => x.name !== "未填風格").slice(0, 3);
   return (
-    <section className="frame bow mt-9 px-4 pb-4 pt-6">
+    <section className="frame mt-9 px-4 pb-4 pt-6">
       <div className="mb-3 flex items-baseline justify-between">
         <h2 className="flex items-center gap-1.5 font-serif text-lg font-bold tracking-[0.08em] text-gold-soft">
           <IconChart className="text-[17px]" />

@@ -128,7 +128,7 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
   }
 
   return (
-    <section id="todo" className="paper bow mt-9 scroll-mt-20 px-4 pb-4 pt-7">
+    <section id="todo" className="paper mt-9 scroll-mt-20 px-4 pb-4 pt-7">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="font-serif text-xl font-bold tracking-[0.08em]">待整理</h2>
         <select className="rounded-full bg-white px-3 py-1.5 text-[13px] ring-1 ring-ink/10" value={sort} onChange={(e) => setParam("sort", e.target.value === "newest" ? "" : e.target.value)} aria-label="排序">

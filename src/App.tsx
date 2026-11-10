@@ -71,7 +71,7 @@ export default function App() {
       <header className="safe-top lace-b sticky top-0 z-30 bg-ink">
         <div className="pat-stripe flex h-12 items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2 font-serif text-[18px] tracking-[0.16em] text-gold-soft">
-            <span className="bow-icon text-[19px]" aria-hidden />
+            <IconSparkle className="text-[10px] text-gold" />
             電子衣櫃
             <IconSparkle className="text-[10px] text-gold" />
           </Link>

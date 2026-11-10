@@ -173,7 +173,7 @@ export default function UploadCenter() {
   const batchProgress = total ? items.reduce((s, i) => s + (i.state === "done" || i.state === "duplicate" ? 1 : i.progress), 0) / total : 0;
 
   return (
-    <section className="paper bow px-4 pb-4 pt-7">
+    <section className="paper px-4 pb-4 pt-7">
       <label
         onDragOver={(e) => {
           e.preventDefault();
@@ -185,7 +185,6 @@ export default function UploadCenter() {
           dragging ? "border-amethyst bg-rose" : "border-amethyst/50 bg-white"
         } ${running ? "pointer-events-none opacity-60" : ""}`}
       >
-        <span className="bow-icon text-[30px]" aria-hidden />
         <span className="mt-2 font-serif text-[18px] font-bold text-amethyst-deep">{total ? "再選相片" : "選擇相片"}</span>
         <span className="mt-1 text-[12px] text-mauve">選好即自動上傳｜最多 {MAX_FILES} 張｜HEIC、JPG、PNG、WebP</span>
         <input type="file" accept={ACCEPT} multiple className="sr-only" onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />

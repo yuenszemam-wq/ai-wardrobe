@@ -77,7 +77,6 @@ export default function Wardrobe() {
   return (
     <div>
       <h1 className="flex items-center gap-2 pb-2 pt-5 font-serif text-[22px] font-bold tracking-[0.08em] text-gold-soft">
-        <span className="bow-icon text-[18px]" aria-hidden />
         我的衣櫃
       </h1>
 

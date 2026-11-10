@@ -66,7 +66,7 @@ export function GarmentTile({ g, size = "md", selected, onSelect, showPrice }: {
   const badge = g.ai_status && g.ai_status !== "done" ? AI_STATUS_LABEL[g.ai_status] : g.status === "review" ? "待確認" : "";
   const inner = (
     <div className="relative">
-      <div className={`arch arch-base bow-sm relative aspect-[3/4] ${selected ? "outline-2 outline-offset-2 outline-gold-soft" : ""}`}>
+      <div className={`arch arch-base relative aspect-[3/4] ${selected ? "outline-2 outline-offset-2 outline-gold-soft" : ""}`}>
         <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
           {src ? (
             <img src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain px-[9%] pb-[9%] pt-[20%]" />
@@ -221,7 +221,6 @@ export function PageTitle({ children, action }: { children: ReactNode; action?: 
   return (
     <div className="flex items-end justify-between gap-3 pb-3 pt-6">
       <h1 className="flex items-center gap-2 font-serif text-[24px] font-bold leading-tight tracking-[0.08em] text-gold-soft">
-        <span className="bow-icon text-[20px]" aria-hidden />
         {children}
       </h1>
       {action}

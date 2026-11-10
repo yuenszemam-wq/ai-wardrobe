@@ -399,7 +399,6 @@ export default function OutfitStudio({ id }: { id?: string }) {
         </Link>
       </div>
       <h1 className="mt-3 flex items-center justify-center gap-2 text-center font-serif text-[22px] font-bold tracking-[0.14em] text-gold-soft">
-        <span className="bow-icon text-[18px]" aria-hidden />
         穿搭工作室
       </h1>
 
@@ -550,7 +549,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
       )}
 
       {/* ───── 穿搭組合 ───── */}
-      <section className="frame bow mt-8 px-3 pb-3 pt-5" aria-label="穿搭組合">
+      <section className="frame mt-8 px-3 pb-3 pt-5" aria-label="穿搭組合">
         <h2 className="orn mb-2.5 text-center font-serif text-[15px] tracking-[0.14em] text-gold-soft">穿搭組合</h2>
         <div className="scrollbar-none flex gap-2.5 overflow-x-auto pb-1">
           <Link to="/outfits/new" className={`chip grid aspect-[3/4] w-20 shrink-0 place-items-center rounded-[14px] text-center text-[12px] ${!id ? "outline-2 outline-gold-soft" : ""}`}>

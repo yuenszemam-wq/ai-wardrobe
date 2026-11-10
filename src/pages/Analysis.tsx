@@ -69,7 +69,6 @@ export default function Analysis() {
           返回
         </button>
         <h1 className="flex items-center gap-2 font-serif text-[22px] font-bold tracking-[0.14em] text-gold-soft">
-          <span className="bow-icon text-[18px]" aria-hidden />
           衣櫥分析
         </h1>
         <span className="w-16" />
@@ -82,7 +81,7 @@ export default function Analysis() {
       ) : (
         <>
           {/* ── 總覽 ── */}
-          <section className="frame pat-argyle bow mt-7 px-4 pb-4 pt-7">
+          <section className="frame mt-7 px-4 pb-4 pt-7">
             <div className="flex items-center gap-4">
               <Donut segs={cats} size={148} thickness={16}>
                 <div>
