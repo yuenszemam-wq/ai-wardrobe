@@ -1,13 +1,30 @@
-import { ButtonHTMLAttributes, ReactNode, useEffect, useState } from "react";
-import { AI_STATUS_LABEL, displayName, Garment, imageUrl } from "../api";
+import { ButtonHTMLAttributes, CSSProperties, ReactNode, useEffect, useState } from "react";
+import { AI_STATUS_LABEL, api, AppSettings, displayName, Garment, imageUrl } from "../api";
 import { navigate } from "../router";
-import { IconHeart } from "./icons";
+import { IconClose, IconHeart, IconSparkle } from "./icons";
 
-export function Link({ to, className, children, onClick }: { to: string; className?: string; children: ReactNode; onClick?: () => void }) {
+export function Link({
+  to,
+  className,
+  children,
+  onClick,
+  style,
+  ...aria
+}: {
+  to: string;
+  className?: string;
+  children?: ReactNode;
+  onClick?: () => void;
+  style?: CSSProperties;
+  "aria-label"?: string;
+  "aria-current"?: "page" | undefined;
+}) {
   return (
     <a
       href={to}
       className={className}
+      style={style}
+      {...aria}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey) return;
         e.preventDefault();
@@ -43,42 +60,143 @@ export function Button({
   );
 }
 
-/** 衣物卡：奶油色卡片，頂部掛小蝴蝶結；縮圖 lazy loading，沒有縮圖時才載入高清主圖 */
-export function GarmentTile({ g, size = "md", selected, onSelect }: { g: Garment; size?: "sm" | "md"; selected?: boolean; onSelect?: () => void }) {
+/** 衣物卡：圓拱形窗，頂部掛小蝴蝶結；縮圖 lazy loading，沒有縮圖時才載入高清主圖 */
+export function GarmentTile({ g, size = "md", selected, onSelect, showPrice }: { g: Garment; size?: "sm" | "md" | "xs"; selected?: boolean; onSelect?: () => void; showPrice?: boolean }) {
   const src = imageUrl(g.thumb_image_id || g.primary_image_id);
   const badge = g.ai_status && g.ai_status !== "done" ? AI_STATUS_LABEL[g.ai_status] : g.status === "review" ? "待確認" : "";
   const inner = (
-    <div className={`paper bow-sm p-1 ${selected ? "outline-2 outline-offset-2 outline-gold-soft" : ""}`} style={{ borderRadius: 14 }}>
-      <div className="relative aspect-[3/4] overflow-hidden rounded-[10px]">
-        {src ? (
-          <img src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-[7%] pt-[11%]" />
-        ) : (
-          <div className="absolute inset-0 grid place-items-center text-sm text-mauve">未有圖片</div>
-        )}
-        {badge && <span className="chip-on absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-full px-2 py-0.5 text-[10px]">{badge}</span>}
-        {g.is_favorite && (
-          <span className="absolute right-1 top-1.5 text-[17px] text-amethyst" aria-label="已收藏">
-            <IconHeart filled />
-          </span>
-        )}
-        {selected && <span className="btn-jewel absolute left-1 top-1.5 grid h-6 w-6 place-items-center rounded-full text-xs">✓</span>}
+    <div className="relative">
+      <div className={`arch arch-base relative aspect-[3/4] ${selected ? "outline-2 outline-offset-2 outline-gold-soft" : ""}`}>
+        <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
+          {src ? (
+            <img src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain px-[9%] pb-[9%] pt-[20%]" />
+          ) : (
+            <div className="absolute inset-0 grid place-items-center pt-[14%] text-[12px] text-mauve">未有圖片</div>
+          )}
+        </div>
+        {badge && size !== "xs" && <span className="chip-on absolute bottom-2.5 left-1/2 max-w-[86%] -translate-x-1/2 truncate rounded-full px-2 py-0.5 text-[10px]">{badge}</span>}
       </div>
-      <div className={`truncate px-1 pt-1 ${size === "sm" ? "pb-0.5 text-[11px]" : "text-[13px]"} font-medium`}>{displayName(g)}</div>
-      {size === "md" && (
-        <div className="truncate px-1 pb-1 text-[11px] text-mauve">{[g.subcategory || g.category, g.style].filter(Boolean).join("｜") || "未分類"}</div>
+      {g.is_favorite && (
+        <span className="absolute right-0 top-0 text-[15px] text-[#f2a7c3] drop-shadow" aria-label="已收藏">
+          <IconHeart filled />
+        </span>
+      )}
+      {selected && <span className="btn-jewel absolute left-0 top-0 grid h-6 w-6 place-items-center rounded-full text-xs">✓</span>}
+      {size !== "xs" && (
+        <>
+          <div className={`truncate px-0.5 pt-1.5 text-center ${size === "sm" ? "text-[11px]" : "text-[13px]"} font-medium`}>{displayName(g)}</div>
+          {size === "md" && (
+            <div className="truncate px-0.5 text-center text-[11px] text-mauve">
+              {showPrice && g.price != null ? money(g.price) : [g.subcategory || g.category, g.style].filter(Boolean).join("｜") || "未分類"}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
   if (onSelect)
     return (
-      <button type="button" onClick={onSelect} className="block w-full pt-2 text-left" aria-pressed={selected}>
+      <button type="button" onClick={onSelect} className="block w-full pt-2.5 text-left" aria-pressed={selected}>
         {inner}
       </button>
     );
   return (
-    <Link to={`/g/${g.id}`} className="block pt-2">
+    <Link to={`/g/${g.id}`} className="block pt-2.5">
       {inner}
     </Link>
+  );
+}
+
+/** 港幣金額：$1,280（有小數才顯示小數） */
+export function money(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  return `$${n.toLocaleString("en-HK", { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`;
+}
+
+/** 複製文字；必須在點按事件內同步呼叫（iPhone Safari 不容許等待網絡後才寫入剪貼簿） */
+export function copyText(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
+  return Promise.resolve(legacyCopy(text));
+}
+function legacyCopy(text: string): boolean {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px";
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  ta.remove();
+  return ok;
+}
+
+/** 使用者設定（AI 指令、主頁背景）。模組內快取，進入頁面時預先載入，按鈕按下時可即時複製 */
+let settingsCache: AppSettings | null = null;
+const settingsListeners = new Set<(s: AppSettings) => void>();
+export function setSettingsCache(s: AppSettings) {
+  settingsCache = s;
+  settingsListeners.forEach((fn) => fn(s));
+}
+export function useSettings(): AppSettings | null {
+  const [s, setS] = useState<AppSettings | null>(settingsCache);
+  useEffect(() => {
+    settingsListeners.add(setS);
+    if (!settingsCache) api<AppSettings>("/api/settings").then(setSettingsCache).catch(() => undefined);
+    else setS(settingsCache);
+    return () => {
+      settingsListeners.delete(setS);
+    };
+  }, []);
+  return s;
+}
+
+/** 「交給 AI 填寫」：複製指令（可在設定頁修改），貼到已連接電子衣櫃的 Claude／ChatGPT 對話 */
+export function AiHandoffButton({ count, className = "", compact }: { count?: number; className?: string; compact?: boolean }) {
+  const settings = useSettings();
+  return (
+    <button
+      type="button"
+      disabled={!settings}
+      onClick={async () => {
+        if (!settings) return;
+        const ok = await copyText(settings.ai_command);
+        toast(ok ? "已複製指令，貼到 Claude／ChatGPT 對話即可" : "未能自動複製，請到「設定 → AI 指令」長按複製", ok ? "ok" : "err");
+      }}
+      className={`btn-jewel inline-flex items-center justify-center gap-1.5 rounded-full font-medium disabled:opacity-50 ${compact ? "min-h-9 px-3.5 text-[13px]" : "min-h-11 px-5 text-[15px]"} ${className}`}
+    >
+      <IconSparkle className="text-[0.9em]" />
+      交給 AI 填寫{count ? `（${count}）` : ""}
+    </button>
+  );
+}
+
+/** 底部彈出面板 */
+export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center" role="dialog" aria-modal aria-label={title} onClick={onClose}>
+      <div className="frame pat-dots max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-b-none p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:rounded-b-[18px]" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="font-serif text-lg font-bold tracking-[0.08em] text-gold-soft">{title}</h2>
+          <button type="button" aria-label="關閉" onClick={onClose} className="chip grid h-8 w-8 place-items-center rounded-full text-[15px]">
+            <IconClose />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -102,7 +220,9 @@ export function Chips<T extends string>({ options, value, onChange, allLabel = "
 export function PageTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex items-end justify-between gap-3 pb-3 pt-6">
-      <h1 className="orn orn-l font-serif text-[26px] font-bold leading-tight tracking-[0.08em] text-gold-soft">{children}</h1>
+      <h1 className="flex items-center gap-2 font-serif text-[24px] font-bold leading-tight tracking-[0.08em] text-gold-soft">
+        {children}
+      </h1>
       {action}
     </div>
   );
@@ -254,8 +374,8 @@ export function ColumnSwitch({ value, onChange }: { value: number; onChange: (n:
 }
 
 export const GRID_COLS: Record<number, string> = {
-  2: "grid-cols-2 gap-x-3 gap-y-3",
-  3: "grid-cols-3 gap-x-2.5 gap-y-2.5",
-  4: "grid-cols-4 gap-x-2 gap-y-2",
-  5: "grid-cols-5 gap-x-1.5 gap-y-1.5",
+  2: "grid-cols-2 gap-x-4 gap-y-3",
+  3: "grid-cols-3 gap-x-3 gap-y-2.5",
+  4: "grid-cols-4 gap-x-2.5 gap-y-2",
+  5: "grid-cols-5 gap-x-2 gap-y-1.5",
 };

@@ -4,6 +4,7 @@ import { IconCrown, IconDress, IconGear, IconHome, IconPlus, IconSparkle } from 
 import { Link, Spinner, Toast } from "./components/ui";
 import { match, navigate, usePath } from "./router";
 import GarmentDetail from "./pages/GarmentDetail";
+import Analysis from "./pages/Analysis";
 import Home from "./pages/Home";
 import ImportCenter from "./pages/ImportCenter";
 import BatchDetail from "./pages/BatchDetail";
@@ -49,6 +50,7 @@ export default function App() {
   let p: Record<string, string> | null;
   if (match("/", path)) page = <Home />;
   else if (match("/wardrobe", path)) page = <Wardrobe />;
+  else if (match("/analysis", path)) page = <Analysis />;
   else if ((p = match("/g/:id", path))) page = <GarmentDetail id={p.id} />;
   else if (match("/import", path)) page = <ImportCenter />;
   else if (match("/review", path)) {
@@ -67,11 +69,11 @@ export default function App() {
   return (
     <div className="mx-auto min-h-screen max-w-5xl">
       <header className="safe-top lace-b sticky top-0 z-30 bg-ink">
-        <div className="flex h-12 items-center justify-between px-4">
+        <div className="pat-stripe flex h-12 items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2 font-serif text-[18px] tracking-[0.16em] text-gold-soft">
-            <IconSparkle className="text-[11px] text-gold" />
+            <IconSparkle className="text-[10px] text-gold" />
             電子衣櫃
-            <IconSparkle className="text-[11px] text-gold" />
+            <IconSparkle className="text-[10px] text-gold" />
           </Link>
           <Link to="/import" className="btn-dark flex items-center gap-1 rounded-full px-3.5 py-1 text-[13px]">
             <IconPlus className="text-[13px]" />
@@ -87,34 +89,32 @@ export default function App() {
 }
 
 const TABS = [
-  { to: "/", label: "首頁", Icon: IconHome, test: (p: string) => p === "/" },
+  { to: "/", label: "首頁", Icon: IconHome, test: (p: string) => p === "/" || p.startsWith("/analysis") },
   { to: "/wardrobe", label: "衣櫃", Icon: IconCrown, test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
   { to: "/import", label: "上傳", Icon: IconPlus, test: (p: string) => p.startsWith("/import") },
   { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") },
   { to: "/settings", label: "設定", Icon: IconGear, test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
 ];
 
+/** 底部選單：選中的項目在原位亮起（不再向上跳起） */
 function TabBar({ path }: { path: string }) {
   const clean = path.split("?")[0];
   return (
-    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-gold/50 bg-ink" aria-label="主選單">
-      <div className="mx-auto grid max-w-5xl grid-cols-5">
-        {TABS.map((t) => {
-          const active = t.test(clean);
-          const upload = t.to === "/import";
-          return (
-            <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-0.5 pb-0.5 pt-1.5 text-[11px] ${active ? "text-gold-soft" : "text-mauve"}`}>
-              <span
-                className={`grid h-9 w-9 place-items-center rounded-full text-[21px] ${
-                  active ? "btn-jewel -mt-3.5" : upload ? "border border-gold/60 text-gold-soft" : ""
-                }`}
-              >
-                <t.Icon />
-              </span>
-              <span>{t.label}</span>
-            </Link>
-          );
-        })}
+    <nav className="safe-bottom lace-t fixed inset-x-0 bottom-0 z-30 bg-ink" aria-label="主選單">
+      <div className="pat-stripe">
+        <div className="mx-auto grid max-w-5xl grid-cols-5">
+          {TABS.map((t) => {
+            const active = t.test(clean);
+            return (
+              <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-0.5 pb-0.5 pt-1.5 text-[11px] ${active ? "text-gold-soft" : "text-mauve"}`}>
+                <span className={`grid h-9 w-9 place-items-center rounded-full text-[21px] ${active ? "btn-jewel" : t.to === "/import" ? "border border-gold/60 text-gold-soft" : "border border-transparent"}`} aria-hidden>
+                  <t.Icon />
+                </span>
+                <span aria-current={active ? "page" : undefined}>{t.label}</span>
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </nav>
   );

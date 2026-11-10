@@ -473,7 +473,7 @@ const SUGGESTION_KEYS = new Set([
   "name", "category", "subcategory", "style", "primary_color", "secondary_colors", "pattern", "season", "details",
   "is_full_outfit", "has_multiple_items", "needs_review", "uncertain_fields", "ai_note",
   "brand", "brand_confidence", "official_name", "series_name", "release_year", "source_urls", "source_type", "brand_note",
-  "brand_evidence_from_generated_image",
+  "brand_evidence_from_generated_image", "same_garment_as",
 ]);
 
 function boolOrNull(v: unknown): boolean | null {
@@ -552,8 +552,11 @@ export function normalizeSuggestion(fields: Record<string, unknown>) {
     source_type: str(fields.source_type, 60),
     brand_note: str(fields.brand_note, 1000),
     brand_evidence_from_generated_image: fromGenerated,
+    // AI 判斷這張相與另一件待整理衣物是同一件衣服（例如透明圖與原相）；要使用者在 App 確認才會合併
+    same_garment_as: /^gar_[a-z2-7]+$/.test(String(fields.same_garment_as ?? "")) ? String(fields.same_garment_as) : (null as string | null),
   };
-  const anyField = ACCEPTABLE_FIELDS.some((f) => normalized[f] !== null && normalized[f] !== undefined) || brandCandidate;
+  if (fields.same_garment_as && !normalized.same_garment_as) warnings.push("same_garment_as 不是有效的 garment_id，已忽略");
+  const anyField = ACCEPTABLE_FIELDS.some((f) => normalized[f] !== null && normalized[f] !== undefined) || brandCandidate || normalized.same_garment_as;
   return { normalized, warnings, anyField: Boolean(anyField) };
 }
 
@@ -595,6 +598,13 @@ async function validate(env: Env, garment: Record<string, unknown> | null, input
     if (!own) return { ok: false, code: "bad_image", error: "image_id 不屬於這件衣物", warnings: [] };
   } else warnings.push("沒有提供 image_id，未能記錄 AI 實際查看了哪張圖");
   const n = normalizeSuggestion(fieldsOf(input));
+  if (n.normalized.same_garment_as) {
+    const other = n.normalized.same_garment_as === garment.id ? null : await env.DB.prepare("SELECT id FROM garments WHERE id = ? AND status != 'archived'").bind(n.normalized.same_garment_as).first();
+    if (!other) {
+      n.normalized.same_garment_as = null;
+      n.warnings.push("same_garment_as 指向的衣物不存在（或是同一件），已忽略");
+    }
+  }
   if (!n.anyField) return { ok: false, code: "empty", error: "沒有任何可用欄位；不清楚時請用 outcome=failed", warnings: n.warnings };
   return { ok: true, normalized: n.normalized, warnings: [...warnings, ...n.warnings] };
 }
@@ -751,10 +761,29 @@ export async function reviewList(env: Env, params: URLSearchParams) {
   const { results: counts } = await env.DB.prepare(
     "SELECT ai_status, COUNT(*) AS n FROM garments WHERE status != 'archived' AND ai_status IS NOT NULL GROUP BY ai_status",
   ).all<{ ai_status: string; n: number }>();
+  // AI 建議合併的對象（同一件衣服的另一張相）
+  const parsed = new Map<string, ReturnType<typeof suggestionJson>>();
+  for (const [gid, r] of sugg) parsed.set(gid, suggestionJson(r));
+  const wantIds = [...new Set([...parsed.values()].map((p) => (p.status === "valid" ? (p.normalized?.same_garment_as as string | null) : null)).filter((x): x is string => Boolean(x)))];
+  const targets = new Map<string, Record<string, unknown>>();
+  for (let i = 0; i < wantIds.length; i += 50) {
+    const chunk = wantIds.slice(i, i + 50);
+    const { results: t } = await env.DB.prepare(
+      `SELECT g.id, g.name, g.display_no, g.name_is_placeholder,
+         (SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail' AND t.variant IS NULL ORDER BY t.created_at DESC LIMIT 1) AS thumb_image_id,
+         (SELECT p.id FROM garment_images p WHERE p.garment_id = g.id AND p.is_primary = 1 LIMIT 1) AS primary_image_id,
+         EXISTS (SELECT 1 FROM garment_images x WHERE x.garment_id = g.id AND x.image_type = 'processed') AS has_processed
+       FROM garments g WHERE g.id IN (${chunk.map(() => "?").join(",")})`,
+    )
+      .bind(...chunk)
+      .all<Record<string, unknown>>();
+    for (const r of t) targets.set(String(r.id), { ...r, has_processed: Number(r.has_processed) === 1 });
+  }
   return {
     items: results.map((r) => {
-      const s = sugg.get(String(r.id));
-      return { ...garmentToJson(r), has_processed: Number(r.has_processed) === 1, suggestion: s ? suggestionJson(s) : null };
+      const s = parsed.get(String(r.id));
+      const same = s?.status === "valid" ? (s.normalized?.same_garment_as as string | null) : null;
+      return { ...garmentToJson(r), has_processed: Number(r.has_processed) === 1, suggestion: s ?? null, merge_target: (same && targets.get(same)) || null };
     }),
     counts: Object.fromEntries(AI_STATUSES.map((st) => [st, counts.find((c) => c.ai_status === st)?.n ?? 0])),
     labels: AI_STATUS_LABEL,

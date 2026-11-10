@@ -46,7 +46,7 @@ export default function Outfits() {
       ) : (
         <div className="grid grid-cols-2 gap-x-3 gap-y-6 pt-3 sm:grid-cols-3">
           {list.map((o) => (
-            <Link key={o.id} to={`/outfits/${o.id}`} className="paper bow block p-2">
+            <Link key={o.id} to={`/outfits/${o.id}`} className="paper block p-2">
               <OutfitPreview o={o} />
               <div className="mt-2 flex items-center justify-between px-1">
                 <span className="truncate font-serif text-[15px] font-bold">{o.name}</span>

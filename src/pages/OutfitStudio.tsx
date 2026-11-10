@@ -1,8 +1,8 @@
 import { PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, displayName, Garment, imageUrl } from "../api";
-import { IconChevronLeft, IconCopy, IconGrid, IconImage, IconLayers, IconPlus, IconRedo, IconSave, IconSearch, IconTrash, IconUndo } from "../components/icons";
+import { IconChevronLeft, IconChevronRight, IconCopy, IconDress, IconGrid, IconImage, IconLayers, IconPlus, IconRedo, IconSave, IconSearch, IconTrash, IconUndo } from "../components/icons";
 import { DragHandle, SortableList } from "../components/Sortable";
-import { Chips, ColumnSwitch, Field, GarmentTile, GRID_COLS, inputCls, Link, Spinner, toast, useColumns } from "../components/ui";
+import { Chips, Field, GarmentTile, inputCls, Link, Spinner, toast } from "../components/ui";
 import { navigate } from "../router";
 import { useTaxonomy } from "../taxonomy";
 import { OutfitPreview, OutfitSummary } from "./Outfits";
@@ -66,7 +66,9 @@ export default function OutfitStudio({ id }: { id?: string }) {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(!id);
-  const [cols, setCols] = useColumns("aw:outfit-pick-cols", 3);
+  // 兩側面板（圖層／揀選單品）可收起，記住上次的狀態
+  const [openLeft, setOpenLeft] = usePanel("aw:studio-left", true);
+  const [openRight, setOpenRight] = usePanel("aw:studio-right", true);
   const [group, setGroup] = useState<"clothes" | "acc">("clothes");
   const [q, setQ] = useState("");
   const [showGrid, setShowGrid] = useState(false);
@@ -396,12 +398,63 @@ export default function OutfitStudio({ id }: { id?: string }) {
           <IconPlus className="text-[13px]" />
         </Link>
       </div>
-      <h1 className="orn mt-3 text-center font-serif text-[24px] font-bold tracking-[0.14em] text-gold-soft">穿搭工作室</h1>
+      <h1 className="mt-3 flex items-center justify-center gap-2 text-center font-serif text-[22px] font-bold tracking-[0.14em] text-gold-soft">
+        穿搭工作室
+      </h1>
 
-      <div className="mt-4 flex flex-col gap-5 lg:grid lg:grid-cols-[210px_minmax(0,1fr)_290px] lg:items-start lg:gap-4">
+      {/* ───── 揀選單品的篩選（衣物／飾物、搜尋、分類） ───── */}
+      <div className="mt-3 flex items-center gap-2">
+        <div className="chip inline-flex shrink-0 rounded-full p-0.5" role="group" aria-label="類型">
+          {(["clothes", "acc"] as const).map((k) => (
+            <button key={k} type="button" aria-pressed={group === k} onClick={() => { setGroup(k); setCat(""); setOpenRight(true); }} className={`h-8 rounded-full px-3.5 font-serif text-[14px] tracking-[0.1em] ${group === k ? "chip-on" : "border border-transparent text-mauve"}`}>
+              {k === "clothes" ? "衣物" : "飾物"}
+            </button>
+          ))}
+        </div>
+        <div className="relative min-w-0 flex-1">
+          <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[#8a6d80]" />
+          <input type="search" className="h-9 w-full rounded-full bg-white pl-9 pr-3 text-ink ring-1 ring-gold placeholder:text-[14px] placeholder:text-mauve/80 focus:outline-none focus:ring-2 focus:ring-amethyst" placeholder="搜尋單品…" value={q} onChange={(e) => { setQ(e.target.value); setOpenRight(true); }} aria-label="搜尋單品" />
+        </div>
+      </div>
+      <div className="mt-1.5">
+        <Chips options={groupCats} value={cat} onChange={(v) => { setCat(v); setOpenRight(true); }} />
+      </div>
+
+      {/* ───── 左：圖層管理｜中：畫布｜右：揀選單品。兩側可收起，畫布會自動變大 ───── */}
+      <div className="-mx-2 mt-2 flex items-stretch gap-1.5 lg:mx-0 lg:gap-4">
+        <SidePanel side="left" open={openLeft} onToggle={() => setOpenLeft(!openLeft)} label="圖層" count={picked.length} icon={<IconLayers />} widthCls="w-[84px] lg:w-[210px]">
+          {picked.length === 0 ? (
+            <p className="px-1 py-3 text-center text-[11px] leading-relaxed text-mauve">加入單品後在這裡調整上下次序</p>
+          ) : (
+            <SortableList
+              items={topFirst}
+              onReorder={reorderTopFirst}
+              render={(p, handle) => (
+                <div className={`flex items-center gap-0.5 rounded-xl p-0.5 lg:gap-1 lg:py-1 lg:pl-1.5 ${p.garment_id === selected ? "chip-on" : "chip"}`}>
+                  <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setSelected(p.garment_id)} aria-label={`選取 ${p.name}`}>
+                    <span className="relative block h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-rose-soft lg:h-10 lg:w-8">
+                      {p.image_id && <img src={imageUrl(p.image_id)} alt="" className="h-full w-full object-contain" loading="lazy" />}
+                    </span>
+                    <span className="hidden min-w-0 flex-1 text-[13px] lg:block">
+                      <span className="block truncate">{p.category || "單品"}</span>
+                      <span className="block truncate text-[11px] opacity-70">{p.name}</span>
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 flex-col items-center lg:flex-row">
+                    <button type="button" aria-label={`移除 ${p.name}`} onClick={() => { update((c) => c.filter((x) => x.garment_id !== p.garment_id)); if (selected === p.garment_id) setSelected(null); }} className="grid h-6 w-6 place-items-center text-[15px] opacity-80">
+                      ×
+                    </button>
+                    <DragHandle {...handle} />
+                  </div>
+                </div>
+              )}
+            />
+          )}
+        </SidePanel>
+
         {/* ───── 畫布 ───── */}
-        <div className="order-1 lg:order-2">
-          <div className="frame mx-auto max-w-sm p-2 lg:max-w-none">
+        <div className="min-w-0 flex-1">
+          <div className="frame p-1.5">
             <div
               ref={canvas}
               className={`checker relative aspect-[3/4] overflow-hidden rounded-[12px] select-none ${showGrid ? "guides" : ""}`}
@@ -414,7 +467,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
               {picked.length === 0 && outfitImage ? (
                 <img src={imageUrl(outfitImage)} alt="" className="absolute inset-0 h-full w-full object-cover" />
               ) : picked.length === 0 ? (
-                <div className="absolute inset-0 grid place-items-center px-8 text-center text-sm text-mauve">在「揀選單品」點選衣物，這裡會即時組合預覽</div>
+                <div className="absolute inset-0 grid place-items-center px-4 pt-8 text-center text-[13px] leading-relaxed text-mauve">在右邊點選衣物，這裡會即時組合預覽</div>
               ) : (
                 picked.map((p, i) => {
                   const isSel = p.garment_id === selected;
@@ -453,106 +506,50 @@ export default function OutfitStudio({ id }: { id?: string }) {
                   );
                 })
               )}
-              <div className="absolute right-2 top-2 flex gap-1.5" style={{ zIndex: 1000 }} onPointerDown={(e) => e.stopPropagation()}>
+              <div className="absolute right-1.5 top-1.5 flex gap-1" style={{ zIndex: 1000 }} onPointerDown={(e) => e.stopPropagation()}>
                 <CanvasBtn label="復原" disabled={!past.length} onClick={undo}><IconUndo /></CanvasBtn>
                 <CanvasBtn label="重做" disabled={!future.length} onClick={redo}><IconRedo /></CanvasBtn>
                 <CanvasBtn label="對位格線" pressed={showGrid} onClick={() => setShowGrid((v) => !v)}><IconGrid /></CanvasBtn>
               </div>
             </div>
           </div>
-
-          <div className="mx-auto mt-2.5 min-h-8 max-w-sm lg:max-w-none">
-            {sel ? (
-              <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
-                <span className="mr-1 max-w-[9rem] truncate text-mauve">{sel.name}</span>
-                <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 0.9))} label="縮小">－</ToolBtn>
-                <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 1.1))} label="放大">＋</ToolBtn>
-                <ToolBtn onClick={() => bringToFront(sel.garment_id)} label="移到最上層">置頂</ToolBtn>
-                <ToolBtn onClick={() => patchBox(sel.garment_id, slotFor(sel.category))} label="重設位置">重設</ToolBtn>
-              </div>
-            ) : picked.length > 0 ? (
-              <p className="text-center text-[12px] text-mauve">點選單品後可拖動；雙指或拉動角位 ⤡ 縮放</p>
-            ) : null}
-          </div>
-
-          {status === "review" && (
-            <p className="frame mt-3 p-3 text-[13px]">這是由 AI 匯入的真人穿搭照，請揀選對應的單品後儲存，即會轉為正式穿搭。</p>
-          )}
         </div>
 
-        {/* ───── 圖層管理 ───── */}
-        <section className="frame bow-sm order-2 p-3 lg:order-1" aria-label="圖層管理">
-          <h2 className="mb-2 flex items-center justify-center gap-1.5 font-serif text-[15px] tracking-[0.1em] text-gold-soft">
-            <IconLayers className="text-[15px]" />
-            圖層管理
-          </h2>
-          {picked.length === 0 ? (
-            <p className="py-3 text-center text-[12px] text-mauve">加入單品後，可在這裡調整上下次序</p>
-          ) : (
-            <>
-              <SortableList
-                items={topFirst}
-                onReorder={reorderTopFirst}
-                render={(p, handle) => (
-                  <div className={`flex items-center gap-1 rounded-xl py-1 pl-1.5 text-[13px] ${p.garment_id === selected ? "chip-on" : "chip"}`}>
-                    <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setSelected(p.garment_id)}>
-                      <span className="arch h-10 w-8 shrink-0 overflow-hidden" style={{ borderRadius: 8 }}>
-                        {p.image_id && <img src={imageUrl(p.image_id)} alt="" className="h-full w-full object-contain" loading="lazy" />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate">{p.category || "單品"}</span>
-                        <span className="block truncate text-[11px] opacity-70">{p.name}</span>
-                      </span>
-                    </button>
-                    <button type="button" aria-label={`移除 ${p.name}`} onClick={() => { update((c) => c.filter((x) => x.garment_id !== p.garment_id)); if (selected === p.garment_id) setSelected(null); }} className="px-1.5 text-[16px] opacity-80">
-                      ×
-                    </button>
-                    <DragHandle {...handle} />
-                  </div>
-                )}
-              />
-              <p className="mt-2 text-center text-[11px] text-mauve">上面＝最上層｜按住 ☰ 拖拉</p>
-            </>
-          )}
-        </section>
-
-        {/* ───── 揀選單品 ───── */}
-        <section className="frame order-3 p-3" aria-label="揀選單品">
-          <div className="flex items-center gap-2">
-            <div className="chip inline-flex flex-1 rounded-full p-0.5" role="group" aria-label="類型">
-              {(["clothes", "acc"] as const).map((k) => (
-                <button key={k} type="button" aria-pressed={group === k} onClick={() => { setGroup(k); setCat(""); }} className={`h-8 flex-1 rounded-full font-serif text-[14px] tracking-[0.1em] ${group === k ? "chip-on" : "border border-transparent text-mauve"}`}>
-                  {k === "clothes" ? "衣物" : "飾物"}
-                </button>
-              ))}
-            </div>
-            <div className="lg:hidden">
-              <ColumnSwitch value={cols} onChange={setCols} />
-            </div>
-          </div>
-          <div className="relative mt-2.5">
-            <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-[16px] text-[#8a6d80]" />
-            <input type="search" className={`${inputCls} rounded-full py-2 pl-10`} placeholder="搜尋單品…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋單品" />
-          </div>
-          <div className="mt-2">
-            <Chips options={groupCats} value={cat} onChange={(v) => setCat(v)} />
-          </div>
+        <SidePanel side="right" open={openRight} onToggle={() => setOpenRight(!openRight)} label={group === "clothes" ? "衣物" : "飾物"} count={visible.length} icon={<IconDress />} widthCls="w-[92px] lg:w-[290px]">
           {!garments ? (
             <Spinner />
           ) : visible.length === 0 ? (
-            <p className="py-8 text-center text-[13px] text-mauve">{garments.length ? "沒有符合的單品" : "衣櫃未有已入庫的衣物"}</p>
+            <p className="px-1 py-6 text-center text-[11px] leading-relaxed text-mauve">{garments.length ? "沒有符合的單品" : "衣櫃未有已入庫的衣物"}</p>
           ) : (
-            <div className={`mt-2 grid ${GRID_COLS[cols]} lg:max-h-[34rem] lg:grid-cols-2 lg:gap-2 lg:overflow-y-auto lg:pr-1`}>
+            <div className="grid grid-cols-1 gap-y-1 px-0.5 lg:grid-cols-2 lg:gap-x-2.5">
               {visible.map((g) => (
                 <GarmentTile key={g.id} g={g} size="sm" selected={picked.some((p) => p.garment_id === g.id)} onSelect={() => toggle(g)} />
               ))}
             </div>
           )}
-        </section>
+        </SidePanel>
       </div>
 
+      <div className="mt-2.5 min-h-8">
+        {sel ? (
+          <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
+            <span className="mr-1 max-w-[9rem] truncate text-mauve">{sel.name}</span>
+            <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 0.9))} label="縮小">－</ToolBtn>
+            <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 1.1))} label="放大">＋</ToolBtn>
+            <ToolBtn onClick={() => bringToFront(sel.garment_id)} label="移到最上層">置頂</ToolBtn>
+            <ToolBtn onClick={() => patchBox(sel.garment_id, slotFor(sel.category))} label="重設位置">重設</ToolBtn>
+          </div>
+        ) : picked.length > 0 ? (
+          <p className="text-center text-[12px] text-mauve">點選單品後可拖動；雙指或拉動角位 ⤡ 縮放。收起兩側可放大畫布。</p>
+        ) : null}
+      </div>
+
+      {status === "review" && (
+        <p className="frame mt-3 p-3 text-[13px]">這是由 AI 匯入的真人穿搭照，請揀選對應的單品後儲存，即會轉為正式穿搭。</p>
+      )}
+
       {/* ───── 穿搭組合 ───── */}
-      <section className="frame bow mt-8 px-3 pb-3 pt-5" aria-label="穿搭組合">
+      <section className="frame mt-8 px-3 pb-3 pt-5" aria-label="穿搭組合">
         <h2 className="orn mb-2.5 text-center font-serif text-[15px] tracking-[0.14em] text-gold-soft">穿搭組合</h2>
         <div className="scrollbar-none flex gap-2.5 overflow-x-auto pb-1">
           <Link to="/outfits/new" className={`chip grid aspect-[3/4] w-20 shrink-0 place-items-center rounded-[14px] text-center text-[12px] ${!id ? "outline-2 outline-gold-soft" : ""}`}>
@@ -594,6 +591,78 @@ export default function OutfitStudio({ id }: { id?: string }) {
   );
 }
 
+function usePanel(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? initial : v === "1";
+    } catch {
+      return initial;
+    }
+  });
+  return [
+    open,
+    (v: boolean) => {
+      setOpen(v);
+      try {
+        localStorage.setItem(key, v ? "1" : "0");
+      } catch {
+        /* 私密瀏覽等情況忽略 */
+      }
+    },
+  ];
+}
+
+/**
+ * 畫布兩側的面板：高度跟隨畫布，內容自己捲動。
+ * 收起時只剩一條窄邊（圖示、直排名稱、數量），按一下展開。
+ */
+function SidePanel({
+  side,
+  open,
+  onToggle,
+  label,
+  count,
+  icon,
+  widthCls,
+  children,
+}: {
+  side: "left" | "right";
+  open: boolean;
+  onToggle: () => void;
+  label: string;
+  count: number;
+  icon: ReactNode;
+  widthCls: string;
+  children: ReactNode;
+}) {
+  // 箭嘴指向面板會移動的方向
+  const Arrow = (side === "left") === open ? IconChevronLeft : IconChevronRight;
+  if (!open)
+    return (
+      <button type="button" onClick={onToggle} aria-expanded={false} aria-label={`展開${label}`} className="frame pat-stripe flex w-8 shrink-0 flex-col items-center gap-2 py-2.5 text-gold-soft" style={{ borderRadius: 12 }}>
+        <Arrow className="text-[14px]" />
+        <span className="text-[16px]">{icon}</span>
+        <span className="font-serif text-[13px] tracking-[0.2em]" style={{ writingMode: "vertical-rl" }}>
+          {label}
+        </span>
+        {count > 0 && <span className="chip-on grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px]">{count}</span>}
+      </button>
+    );
+  return (
+    <section className={`frame relative shrink-0 ${widthCls}`} style={{ borderRadius: 12 }} aria-label={label}>
+      <div className="absolute inset-0 flex flex-col">
+        <button type="button" onClick={onToggle} aria-expanded aria-label={`收起${label}`} className="flex shrink-0 items-center justify-center gap-1 border-b border-gold/30 py-1.5 font-serif text-[13px] tracking-[0.1em] text-gold-soft">
+          {side === "right" && <Arrow className="text-[12px]" />}
+          {label}
+          {side === "left" && <Arrow className="text-[12px]" />}
+        </button>
+        <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 lg:p-2.5">{children}</div>
+      </div>
+    </section>
+  );
+}
+
 function ToolBtn({ onClick, label, children }: { onClick: () => void; label: string; children: string }) {
   return (
     <button type="button" aria-label={label} onClick={onClick} className="chip min-h-8 rounded-full px-3">
@@ -604,7 +673,7 @@ function ToolBtn({ onClick, label, children }: { onClick: () => void; label: str
 
 function CanvasBtn({ onClick, label, disabled, pressed, children }: { onClick: () => void; label: string; disabled?: boolean; pressed?: boolean; children: ReactNode }) {
   return (
-    <button type="button" aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick} className={`grid h-8 w-8 place-items-center rounded-lg text-[17px] disabled:opacity-35 ${pressed ? "btn-jewel" : "btn-dark"}`}>
+    <button type="button" aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick} className={`grid h-7 w-7 place-items-center rounded-lg text-[15px] disabled:opacity-35 ${pressed ? "btn-jewel" : "btn-dark"}`}>
       {children}
     </button>
   );

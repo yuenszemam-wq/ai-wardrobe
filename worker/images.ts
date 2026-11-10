@@ -469,7 +469,8 @@ export async function cleanupOrphans(env: Env, actor: Actor, doDelete: boolean):
       }
       // 只當作孤兒處理超過 1 小時的檔案，避免誤刪正在寫入中的上傳
       for (const o of list.objects.slice(i, i + 50)) {
-        if (!found.has(o.key) && Date.now() - o.uploaded.getTime() > 3600_000) orphans.push(o.key);
+        // settings/ 是主頁背景圖等設定檔案，由 app_settings 管理，不屬於孤兒
+        if (!found.has(o.key) && !o.key.startsWith("settings/") && Date.now() - o.uploaded.getTime() > 3600_000) orphans.push(o.key);
       }
     }
     cursor = list.truncated ? list.cursor : undefined;
