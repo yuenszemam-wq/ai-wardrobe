@@ -322,10 +322,9 @@
   padding-bottom: calc(env(safe-area-inset-bottom) + 0.4rem);
 }
 :root {
-  --tabbar-inset: max(0px, calc(env(safe-area-inset-bottom, 0px) - 10px));
-  --tabbar-height: calc(59px + var(--tabbar-inset));
+  --tabbar-height: 59px;
 }
-.app-tabbar { padding-bottom: var(--tabbar-inset); }
+.app-tabbar { padding-bottom: 0; }
 .detail-actions {
   position: fixed;
   bottom: var(--tabbar-height);

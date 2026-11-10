@@ -1,5 +1,6 @@
+import { usePullRefresh } from "../hooks/usePullRefresh";
 import { BulkEditSheet } from "../components/BulkEditSheet";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, Garment, STATUS_LABEL } from "../api";
 import { IconFilter, IconSearch } from "../components/icons";
 import { Button, Chips, ColumnSwitch, Empty, GarmentTile, GRID_COLS, Link, Spinner, useColumns, toast } from "../components/ui";
@@ -19,6 +20,16 @@ export default function Wardrobe() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+  const generation = useRef(0);
+  const refresh = useCallback(() => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    setRevision(v => v + 1);
+  }, []);
+  const pull = usePullRefresh(refresh, refreshing || bulkOpen || items === null);
   const tax = useTaxonomy();
   const [cols, setCols] = useColumns("aw:wardrobe-cols", 3);
 
@@ -51,6 +62,8 @@ export default function Wardrobe() {
 
   useEffect(() => {
     let alive = true;
+    generation.current += 1;
+    setLoadingMore(false);
     setItems(null);
     setSelected(new Set());
     const p = new URLSearchParams(params);
@@ -59,6 +72,15 @@ export default function Wardrobe() {
       if (!alive) return;
       setItems(r.garments);
       setNext(r.next_offset);
+    }).catch(() => {
+      if (!alive) return;
+      setItems([]);
+      setNext(null);
+      toast("讀取失敗，請按重新整理再試", "err");
+    }).finally(() => {
+      if (!alive) return;
+      refreshingRef.current = false;
+      setRefreshing(false);
     });
     return () => {
       alive = false;
@@ -71,20 +93,36 @@ export default function Wardrobe() {
     const p = new URLSearchParams(params);
     p.set("limit", "60");
     p.set("offset", String(next));
-    const r = await api<{ garments: Garment[]; next_offset: number | null }>(`/api/garments?${p}`);
-    setItems((cur) => [...(cur || []), ...r.garments]);
-    setNext(r.next_offset);
-    setLoadingMore(false);
+    const requestGeneration = generation.current;
+    try {
+      const r = await api<{ garments: Garment[]; next_offset: number | null }>(`/api/garments?${p}`);
+      if (requestGeneration !== generation.current) return;
+      setItems((cur) => [...(cur || []), ...r.garments]);
+      setNext(r.next_offset);
+    } catch {
+      if (requestGeneration === generation.current) toast("載入失敗，請再試", "err");
+    } finally {
+      if (requestGeneration === generation.current) setLoadingMore(false);
+    }
   }
 
   const activeFilters = [style, color, season, status, brand, identified, priced, params.get("attr") || "", favorite ? "收藏" : ""].filter(Boolean).length;
   const subs = tax.categories.find((c) => c.name === category)?.subs.map((x) => x.name) ?? [];
 
   return (
-    <div>
-      <h1 className="flex items-center gap-2 pb-2 pt-5 font-serif text-[22px] font-bold tracking-[0.08em] text-gold-soft">
-        我的衣櫃
-      </h1>
+    <div ref={pull.ref}>
+      <div role="status" className="overflow-hidden text-center text-[12px] text-gold-soft" style={{ height: pull.distance }}>
+        {pull.distance > 0 && <span className="inline-block pt-3">{pull.distance >= 60 ? "放開即可刷新" : "向下拉以刷新"}</span>}
+      </div>
+      <div className="flex items-center justify-between gap-2 pb-2 pt-5">
+        <h1 className="shrink-0 font-serif text-[22px] font-bold tracking-[0.08em] text-gold-soft">我的衣櫃</h1>
+        <div className="flex items-center gap-1.5">
+          <button type="button" className="chip min-h-9 whitespace-nowrap px-2 text-[12px]" onClick={() => { setSelecting(v => !v); setSelected(new Set()); }}>{selecting ? "結束多選" : "批量修改"}</button>
+          <button type="button" className="chip min-h-9 whitespace-nowrap px-2 text-[12px] disabled:opacity-50" onClick={refresh} disabled={refreshing || items === null} aria-label="重新整理衣櫃" aria-busy={refreshing}>
+            <span aria-hidden="true">↻</span> {refreshing ? "刷新中…" : "重新整理"}
+          </button>
+        </div>
+      </div>
 
       {/* 搜尋及篩選：捲動時固定在頁首下方，只佔兩行 */}
       <div className="lace-b sticky z-20 -mx-4 bg-ink/95 px-4 pb-1.5 pt-2 backdrop-blur" style={{ top: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
@@ -179,14 +217,11 @@ export default function Wardrobe() {
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button variant="ghost" onClick={() => { setSelecting(v => !v); setSelected(new Set()); }}>{selecting ? '結束多選' : '批量修改'}</Button>
-        {selecting && <>
+      {selecting && <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button variant="ghost" onClick={() => setSelected(new Set((items || []).slice(0, 100).map(g => g.id)))}>全選已載入（最多100件）</Button>
           <Button variant="ghost" onClick={() => setSelected(new Set())}>取消全選</Button>
           <Button disabled={!selected.size} onClick={() => setBulkOpen(true)}>修改 {selected.size} 件</Button>
-        </>}
-      </div>
+      </div>}
       <div className="mt-3 flex items-center justify-between">
         <span className="flex items-center gap-2 text-[13px] text-mauve">
           {items ? `${items.length}${next !== null ? "+" : ""} 件` : ""}
