@@ -129,9 +129,9 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
   }
 
   return (
-    <section id="todo" className="mt-7 scroll-mt-14">
+    <section id="todo" className="paper bow mt-9 scroll-mt-20 px-4 pb-4 pt-6">
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="font-serif text-lg font-bold">待整理</h2>
+        <h2 className="font-serif text-xl font-bold tracking-[0.08em]">待整理</h2>
         <select className="rounded-full bg-white px-3 py-1.5 text-[13px] ring-1 ring-ink/10" value={sort} onChange={(e) => setParam("sort", e.target.value === "newest" ? "" : e.target.value)} aria-label="排序">
           <option value="newest">最新上傳</option>
           <option value="oldest">最舊上傳</option>
@@ -148,10 +148,10 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
               key={t.key}
               type="button"
               onClick={() => setParam("tab", t.key === "todo" ? "" : t.key)}
-              className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] ${active ? "bg-ink text-rose" : "bg-white ring-1 ring-ink/10"}`}
+              className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] ${active ? "chip-on" : "chip"}`}
             >
               {t.label}
-              {n !== null && <span className={active ? "ml-1 text-rose/70" : "ml-1 text-mauve"}>{n}</span>}
+              {n !== null && <span className={active ? "ml-1 text-white/75" : "ml-1 text-mauve"}>{n}</span>}
             </button>
           );
         })}

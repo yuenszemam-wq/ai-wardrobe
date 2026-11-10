@@ -1,5 +1,6 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { api, Garment } from "../api";
+import { IconCloudUp, IconDress } from "../components/icons";
 import { Empty, GarmentTile, Link, Spinner } from "../components/ui";
 import { navigate } from "../router";
 import ReviewPanel from "./AiReview";
@@ -35,49 +36,51 @@ export default function Home() {
   return (
     <div>
       {/* 開場：衣物總數放在拱窗中，像衣櫃門上的銘牌 */}
-      <section className="-mx-4 bg-ink px-4 pb-8 pt-6 text-rose">
+      <section className="pb-2 pt-7">
         <div className="flex items-center gap-5">
-          <div className="arch-dark grid h-32 w-24 shrink-0 place-items-center ring-1 ring-rose/20">
+          <div className="arch-dark bow grid h-36 w-28 shrink-0 place-items-center">
             <div className="text-center">
-              <div className="font-serif text-[40px] font-bold leading-none">{s.total}</div>
-              <div className="mt-1 text-[11px] text-mauve">件</div>
+              <div className="font-serif text-[46px] font-bold leading-none text-gold-soft">{s.total}</div>
+              <div className="mt-1.5 text-[12px] text-mauve">件</div>
             </div>
           </div>
           <div className="min-w-0">
-            <p className="font-serif text-xl">我的衣櫃</p>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-rose/80">
+            <h1 className="font-serif text-[24px] font-bold tracking-[0.08em] text-gold-soft">我的衣櫃</h1>
+            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-cream/85">
               <Link to="/wardrobe?favorite=1">收藏 {s.favorites}</Link>
-              <Link to="/wardrobe?status=review" className={s.review ? "text-rose underline decoration-amethyst underline-offset-4" : ""}>
+              <Link to="/wardrobe?status=review" className={s.review ? "text-cream underline decoration-gold underline-offset-4" : ""}>
                 待確認 {s.review}
               </Link>
               {s.missing_image > 0 && <Link to="/wardrobe?needs_image=1">缺圖片 {s.missing_image}</Link>}
             </div>
           </div>
         </div>
-        <div className="mt-5 grid grid-cols-4 gap-2 text-center">
+        <div className="mt-6 grid grid-cols-4 gap-2 text-center">
           <Stat to="/wardrobe" n={s.total} label="衣物總數" />
           <Stat tab="pending_ai" n={s.ai_todo} label="待整理" hot={s.ai_todo > 0} />
           <Stat tab="pending_review" n={s.ai_review} label="待確認" hot={s.ai_review > 0} />
           <Stat tab="done" n={s.ai_done} label="已完成" />
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3">
-          <Link to="/import" className="rounded-2xl bg-amethyst px-4 py-3 text-center text-[15px] font-medium text-white">
+          <Link to="/import" className="btn-jewel flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-serif text-[16px] tracking-[0.1em]">
+            <IconCloudUp className="text-[20px]" />
             批量上傳
           </Link>
-          <Link to="/outfits/new" className="rounded-2xl bg-velvet px-4 py-3 text-center text-[15px] text-rose">
+          <Link to="/outfits/new" className="btn-dark flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-serif text-[16px] tracking-[0.1em]">
+            <IconDress className="text-[20px]" />
             配搭一套
           </Link>
         </div>
       </section>
 
       {s.ai_review > 0 && (
-        <button type="button" onClick={() => goTab("pending_review")} className="mt-4 block w-full rounded-2xl bg-rose-soft px-4 py-3 text-left text-sm">
-          AI 已整理好 {s.ai_review} 件，等你確認 →
+        <button type="button" onClick={() => goTab("pending_review")} className="frame mt-4 block w-full px-4 py-3 text-left text-sm">
+          AI 已整理好 {s.ai_review} 件，等你確認
         </button>
       )}
 
       {s.open_batches > 0 && (
-        <Link to="/import" className="mt-4 block rounded-2xl bg-rose-soft px-4 py-3 text-sm">
+        <Link to="/import" className="frame mt-4 block px-4 py-3 text-sm">
           有 {s.open_batches} 個匯入批次仍在進行中，按此查看
         </Link>
       )}
@@ -107,7 +110,7 @@ export default function Home() {
               <Link
                 key={c.category}
                 to={c.category === "未分類" ? "/wardrobe" : `/wardrobe?category=${encodeURIComponent(c.category)}`}
-                className="rounded-full bg-white px-3.5 py-1.5 text-[13px] ring-1 ring-ink/10"
+                className="chip rounded-full px-3.5 py-1.5 text-[13px]"
               >
                 {c.category} <span className="text-mauve">{c.n}</span>
               </Link>
@@ -126,11 +129,11 @@ function goTab(tab: string) {
 }
 
 function Stat({ to, tab, n, label, hot }: { to?: string; tab?: string; n: number; label: string; hot?: boolean }) {
-  const cls = `rounded-2xl px-1 py-2.5 ${hot ? "bg-amethyst text-white" : "bg-velvet text-rose"}`;
+  const cls = `frame px-1 py-3 ${hot ? "frame-hot" : ""}`;
   const inner = (
     <>
-      <div className="font-serif text-[22px] font-bold leading-none">{n}</div>
-      <div className={`mt-1 text-[11px] ${hot ? "text-white/85" : "text-mauve"}`}>{label}</div>
+      <div className={`font-serif text-[24px] font-bold leading-none ${hot ? "text-white" : "text-gold-soft"}`}>{n}</div>
+      <div className={`mt-1.5 text-[11px] ${hot ? "text-white/90" : "text-mauve"}`}>{label}</div>
     </>
   );
   if (tab)
@@ -148,9 +151,9 @@ function Stat({ to, tab, n, label, hot }: { to?: string; tab?: string; n: number
 
 function Section({ title, more, children }: { title: string; more?: string; children: ReactNode }) {
   return (
-    <section className="mt-7">
-      <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="font-serif text-lg font-bold">{title}</h2>
+    <section className="mt-8">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="orn orn-l font-serif text-lg font-bold tracking-[0.08em] text-gold-soft">{title}</h2>
         {more && (
           <Link to={more} className="text-[13px] text-amethyst-deep">
             查看全部

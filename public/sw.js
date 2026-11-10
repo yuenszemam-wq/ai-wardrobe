@@ -1,6 +1,6 @@
 // 只快取 App 外殼，令 iPhone／iPad／Windows 可安裝及快速開啟。
 // /api 與 /mcp 永不快取，私人圖片只靠瀏覽器 HTTP 快取（private）。
-const CACHE = "aw-shell-v1";
+const CACHE = "aw-shell-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/manifest.webmanifest"])).then(() => self.skipWaiting()));

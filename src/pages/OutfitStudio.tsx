@@ -1,9 +1,11 @@
-import { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useEffect, useMemo, useRef, useState } from "react";
+import { PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, displayName, Garment, imageUrl } from "../api";
+import { IconChevronLeft, IconCopy, IconGrid, IconImage, IconLayers, IconPlus, IconRedo, IconSave, IconSearch, IconTrash, IconUndo } from "../components/icons";
 import { DragHandle, SortableList } from "../components/Sortable";
-import { Button, Chips, ColumnSwitch, Field, GarmentTile, GRID_COLS, inputCls, Link, Spinner, toast, useColumns } from "../components/ui";
+import { Chips, ColumnSwitch, Field, GarmentTile, GRID_COLS, inputCls, Link, Spinner, toast, useColumns } from "../components/ui";
 import { navigate } from "../router";
 import { useTaxonomy } from "../taxonomy";
+import { OutfitPreview, OutfitSummary } from "./Outfits";
 
 interface Box {
   x: number; // 左上角，佔畫布寬度 %
@@ -40,6 +42,10 @@ const slotFor = (category: string | null): Box => ({ ...((category && SLOT[categ
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const MIN_SIZE = 6;
 const MAX_SIZE = 220;
+const HISTORY_MAX = 50;
+// 「飾物」分頁包含的主分類；其餘主分類歸入「衣物」
+const ACCESSORY = new Set(["鞋", "襪", "頭飾", "手袋", "配件", "其他裝飾"]);
+const sameLayout = (a: Picked[], b: Picked[]) => a.length === b.length && a.every((p, i) => p.garment_id === b[i].garment_id && p.x === b[i].x && p.y === b[i].y && p.w === b[i].w && p.h === b[i].h);
 
 type Gesture =
   | { kind: "move"; id: string; sx: number; sy: number; box: Box }
@@ -61,6 +67,15 @@ export default function OutfitStudio({ id }: { id?: string }) {
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(!id);
   const [cols, setCols] = useColumns("aw:outfit-pick-cols", 3);
+  const [group, setGroup] = useState<"clothes" | "acc">("clothes");
+  const [q, setQ] = useState("");
+  const [showGrid, setShowGrid] = useState(false);
+  const [others, setOthers] = useState<OutfitSummary[]>([]);
+  const [busy, setBusy] = useState(false);
+  // 復原／重做：只記錄版面（單品、位置、大小、圖層次序）
+  const history = useRef<{ past: Picked[][]; future: Picked[][] }>({ past: [], future: [] });
+  const gestureStart = useRef<Picked[] | null>(null);
+  const [, bump] = useState(0);
 
   const canvas = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -69,6 +84,22 @@ export default function OutfitStudio({ id }: { id?: string }) {
   pickedRef.current = picked;
 
   useEffect(() => {
+    api<{ outfits: OutfitSummary[] }>("/api/outfits").then((r) => setOthers(r.outfits)).catch(() => undefined);
+  }, [id]);
+
+  useEffect(() => {
+    history.current = { past: [], future: [] };
+    setSelected(null);
+    setDirty(false);
+    if (!id) {
+      setPicked([]);
+      setName("");
+      setNotes("");
+      setFavorite(false);
+      setStatus("active");
+      setOutfitImage(null);
+      setLoaded(true);
+    } else setLoaded(false);
     api<{ garments: Garment[] }>("/api/garments?limit=200&status=active").then((r) => setGarments(r.garments));
     if (id) {
       api<{
@@ -95,13 +126,48 @@ export default function OutfitStudio({ id }: { id?: string }) {
     }
   }, [id]);
 
-  const visible = useMemo(() => (garments || []).filter((g) => !cat || g.category === cat), [garments, cat]);
+  const groupCats = useMemo(() => tax.categories.map((c) => c.name).filter((n) => (group === "acc") === ACCESSORY.has(n)), [tax, group]);
+  const visible = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    return (garments || []).filter((g) => {
+      if ((group === "acc") !== ACCESSORY.has(g.category || "")) return false;
+      if (cat && g.category !== cat) return false;
+      if (kw && !`${displayName(g)} ${g.brand || ""} ${g.subcategory || ""}`.toLowerCase().includes(kw)) return false;
+      return true;
+    });
+  }, [garments, cat, group, q]);
 
-  function update(fn: (cur: Picked[]) => Picked[]) {
+  function record(prev: Picked[]) {
+    const h = history.current;
+    h.past.push(prev);
+    if (h.past.length > HISTORY_MAX) h.past.shift();
+    h.future = [];
+    bump((n) => n + 1);
+  }
+  /** 改動版面。keep=false 用於手勢進行中（放手時才記入復原紀錄） */
+  function update(fn: (cur: Picked[]) => Picked[], keep = true) {
+    if (keep) record(pickedRef.current);
     setPicked(fn);
     setDirty(true);
   }
-  const patchBox = (gid: string, box: Partial<Box>) => update((cur) => cur.map((p) => (p.garment_id === gid ? { ...p, ...box } : p)));
+  const patchBox = (gid: string, box: Partial<Box>, keep = true) => update((cur) => cur.map((p) => (p.garment_id === gid ? { ...p, ...box } : p)), keep);
+  function undo() {
+    const h = history.current;
+    const prev = h.past.pop();
+    if (!prev) return;
+    h.future.push(pickedRef.current);
+    setPicked(prev);
+    setDirty(true);
+    if (selected && !prev.some((p) => p.garment_id === selected)) setSelected(null);
+  }
+  function redo() {
+    const h = history.current;
+    const nxt = h.future.pop();
+    if (!nxt) return;
+    h.past.push(pickedRef.current);
+    setPicked(nxt);
+    setDirty(true);
+  }
 
   function toggle(g: Garment) {
     if (picked.some((p) => p.garment_id === g.id)) {
@@ -133,6 +199,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     setSelected(gid);
+    if (!pointers.current.size) gestureStart.current = pickedRef.current;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const pts = [...pointers.current.values()];
     if (pts.length >= 2) {
@@ -144,6 +211,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
   function onResizeDown(e: ReactPointerEvent<HTMLDivElement>, gid: string) {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
+    if (!pointers.current.size) gestureStart.current = pickedRef.current;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     gesture.current = { kind: "resize", id: gid, sx: e.clientX, box: boxOf(gid) };
   }
@@ -157,16 +225,16 @@ export default function OutfitStudio({ id }: { id?: string }) {
       const dx = ((e.clientX - g.sx) / r.width) * 100;
       const dy = ((e.clientY - g.sy) / r.height) * 100;
       // 至少保留一小部分在畫布內，避免拖到看不見
-      patchBox(g.id, { x: clamp(g.box.x + dx, -g.box.w + 8, 92), y: clamp(g.box.y + dy, -g.box.h + 8, 92) });
+      patchBox(g.id, { x: clamp(g.box.x + dx, -g.box.w + 8, 92), y: clamp(g.box.y + dy, -g.box.h + 8, 92) }, false);
     } else if (g.kind === "pinch") {
       const pts = [...pointers.current.values()];
       if (pts.length < 2) return;
       const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      patchBox(g.id, scaleBox(g.box, d / g.d0));
+      patchBox(g.id, scaleBox(g.box, d / g.d0), false);
     } else {
       const startW = (g.box.w / 100) * r.width;
       const newW = startW + (e.clientX - g.sx);
-      patchBox(g.id, scaleBox(g.box, newW / startW, "topleft"));
+      patchBox(g.id, scaleBox(g.box, newW / startW, "topleft"), false);
     }
   }
   /** 第二隻手指落在單品旁邊（畫布上）時，同樣當作雙指縮放 */
@@ -191,11 +259,17 @@ export default function OutfitStudio({ id }: { id?: string }) {
     // 雙指縮放中放開一指 → 改為拖動餘下那隻手指
     const rest = [...pointers.current.values()];
     if (g.kind === "pinch" && rest.length === 1) gesture.current = { kind: "move", id: g.id, sx: rest[0].x, sy: rest[0].y, box: boxOf(g.id) };
-    else if (!rest.length) gesture.current = null;
+    else if (!rest.length) {
+      gesture.current = null;
+      // 手勢結束：版面真的有改動才記入復原紀錄
+      const start = gestureStart.current;
+      gestureStart.current = null;
+      if (start && !sameLayout(start, pickedRef.current)) record(start);
+    }
   }
   function onWheel(e: ReactWheelEvent<HTMLDivElement>, gid: string) {
     if (selected !== gid) return;
-    patchBox(gid, scaleBox(boxOf(gid), e.deltaY < 0 ? 1.05 : 0.95));
+    patchBox(gid, scaleBox(boxOf(gid), e.deltaY < 0 ? 1.05 : 0.95), false);
   }
 
   // ───── 圖層 ─────
@@ -230,163 +304,291 @@ export default function OutfitStudio({ id }: { id?: string }) {
     }
   }
 
+  /** 把畫布上的排版輸出成 PNG（1200×1600，奶油色底） */
+  async function exportImage() {
+    if (!picked.length) return toast("畫布上未有單品", "err");
+    setBusy(true);
+    try {
+      const W = 1200, H = 1600;
+      const cv = document.createElement("canvas");
+      cv.width = W;
+      cv.height = H;
+      const ctx = cv.getContext("2d")!;
+      ctx.fillStyle = "#fffaf6";
+      ctx.fillRect(0, 0, W, H);
+      for (const p of picked) {
+        if (!p.image_id) continue;
+        const img = new Image();
+        img.src = imageUrl(p.image_id)!;
+        await img.decode();
+        // 與畫面一致：在方框內按比例完整顯示（object-contain）
+        const bw = (p.w / 100) * W, bh = (p.h / 100) * H;
+        const s = Math.min(bw / img.naturalWidth, bh / img.naturalHeight);
+        const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+        ctx.drawImage(img, (p.x / 100) * W + (bw - dw) / 2, (p.y / 100) * H + (bh - dh) / 2, dw, dh);
+      }
+      const blob = await new Promise<Blob | null>((res) => cv.toBlob(res, "image/png"));
+      if (!blob) throw new Error("未能產生圖片");
+      const filename = `${name.trim() || "穿搭"}.png`;
+      const file = new File([blob], filename, { type: "image/png" });
+      // iPhone 加到主畫面後不能直接下載，改用分享面板（可「儲存影像」）
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file] }).catch(() => undefined);
+      } else {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        toast("已導出圖片");
+      }
+    } catch (e) {
+      toast((e as Error).message || "導出失敗", "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function duplicate() {
+    if (!picked.length) return toast("畫布上未有單品", "err");
+    setBusy(true);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    try {
+      const res = await api<{ id: string }>("/api/outfits", {
+        method: "POST",
+        json: {
+          name: `${name.trim() || "新穿搭"}（副本）`,
+          notes,
+          is_favorite: false,
+          items: picked.map((p, i) => ({ garment_id: p.garment_id, position: i, layer_order: i, x: r2(p.x), y: r2(p.y), w: r2(p.w), h: r2(p.h) })),
+        },
+      });
+      toast("已複製成新一套");
+      navigate(`/outfits/${res.id}`);
+    } catch (e) {
+      toast((e as Error).message, "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!id || !confirm("確定刪除這套穿搭？單品不會被刪除。")) return;
+    await api(`/api/outfits/${id}`, { method: "DELETE" });
+    toast("已刪除");
+    navigate("/outfits", true);
+  }
+
   if (!loaded) return <Spinner />;
   const sel = picked.find((p) => p.garment_id === selected) ?? null;
+  const { past, future } = history.current;
 
   return (
     <div>
-      <div className="flex items-center justify-between pt-4">
-        <Link to="/outfits" className="text-[14px] text-amethyst-deep">‹ 穿搭</Link>
+      <div className="flex items-center justify-between gap-2 pt-5">
+        <Link to="/outfits" className="btn-dark flex items-center gap-1 rounded-full py-1.5 pl-2 pr-3.5 text-[13px]">
+          <IconChevronLeft className="text-[15px]" />
+          我的穿搭
+        </Link>
         {dirty && <span className="text-[12px] text-wine">未儲存</span>}
+        <Link to="/outfits/new" className="btn-dark flex items-center gap-1 rounded-full py-1.5 pl-3.5 pr-3 text-[13px]">
+          配搭新一套
+          <IconPlus className="text-[13px]" />
+        </Link>
       </div>
-      <div className="mt-3 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:gap-8">
-        <div>
-          <div
-            ref={canvas}
-            className="arch relative mx-auto aspect-[3/4] max-w-sm overflow-hidden select-none"
-            style={{ touchAction: selected ? "none" : "pan-y" }}
-            onPointerDown={onCanvasDown}
-            onPointerMove={onMove}
-            onPointerUp={onUp}
-            onPointerCancel={onUp}
-          >
-            {picked.length === 0 && outfitImage ? (
-              <img src={imageUrl(outfitImage)} alt="" className="absolute inset-0 h-full w-full object-cover" />
-            ) : picked.length === 0 ? (
-              <div className="absolute inset-0 grid place-items-center px-8 text-center text-sm text-mauve">在下面揀選單品，這裡會即時組合預覽</div>
-            ) : (
-              picked.map((p, i) => {
-                const isSel = p.garment_id === selected;
-                return (
-                  <div
-                    key={p.garment_id}
-                    className={`absolute ${isSel ? "outline-2 outline-dashed outline-amethyst" : ""}`}
-                    style={{ left: `${p.x}%`, top: `${p.y}%`, width: `${p.w}%`, height: `${p.h}%`, zIndex: i + 1, touchAction: "none", cursor: "move" }}
-                    onPointerDown={(e) => onItemDown(e, p.garment_id)}
-                    onPointerMove={stop(onMove)}
-                    onPointerUp={stop(onUp)}
-                    onPointerCancel={stop(onUp)}
-                    onWheel={(e) => onWheel(e, p.garment_id)}
-                  >
-                    {p.image_id ? (
-                      <img src={imageUrl(p.image_id)} alt={p.name} draggable={false} className="pointer-events-none h-full w-full object-contain" />
-                    ) : (
-                      <div className="grid h-full w-full place-items-center rounded-xl bg-white/70 text-[11px] text-mauve">{p.name}</div>
-                    )}
-                    {isSel && (
-                      <div
-                        role="slider"
-                        aria-label="拖拉縮放"
-                        aria-valuenow={Math.round(p.w)}
-                        className="absolute -bottom-3 -right-3 grid h-7 w-7 place-items-center rounded-full bg-amethyst text-[12px] text-white shadow"
-                        style={{ touchAction: "none", cursor: "nwse-resize" }}
-                        onPointerDown={(e) => onResizeDown(e, p.garment_id)}
-                        onPointerMove={stop(onMove)}
-                        onPointerUp={stop(onUp)}
-                        onPointerCancel={stop(onUp)}
-                      >
-                        ⤡
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+      <h1 className="orn mt-3 text-center font-serif text-[24px] font-bold tracking-[0.14em] text-gold-soft">穿搭工作室</h1>
+
+      <div className="mt-4 flex flex-col gap-5 lg:grid lg:grid-cols-[210px_minmax(0,1fr)_290px] lg:items-start lg:gap-4">
+        {/* ───── 畫布 ───── */}
+        <div className="order-1 lg:order-2">
+          <div className="frame mx-auto max-w-sm p-2 lg:max-w-none">
+            <div
+              ref={canvas}
+              className={`checker relative aspect-[3/4] overflow-hidden rounded-[12px] select-none ${showGrid ? "guides" : ""}`}
+              style={{ touchAction: selected ? "none" : "pan-y" }}
+              onPointerDown={onCanvasDown}
+              onPointerMove={onMove}
+              onPointerUp={onUp}
+              onPointerCancel={onUp}
+            >
+              {picked.length === 0 && outfitImage ? (
+                <img src={imageUrl(outfitImage)} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              ) : picked.length === 0 ? (
+                <div className="absolute inset-0 grid place-items-center px-8 text-center text-sm text-mauve">在「揀選單品」點選衣物，這裡會即時組合預覽</div>
+              ) : (
+                picked.map((p, i) => {
+                  const isSel = p.garment_id === selected;
+                  return (
+                    <div
+                      key={p.garment_id}
+                      className={`absolute ${isSel ? "outline-2 outline-dashed outline-amethyst" : ""}`}
+                      style={{ left: `${p.x}%`, top: `${p.y}%`, width: `${p.w}%`, height: `${p.h}%`, zIndex: i + 1, touchAction: "none", cursor: "move" }}
+                      onPointerDown={(e) => onItemDown(e, p.garment_id)}
+                      onPointerMove={stop(onMove)}
+                      onPointerUp={stop(onUp)}
+                      onPointerCancel={stop(onUp)}
+                      onWheel={(e) => onWheel(e, p.garment_id)}
+                    >
+                      {p.image_id ? (
+                        <img src={imageUrl(p.image_id)} alt={p.name} draggable={false} className="pointer-events-none h-full w-full object-contain" />
+                      ) : (
+                        <div className="grid h-full w-full place-items-center rounded-xl bg-white/70 text-[11px] text-mauve">{p.name}</div>
+                      )}
+                      {isSel && (
+                        <div
+                          role="slider"
+                          aria-label="拖拉縮放"
+                          aria-valuenow={Math.round(p.w)}
+                          className="btn-jewel absolute -bottom-3 -right-3 grid h-7 w-7 place-items-center rounded-full text-[12px]"
+                          style={{ touchAction: "none", cursor: "nwse-resize" }}
+                          onPointerDown={(e) => onResizeDown(e, p.garment_id)}
+                          onPointerMove={stop(onMove)}
+                          onPointerUp={stop(onUp)}
+                          onPointerCancel={stop(onUp)}
+                        >
+                          ⤡
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+              <div className="absolute right-2 top-2 flex gap-1.5" style={{ zIndex: 1000 }} onPointerDown={(e) => e.stopPropagation()}>
+                <CanvasBtn label="復原" disabled={!past.length} onClick={undo}><IconUndo /></CanvasBtn>
+                <CanvasBtn label="重做" disabled={!future.length} onClick={redo}><IconRedo /></CanvasBtn>
+                <CanvasBtn label="對位格線" pressed={showGrid} onClick={() => setShowGrid((v) => !v)}><IconGrid /></CanvasBtn>
+              </div>
+            </div>
           </div>
 
-          {picked.length > 0 && (
-            <div className="mx-auto mt-2 max-w-sm">
-              {sel ? (
-                <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
-                  <span className="mr-1 max-w-[9rem] truncate text-mauve">{sel.name}</span>
-                  <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 0.9))} label="縮小">－</ToolBtn>
-                  <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 1.1))} label="放大">＋</ToolBtn>
-                  <ToolBtn onClick={() => bringToFront(sel.garment_id)} label="移到最上層">置頂</ToolBtn>
-                  <ToolBtn onClick={() => patchBox(sel.garment_id, slotFor(sel.category))} label="重設位置">重設</ToolBtn>
-                </div>
-              ) : (
-                <p className="text-center text-[12px] text-mauve">點選單品後可拖動；雙指或拉動角位 ⤡ 縮放</p>
-              )}
-            </div>
-          )}
+          <div className="mx-auto mt-2.5 min-h-8 max-w-sm lg:max-w-none">
+            {sel ? (
+              <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
+                <span className="mr-1 max-w-[9rem] truncate text-mauve">{sel.name}</span>
+                <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 0.9))} label="縮小">－</ToolBtn>
+                <ToolBtn onClick={() => patchBox(sel.garment_id, scaleBox(sel, 1.1))} label="放大">＋</ToolBtn>
+                <ToolBtn onClick={() => bringToFront(sel.garment_id)} label="移到最上層">置頂</ToolBtn>
+                <ToolBtn onClick={() => patchBox(sel.garment_id, slotFor(sel.category))} label="重設位置">重設</ToolBtn>
+              </div>
+            ) : picked.length > 0 ? (
+              <p className="text-center text-[12px] text-mauve">點選單品後可拖動；雙指或拉動角位 ⤡ 縮放</p>
+            ) : null}
+          </div>
 
           {status === "review" && (
-            <p className="mt-3 rounded-2xl bg-rose-soft p-3 text-[13px]">這是由 AI 匯入的真人穿搭照，請揀選對應的單品後儲存，即會轉為正式穿搭。</p>
+            <p className="frame mt-3 p-3 text-[13px]">這是由 AI 匯入的真人穿搭照，請揀選對應的單品後儲存，即會轉為正式穿搭。</p>
           )}
+        </div>
 
-          {picked.length > 0 && (
-            <div className="mt-4">
-              <p className="mb-1.5 text-[13px] text-mauve">圖層（上面＝最上層，按住 ☰ 拖拉調整次序）</p>
+        {/* ───── 圖層管理 ───── */}
+        <section className="frame bow-sm order-2 p-3 lg:order-1" aria-label="圖層管理">
+          <h2 className="mb-2 flex items-center justify-center gap-1.5 font-serif text-[15px] tracking-[0.1em] text-gold-soft">
+            <IconLayers className="text-[15px]" />
+            圖層管理
+          </h2>
+          {picked.length === 0 ? (
+            <p className="py-3 text-center text-[12px] text-mauve">加入單品後，可在這裡調整上下次序</p>
+          ) : (
+            <>
               <SortableList
                 items={topFirst}
                 onReorder={reorderTopFirst}
                 render={(p, handle) => (
-                  <div
-                    className={`flex items-center gap-1 rounded-2xl bg-white py-1 pl-1 pr-2 text-[14px] ring-1 ${p.garment_id === selected ? "ring-amethyst" : "ring-ink/5"}`}
-                  >
-                    <DragHandle {...handle} />
+                  <div className={`flex items-center gap-1 rounded-xl py-1 pl-1.5 text-[13px] ${p.garment_id === selected ? "chip-on" : "chip"}`}>
                     <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setSelected(p.garment_id)}>
-                      <span className="h-10 w-8 shrink-0 overflow-hidden rounded-lg bg-rose-soft">
+                      <span className="arch h-10 w-8 shrink-0 overflow-hidden" style={{ borderRadius: 8 }}>
                         {p.image_id && <img src={imageUrl(p.image_id)} alt="" className="h-full w-full object-contain" loading="lazy" />}
                       </span>
-                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{p.category || "單品"}</span>
+                        <span className="block truncate text-[11px] opacity-70">{p.name}</span>
+                      </span>
                     </button>
-                    <button type="button" aria-label={`移除 ${p.name}`} onClick={() => update((c) => c.filter((x) => x.garment_id !== p.garment_id))} className="px-2 text-[16px] text-wine">
+                    <button type="button" aria-label={`移除 ${p.name}`} onClick={() => { update((c) => c.filter((x) => x.garment_id !== p.garment_id)); if (selected === p.garment_id) setSelected(null); }} className="px-1.5 text-[16px] opacity-80">
                       ×
                     </button>
+                    <DragHandle {...handle} />
                   </div>
                 )}
               />
-            </div>
+              <p className="mt-2 text-center text-[11px] text-mauve">上面＝最上層｜按住 ☰ 拖拉</p>
+            </>
           )}
+        </section>
 
-          <div className="mt-4 space-y-3">
-            <Field label="穿搭名稱">
-              <input className={inputCls} value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} placeholder="例如：週末茶會" />
-            </Field>
-            <Field label="備註">
-              <input className={inputCls} value={notes} onChange={(e) => { setNotes(e.target.value); setDirty(true); }} />
-            </Field>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={favorite} onChange={(e) => { setFavorite(e.target.checked); setDirty(true); }} className="h-5 w-5 accent-amethyst" />
-              收藏這套穿搭
-            </label>
+        {/* ───── 揀選單品 ───── */}
+        <section className="frame order-3 p-3" aria-label="揀選單品">
+          <div className="flex items-center gap-2">
+            <div className="chip inline-flex flex-1 rounded-full p-0.5" role="group" aria-label="類型">
+              {(["clothes", "acc"] as const).map((k) => (
+                <button key={k} type="button" aria-pressed={group === k} onClick={() => { setGroup(k); setCat(""); }} className={`h-8 flex-1 rounded-full font-serif text-[14px] tracking-[0.1em] ${group === k ? "chip-on" : "border border-transparent text-mauve"}`}>
+                  {k === "clothes" ? "衣物" : "飾物"}
+                </button>
+              ))}
+            </div>
+            <div className="lg:hidden">
+              <ColumnSwitch value={cols} onChange={setCols} />
+            </div>
           </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={save} disabled={saving}>{saving ? "儲存中…" : "儲存穿搭"}</Button>
-            {id && (
-              <Button
-                variant="danger"
-                onClick={async () => {
-                  if (!confirm("確定刪除這套穿搭？單品不會被刪除。")) return;
-                  await api(`/api/outfits/${id}`, { method: "DELETE" });
-                  toast("已刪除");
-                  navigate("/outfits", true);
-                }}
-              >
-                刪除
-              </Button>
-            )}
+          <div className="relative mt-2.5">
+            <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-[16px] text-[#8a6d80]" />
+            <input type="search" className={`${inputCls} rounded-full py-2 pl-10`} placeholder="搜尋單品…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋單品" />
           </div>
-        </div>
-
-        <div className="mt-8 lg:mt-0">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-serif text-lg font-bold">揀選單品</h2>
-            <ColumnSwitch value={cols} onChange={setCols} />
+          <div className="mt-2">
+            <Chips options={groupCats} value={cat} onChange={(v) => setCat(v)} />
           </div>
-          <Chips options={tax.categories.map((c) => c.name)} value={cat} onChange={(v) => setCat(v)} />
           {!garments ? (
             <Spinner />
+          ) : visible.length === 0 ? (
+            <p className="py-8 text-center text-[13px] text-mauve">{garments.length ? "沒有符合的單品" : "衣櫃未有已入庫的衣物"}</p>
           ) : (
-            <div className={`mt-3 grid ${GRID_COLS[cols]}`}>
+            <div className={`mt-2 grid ${GRID_COLS[cols]} lg:max-h-[34rem] lg:grid-cols-2 lg:gap-2 lg:overflow-y-auto lg:pr-1`}>
               {visible.map((g) => (
                 <GarmentTile key={g.id} g={g} size="sm" selected={picked.some((p) => p.garment_id === g.id)} onSelect={() => toggle(g)} />
               ))}
             </div>
           )}
+        </section>
+      </div>
+
+      {/* ───── 穿搭組合 ───── */}
+      <section className="frame bow mt-8 px-3 pb-3 pt-5" aria-label="穿搭組合">
+        <h2 className="orn mb-2.5 text-center font-serif text-[15px] tracking-[0.14em] text-gold-soft">穿搭組合</h2>
+        <div className="scrollbar-none flex gap-2.5 overflow-x-auto pb-1">
+          <Link to="/outfits/new" className={`chip grid aspect-[3/4] w-20 shrink-0 place-items-center rounded-[14px] text-center text-[12px] ${!id ? "outline-2 outline-gold-soft" : ""}`}>
+            <span>
+              <IconPlus className="mx-auto mb-1 text-[20px]" />
+              新增組合
+            </span>
+          </Link>
+          {others.map((o) => (
+            <Link key={o.id} to={`/outfits/${o.id}`} aria-current={o.id === id ? "page" : undefined} className={`block w-20 shrink-0 rounded-[14px] ${o.id === id ? "outline-2 outline-offset-1 outline-gold-soft" : ""}`}>
+              <OutfitPreview o={o} />
+              <span className="mt-1 block truncate text-center text-[11px] text-mauve">{o.name}</span>
+            </Link>
+          ))}
         </div>
+      </section>
+
+      {/* ───── 穿搭資料及動作 ───── */}
+      <section className="mt-5 grid gap-3 sm:grid-cols-2">
+        <Field label="穿搭名稱">
+          <input className={inputCls} value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} placeholder="例如：週末茶會" />
+        </Field>
+        <Field label="備註">
+          <input className={inputCls} value={notes} onChange={(e) => { setNotes(e.target.value); setDirty(true); }} />
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={favorite} onChange={(e) => { setFavorite(e.target.checked); setDirty(true); }} className="h-5 w-5 accent-amethyst" />
+          收藏這套穿搭
+        </label>
+      </section>
+
+      <div className={`mt-4 grid gap-2 ${id ? "grid-cols-4" : "grid-cols-2"}`}>
+        <ActionBtn primary onClick={save} disabled={saving} label={saving ? "儲存中…" : "保存穿搭"}><IconSave /></ActionBtn>
+        <ActionBtn onClick={exportImage} disabled={busy} label="導出圖片"><IconImage /></ActionBtn>
+        {id && <ActionBtn onClick={duplicate} disabled={busy} label="複製組合"><IconCopy /></ActionBtn>}
+        {id && <ActionBtn onClick={remove} disabled={busy} label="刪除組合"><IconTrash /></ActionBtn>}
       </div>
     </div>
   );
@@ -394,8 +596,25 @@ export default function OutfitStudio({ id }: { id?: string }) {
 
 function ToolBtn({ onClick, label, children }: { onClick: () => void; label: string; children: string }) {
   return (
-    <button type="button" aria-label={label} onClick={onClick} className="min-h-8 rounded-full bg-white px-3 ring-1 ring-ink/10 active:bg-rose-soft">
+    <button type="button" aria-label={label} onClick={onClick} className="chip min-h-8 rounded-full px-3">
       {children}
+    </button>
+  );
+}
+
+function CanvasBtn({ onClick, label, disabled, pressed, children }: { onClick: () => void; label: string; disabled?: boolean; pressed?: boolean; children: ReactNode }) {
+  return (
+    <button type="button" aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick} className={`grid h-8 w-8 place-items-center rounded-lg text-[17px] disabled:opacity-35 ${pressed ? "btn-jewel" : "btn-dark"}`}>
+      {children}
+    </button>
+  );
+}
+
+function ActionBtn({ onClick, label, disabled, primary, children }: { onClick: () => void; label: string; disabled?: boolean; primary?: boolean; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-2xl px-1 text-[13px] disabled:opacity-40 ${primary ? "btn-jewel" : "btn-dark"}`}>
+      <span className="text-[22px]">{children}</span>
+      {label}
     </button>
   );
 }

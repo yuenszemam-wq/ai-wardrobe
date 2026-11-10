@@ -1,6 +1,7 @@
 import { ButtonHTMLAttributes, ReactNode, useEffect, useState } from "react";
 import { AI_STATUS_LABEL, displayName, Garment, imageUrl } from "../api";
 import { navigate } from "../router";
+import { IconHeart } from "./icons";
 
 export function Link({ to, className, children, onClick }: { to: string; className?: string; children: ReactNode; onClick?: () => void }) {
   return (
@@ -27,10 +28,10 @@ export function Button({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant }) {
   const styles: Record<BtnVariant, string> = {
-    primary: "bg-amethyst text-white active:bg-amethyst-deep disabled:opacity-40",
+    primary: "btn-jewel disabled:opacity-40",
     soft: "bg-rose text-ink active:bg-rose/70 disabled:opacity-40",
-    ghost: "bg-transparent text-amethyst-deep ring-1 ring-amethyst/30 active:bg-rose-soft disabled:opacity-40",
-    danger: "bg-transparent text-wine ring-1 ring-wine/30 active:bg-wine/10 disabled:opacity-40",
+    ghost: "bg-transparent text-amethyst-deep ring-1 ring-gold/60 active:bg-gold/15 disabled:opacity-40",
+    danger: "bg-transparent text-wine ring-1 ring-wine/50 active:bg-wine/10 disabled:opacity-40",
   };
   return (
     <button
@@ -42,39 +43,40 @@ export function Button({
   );
 }
 
-/** 拱窗形衣物卡：縮圖 lazy loading；沒有縮圖時才載入高清主圖 */
+/** 衣物卡：奶油色卡片，頂部掛小蝴蝶結；縮圖 lazy loading，沒有縮圖時才載入高清主圖 */
 export function GarmentTile({ g, size = "md", selected, onSelect }: { g: Garment; size?: "sm" | "md"; selected?: boolean; onSelect?: () => void }) {
   const src = imageUrl(g.thumb_image_id || g.primary_image_id);
+  const badge = g.ai_status && g.ai_status !== "done" ? AI_STATUS_LABEL[g.ai_status] : g.status === "review" ? "待確認" : "";
   const inner = (
-    <>
-      <div className={`arch relative aspect-[3/4] overflow-hidden ${selected ? "ring-2 ring-amethyst ring-offset-2 ring-offset-lace" : ""}`}>
+    <div className={`paper bow-sm p-1 ${selected ? "outline-2 outline-offset-2 outline-gold-soft" : ""}`} style={{ borderRadius: 14 }}>
+      <div className="relative aspect-[3/4] overflow-hidden rounded-[10px]">
         {src ? (
-          <img src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-[8%] pt-[14%]" />
+          <img src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-[7%] pt-[11%]" />
         ) : (
           <div className="absolute inset-0 grid place-items-center text-sm text-mauve">未有圖片</div>
         )}
-        {g.ai_status && g.ai_status !== "done" ? (
-          <span className="absolute bottom-2 left-2 rounded-full bg-ink/85 px-2 py-0.5 text-[11px] text-rose">{AI_STATUS_LABEL[g.ai_status]}</span>
-        ) : (
-          g.status === "review" && <span className="absolute bottom-2 left-2 rounded-full bg-ink/85 px-2 py-0.5 text-[11px] text-rose">待確認</span>
+        {badge && <span className="chip-on absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-full px-2 py-0.5 text-[10px]">{badge}</span>}
+        {g.is_favorite && (
+          <span className="absolute right-1 top-1.5 text-[17px] text-amethyst" aria-label="已收藏">
+            <IconHeart filled />
+          </span>
         )}
-        {g.is_favorite && <span className="absolute bottom-2 right-2 text-[15px] text-amethyst" aria-label="已收藏">♥</span>}
-        {selected && <span className="absolute right-2 top-[18%] grid h-6 w-6 place-items-center rounded-full bg-amethyst text-xs text-white">✓</span>}
+        {selected && <span className="btn-jewel absolute left-1 top-1.5 grid h-6 w-6 place-items-center rounded-full text-xs">✓</span>}
       </div>
-      <div className={`mt-1.5 truncate ${size === "sm" ? "text-[12px]" : "text-[13px]"} font-medium`}>{displayName(g)}</div>
+      <div className={`truncate px-1 pt-1 ${size === "sm" ? "pb-0.5 text-[11px]" : "text-[13px]"} font-medium`}>{displayName(g)}</div>
       {size === "md" && (
-        <div className="truncate text-[11px] text-mauve">{[g.subcategory || g.category, g.style].filter(Boolean).join("｜") || "未分類"}</div>
+        <div className="truncate px-1 pb-1 text-[11px] text-mauve">{[g.subcategory || g.category, g.style].filter(Boolean).join("｜") || "未分類"}</div>
       )}
-    </>
+    </div>
   );
   if (onSelect)
     return (
-      <button type="button" onClick={onSelect} className="block w-full text-left" aria-pressed={selected}>
+      <button type="button" onClick={onSelect} className="block w-full pt-2 text-left" aria-pressed={selected}>
         {inner}
       </button>
     );
   return (
-    <Link to={`/g/${g.id}`} className="block">
+    <Link to={`/g/${g.id}`} className="block pt-2">
       {inner}
     </Link>
   );
@@ -88,9 +90,7 @@ export function Chips<T extends string>({ options, value, onChange, allLabel = "
           key={o || "__all"}
           type="button"
           onClick={() => onChange(o)}
-          className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] transition-colors ${
-            value === o ? "bg-ink text-rose" : "bg-white text-ink ring-1 ring-ink/10"
-          }`}
+          className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] transition-colors ${value === o ? "chip-on" : "chip"}`}
         >
           {o ? labels?.[o] ?? o : allLabel}
         </button>
@@ -101,8 +101,8 @@ export function Chips<T extends string>({ options, value, onChange, allLabel = "
 
 export function PageTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex items-end justify-between gap-3 pb-3 pt-5">
-      <h1 className="font-serif text-[26px] font-bold leading-tight tracking-wide">{children}</h1>
+    <div className="flex items-end justify-between gap-3 pb-3 pt-6">
+      <h1 className="orn orn-l font-serif text-[26px] font-bold leading-tight tracking-[0.08em] text-gold-soft">{children}</h1>
       {action}
     </div>
   );
@@ -110,7 +110,7 @@ export function PageTitle({ children, action }: { children: ReactNode; action?: 
 
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="rounded-3xl bg-rose-soft px-6 py-10 text-center">
+    <div className="paper px-6 py-10 text-center">
       <p className="font-serif text-lg">{title}</p>
       {children && <div className="mt-2 text-sm text-mauve">{children}</div>}
     </div>
@@ -128,7 +128,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 export const inputCls =
-  "w-full rounded-2xl bg-white px-4 py-3 text-ink ring-1 ring-ink/10 placeholder:text-mauve/70 focus:outline-none focus:ring-2 focus:ring-amethyst";
+  "w-full rounded-2xl bg-white px-4 py-3 text-ink ring-1 ring-gold placeholder:text-mauve/80 focus:outline-none focus:ring-2 focus:ring-amethyst";
 
 export function Toast() {
   const [msg, setMsg] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
@@ -146,7 +146,7 @@ export function Toast() {
   if (!msg) return null;
   return (
     <div role="status" className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4">
-      <div className={`rounded-full px-5 py-2.5 text-sm shadow-lg ${msg.tone === "err" ? "bg-wine text-white" : "bg-ink text-rose"}`}>{msg.text}</div>
+      <div className={`rounded-full px-5 py-2.5 text-sm shadow-lg ${msg.tone === "err" ? "bg-[#a12c4b] text-white" : "btn-dark"}`}>{msg.text}</div>
     </div>
   );
 }
@@ -157,7 +157,7 @@ export function toast(text: string, tone: "ok" | "err" = "ok") {
 
 export function ProgressBar({ value }: { value: number }) {
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-rose">
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-gold/30">
       <div className="h-full rounded-full bg-amethyst transition-[width]" style={{ width: `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%` }} />
     </div>
   );
@@ -201,9 +201,7 @@ export function PickChips({
               if (!multi) onChange(on ? [] : [o]);
               else onChange(on ? value.filter((x) => x !== o) : [...value, o]);
             }}
-            className={`rounded-full px-3 py-1.5 text-[13px] transition-colors disabled:opacity-35 ${
-              on ? "bg-ink text-rose" : "bg-white text-ink ring-1 ring-ink/10"
-            } ${legacy ? "italic" : ""}`}
+            className={`rounded-full px-3 py-1.5 text-[13px] transition-colors disabled:opacity-35 ${on ? "chip-on" : "chip"} ${legacy ? "italic" : ""}`}
             title={legacy ? "已不在分類字典內" : undefined}
           >
             {o}
@@ -239,14 +237,14 @@ export function useColumns(key: string, initial = 3): [number, (n: number) => vo
 
 export function ColumnSwitch({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   return (
-    <div className="inline-flex items-center rounded-full bg-white p-0.5 ring-1 ring-ink/10" role="group" aria-label="每排張數">
+    <div className="chip inline-flex items-center rounded-full p-0.5" role="group" aria-label="每排張數">
       {[2, 3, 4, 5].map((n) => (
         <button
           key={n}
           type="button"
           aria-pressed={value === n}
           onClick={() => onChange(n)}
-          className={`h-7 min-w-7 rounded-full px-2 text-[13px] ${value === n ? "bg-ink text-rose" : "text-mauve"}`}
+          className={`h-7 min-w-7 rounded-full px-2 text-[13px] ${value === n ? "chip-on" : "border border-transparent text-mauve"}`}
         >
           {n}
         </button>
@@ -256,8 +254,8 @@ export function ColumnSwitch({ value, onChange }: { value: number; onChange: (n:
 }
 
 export const GRID_COLS: Record<number, string> = {
-  2: "grid-cols-2 gap-x-3 gap-y-5",
-  3: "grid-cols-3 gap-x-2.5 gap-y-4",
-  4: "grid-cols-4 gap-x-2 gap-y-3",
-  5: "grid-cols-5 gap-x-1.5 gap-y-3",
+  2: "grid-cols-2 gap-x-3 gap-y-3",
+  3: "grid-cols-3 gap-x-2.5 gap-y-2.5",
+  4: "grid-cols-4 gap-x-2 gap-y-2",
+  5: "grid-cols-5 gap-x-1.5 gap-y-1.5",
 };
