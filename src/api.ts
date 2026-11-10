@@ -57,6 +57,7 @@ export interface AiNormalized {
   source_type: string | null;
   brand_note: string | null;
   brand_evidence_from_generated_image: boolean;
+  same_garment_as?: string | null;
   warnings?: string[];
 }
 
@@ -75,6 +76,24 @@ export interface AiSuggestion {
 export interface ReviewItem extends Garment {
   has_processed: boolean;
   suggestion: AiSuggestion | null;
+  /** AI 認為與這一件是同一件衣服的另一件衣物（等使用者確認合併） */
+  merge_target?: { id: string; name: string; display_no: number | null; thumb_image_id: string | null; primary_image_id: string | null; has_processed: boolean } | null;
+}
+
+export interface HomeBg {
+  url: string;
+  width: number;
+  height: number;
+  ratio: number;
+  zoom: number;
+  x: number;
+  y: number;
+}
+export interface AppSettings {
+  ai_command: string;
+  ai_command_is_default: boolean;
+  default_ai_command: string;
+  home_bg: HomeBg | null;
 }
 
 export interface Garment {
@@ -89,6 +108,7 @@ export interface Garment {
   pattern: string | null;
   season: string | null;
   notes: string | null;
+  price?: number | null;
   attributes?: Record<string, string | string[]>;
   status: "active" | "review" | "archived";
   is_favorite: boolean;

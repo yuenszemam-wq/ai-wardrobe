@@ -14,6 +14,7 @@ export interface GarmentInput {
   season?: unknown;
   notes?: unknown;
   attributes?: unknown;
+  price?: unknown;
   status?: unknown;
   is_favorite?: unknown;
   uncertain_fields?: unknown;
@@ -126,6 +127,7 @@ export function normalizeGarment(input: GarmentInput, partial: boolean): Normali
     uncertain.add("name");
   }
   if (has("is_favorite")) values.is_favorite = input.is_favorite ? 1 : 0;
+  if (has("price")) values.price = normalizePrice(input.price);
   if (has("ai_note") || notes.length) {
     values.ai_note = [str(input.ai_note, 1000), ...notes].filter(Boolean).join("；") || null;
   }
@@ -135,6 +137,16 @@ export function normalizeGarment(input: GarmentInput, partial: boolean): Normali
     values.status = s;
   }
   return { values, uncertain: [...uncertain] };
+}
+
+/** 價錢（港幣）：空白＝未填；必須是 0 至 9,999,999 的數字，保留兩位小數 */
+export function normalizePrice(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  const text = typeof raw === "string" ? raw.replace(/[,，$＄\s]|HK\$?/gi, "") : raw;
+  if (text === "") return null;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 0 || n > 9_999_999) throw new HttpError(400, "bad_price", "價錢必須是 0 或以上的數字");
+  return Math.round(n * 100) / 100;
 }
 
 /** 屬性 JSON：鍵必須是分類字典內的屬性 ID；多選存陣列，單選存字串，空值移除 */
@@ -181,6 +193,7 @@ export function garmentToJson(r: Record<string, unknown>) {
     locked_fields: parseJsonArray(r.locked_fields),
     attributes: parseAttributes(r.attributes),
     is_favorite: Number(r.is_favorite) === 1,
+    price: r.price === null || r.price === undefined ? null : Number(r.price),
     name_is_placeholder: Number(r.name_is_placeholder) === 1,
   };
 }
@@ -209,14 +222,14 @@ export async function createGarment(env: Env, actor: Actor, input: GarmentInput,
 
   await env.DB.prepare(
     `INSERT INTO garments (id, name, category, subcategory, brand, style, primary_color, secondary_colors, pattern, season, notes,
-       status, is_favorite, uncertain_fields, ai_note, source, client_key, created_at, updated_at, attributes)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       status, is_favorite, uncertain_fields, ai_note, source, client_key, created_at, updated_at, attributes, price)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   )
     .bind(
       id, values.name, values.category ?? null, values.subcategory ?? null, values.brand ?? null, values.style ?? null,
       values.primary_color ?? null, values.secondary_colors ?? null, values.pattern ?? null, values.season ?? null,
       values.notes ?? null, status, values.is_favorite ?? 0, uncertain.length ? JSON.stringify(uncertain) : null,
-      values.ai_note ?? null, opts.source, opts.clientKey ?? null, now, now, values.attributes ?? null,
+      values.ai_note ?? null, opts.source, opts.clientKey ?? null, now, now, values.attributes ?? null, values.price ?? null,
     )
     .run();
   await audit(env, actor, "garment.create", id, { source: opts.source, status });
@@ -371,7 +384,17 @@ export async function listGarments(env: Env, params: URLSearchParams) {
   }
   const limit = Math.min(Math.max(Number(params.get("limit")) || 60, 1), 200);
   const offset = Math.max(Number(params.get("offset")) || 0, 0);
-  const sort = params.get("sort") === "name" ? "g.name COLLATE NOCASE ASC" : params.get("sort") === "updated" ? "g.updated_at DESC" : "g.created_at DESC";
+  const SORTS: Record<string, string> = {
+    name: "g.name COLLATE NOCASE ASC",
+    updated: "g.updated_at DESC",
+    price_desc: "g.price IS NULL, g.price DESC, g.created_at DESC",
+    price_asc: "g.price IS NULL, g.price ASC, g.created_at DESC",
+    oldest: "g.created_at ASC",
+  };
+  const sort = SORTS[params.get("sort") || ""] ?? "g.created_at DESC";
+  const priced = params.get("priced");
+  if (priced === "1") where.push("g.price IS NOT NULL");
+  else if (priced === "0") where.push("g.price IS NULL");
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const { results } = await env.DB.prepare(`${LIST_SELECT} ${whereSql} ORDER BY ${sort} LIMIT ? OFFSET ?`)
     .bind(...binds, limit + 1, offset)
@@ -398,7 +421,9 @@ export async function stats(env: Env) {
          SUM(CASE WHEN status != 'archived' THEN 1 ELSE 0 END) AS total,
          SUM(CASE WHEN status = 'review' THEN 1 ELSE 0 END) AS review,
          SUM(CASE WHEN is_favorite = 1 AND status != 'archived' THEN 1 ELSE 0 END) AS favorites,
-         SUM(CASE WHEN status != 'archived' AND NOT EXISTS (SELECT 1 FROM garment_images i WHERE i.garment_id = garments.id) THEN 1 ELSE 0 END) AS missing_image
+         SUM(CASE WHEN status != 'archived' AND NOT EXISTS (SELECT 1 FROM garment_images i WHERE i.garment_id = garments.id) THEN 1 ELSE 0 END) AS missing_image,
+         SUM(CASE WHEN status != 'archived' AND price IS NOT NULL THEN price ELSE 0 END) AS total_value,
+         SUM(CASE WHEN status != 'archived' AND price IS NOT NULL THEN 1 ELSE 0 END) AS priced_count
        FROM garments`,
     ),
     env.DB.prepare(`${LIST_SELECT} WHERE g.status != 'archived' ORDER BY g.created_at DESC LIMIT 12`),
@@ -419,6 +444,8 @@ export async function stats(env: Env) {
     review: c.review ?? 0,
     favorites: c.favorites ?? 0,
     missing_image: c.missing_image ?? 0,
+    total_value: Math.round((c.total_value ?? 0) * 100) / 100,
+    priced_count: c.priced_count ?? 0,
     open_batches: ((batches.results[0] || {}) as Record<string, number>).open_batches ?? 0,
     ai,
     ai_todo: ai.pending_ai + ai.ai_processing + ai.needs_rework + ai.failed,
@@ -428,4 +455,192 @@ export async function stats(env: Env) {
     recent: (recent.results as Record<string, unknown>[]).map(garmentToJson),
     favorite_items: (favs.results as Record<string, unknown>[]).map(garmentToJson),
   });
+}
+
+// ───────────────────────── 衣櫥分析 ─────────────────────────
+
+interface Bucket {
+  name: string;
+  n: number;
+  value: number;
+}
+function bump(map: Map<string, Bucket>, name: string, price: number | null) {
+  const b = map.get(name) ?? { name, n: 0, value: 0 };
+  b.n++;
+  if (price !== null) b.value += price;
+  map.set(name, b);
+}
+const sorted = (map: Map<string, Bucket>, limit = 40) =>
+  [...map.values()].sort((a, b) => b.n - a.n || b.value - a.value || a.name.localeCompare(b.name)).slice(0, limit).map((b) => ({ ...b, value: Math.round(b.value * 100) / 100 }));
+
+const PRICE_BANDS: [string, number, number][] = [
+  ["$500 以下", 0, 500],
+  ["$500–999", 500, 1000],
+  ["$1,000–1,999", 1000, 2000],
+  ["$2,000–2,999", 2000, 3000],
+  ["$3,000 或以上", 3000, Infinity],
+];
+
+/** 衣櫥分析：數量、價值、分類／顏色／風格／品牌／季節／圖案分佈、價錢分佈、最貴單品、每月新增、穿搭使用率（不含已封存） */
+export async function analysis(env: Env) {
+  const { results } = await env.DB.prepare(
+    `${LIST_SELECT} WHERE g.status != 'archived' ORDER BY g.created_at DESC LIMIT 5000`,
+  ).all<Record<string, unknown>>();
+  const { results: used } = await env.DB.prepare(
+    "SELECT oi.garment_id AS id, COUNT(*) AS n FROM outfit_items oi JOIN outfits o ON o.id = oi.outfit_id WHERE o.status != 'archived' GROUP BY oi.garment_id",
+  ).all<{ id: string; n: number }>();
+  const usage = new Map(used.map((u) => [u.id, Number(u.n)]));
+  const tax = currentTaxonomy();
+  const attrName = (id: string) => tax.attributes.find((a) => a.id === id)?.name ?? id;
+
+  const cat = new Map<string, Bucket>();
+  const sub = new Map<string, Bucket>();
+  const color = new Map<string, Bucket>();
+  const style = new Map<string, Bucket>();
+  const brand = new Map<string, Bucket>();
+  const season = new Map<string, Bucket>();
+  const month = new Map<string, Bucket>();
+  const extra = new Map<string, Map<string, Bucket>>(); // 其他屬性（圖案、材質、裝飾元素…）
+  const bands = PRICE_BANDS.map(([label]) => ({ label, n: 0 }));
+  const items = results.map(garmentToJson) as (ReturnType<typeof garmentToJson> & Record<string, unknown>)[];
+  let totalValue = 0;
+  let priced = 0;
+  let favorites = 0;
+  let inOutfits = 0;
+  let identified = 0;
+
+  for (const g of items) {
+    const price = g.price;
+    if (price !== null) {
+      totalValue += price;
+      priced++;
+      const i = PRICE_BANDS.findIndex(([, lo, hi]) => price >= lo && price < hi);
+      if (i >= 0) bands[i].n++;
+    }
+    if (g.is_favorite) favorites++;
+    if (usage.has(String(g.id))) inOutfits++;
+    if (!g.ai_status || g.ai_status === "done") identified++;
+    bump(cat, (g.category as string) || "未分類", price);
+    if (g.subcategory) bump(sub, String(g.subcategory), price);
+    for (const c of splitMulti(g.primary_color)) bump(color, c, price);
+    const styles = splitMulti(g.style);
+    for (const s of styles.length ? styles : ["未填風格"]) bump(style, s, price);
+    bump(brand, (g.brand as string) || "未有品牌", price);
+    for (const s of splitMulti(g.season)) bump(season, s, price);
+    bump(month, String(g.created_at).slice(0, 7), price);
+    for (const [k, v] of Object.entries(g.attributes)) {
+      if (k === "brand_confidence") continue;
+      const m = extra.get(k) ?? new Map<string, Bucket>();
+      for (const x of Array.isArray(v) ? v : [v]) if (x) bump(m, String(x), price);
+      extra.set(k, m);
+    }
+  }
+  const brief = (g: Record<string, unknown>) => ({
+    id: g.id, name: g.name, display_no: g.display_no ?? null, category: g.category, subcategory: g.subcategory, brand: g.brand, price: g.price,
+    primary_image_id: g.primary_image_id ?? null, thumb_image_id: g.thumb_image_id ?? null,
+  });
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return {
+    total: items.length,
+    total_value: round(totalValue),
+    priced_count: priced,
+    unpriced_count: items.length - priced,
+    avg_price: priced ? round(totalValue / priced) : null,
+    favorites,
+    identified,
+    in_outfits: inOutfits,
+    never_in_outfit: items.length - inOutfits,
+    by_category: sorted(cat),
+    by_subcategory: sorted(sub, 12),
+    by_color: sorted(color),
+    by_style: sorted(style),
+    by_brand: sorted(brand, 12),
+    by_season: sorted(season),
+    by_month: [...month.values()].sort((a, b) => a.name.localeCompare(b.name)).slice(-12).map((b) => ({ ...b, value: round(b.value) })),
+    attributes: [...extra.entries()]
+      .map(([id, m]) => ({ id, name: attrName(id), options: sorted(m, 10) }))
+      .filter((a) => a.options.length)
+      .sort((a, b) => b.options.reduce((s, o) => s + o.n, 0) - a.options.reduce((s, o) => s + o.n, 0))
+      .slice(0, 6),
+    price_bands: bands,
+    top_priced: items.filter((g) => g.price !== null).sort((a, b) => (b.price as number) - (a.price as number)).slice(0, 5).map(brief),
+    most_worn: items
+      .filter((g) => usage.has(String(g.id)))
+      .sort((a, b) => usage.get(String(b.id))! - usage.get(String(a.id))!)
+      .slice(0, 5)
+      .map((g) => ({ ...brief(g), outfits: usage.get(String(g.id)) })),
+  };
+}
+
+// ───────────────────────── 合併衣物（同一件衣服的透明圖與原相） ─────────────────────────
+
+/**
+ * 把 source 的圖片併入 target，然後刪除 source。
+ * - 圖片檔案不動（R2 key 不變），只改 D1 的 garment_id；兩邊有同一張相（同類型、SHA-256 相同）時保留 target 那張。
+ * - 有透明圖時以透明圖作主圖；target 未填的資料欄位由 source 補上（已填的不覆寫）。
+ * - source 出現過的穿搭改為指向 target。
+ */
+export async function mergeGarments(env: Env, actor: Actor, targetId: string, sourceId: string) {
+  if (!sourceId || targetId === sourceId) throw new HttpError(400, "bad_merge", "請選擇另一件衣物");
+  const [t, s] = await Promise.all(
+    [targetId, sourceId].map((id) => env.DB.prepare("SELECT * FROM garments WHERE id = ?").bind(id).first<Record<string, unknown>>()),
+  );
+  if (!t || !s) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
+
+  const { results: tImgs } = await env.DB.prepare("SELECT id, image_type, sha256 FROM garment_images WHERE garment_id = ?").bind(targetId).all<{ id: string; image_type: string; sha256: string }>();
+  const { results: sImgs } = await env.DB.prepare("SELECT id, image_type, sha256, r2_key, derived_from FROM garment_images WHERE garment_id = ?")
+    .bind(sourceId)
+    .all<{ id: string; image_type: string; sha256: string; r2_key: string; derived_from: string | null }>();
+  const have = new Set(tImgs.map((i) => `${i.image_type}:${i.sha256}`));
+  const dupIds = new Set(sImgs.filter((i) => have.has(`${i.image_type}:${i.sha256}`)).map((i) => i.id));
+  // 重複圖片連同它的縮圖一併捨棄
+  const drop = sImgs.filter((i) => dupIds.has(i.id) || (i.derived_from && dupIds.has(i.derived_from)));
+  const dropIds = new Set(drop.map((i) => i.id));
+  const move = sImgs.filter((i) => !dropIds.has(i.id));
+
+  // target 未填的欄位由 source 補上
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  const empty = (v: unknown) => v === null || v === undefined || v === "" || v === "[]";
+  for (const f of ["category", "subcategory", "brand", "style", "primary_color", "secondary_colors", "pattern", "season", "notes", "price"]) {
+    if (empty(t[f]) && !empty(s[f])) {
+      sets.push(`${f} = ?`);
+      binds.push(s[f]);
+    }
+  }
+  if (Number(t.name_is_placeholder) === 1 && Number(s.name_is_placeholder) !== 1 && s.name) {
+    sets.push("name = ?", "name_is_placeholder = 0");
+    binds.push(s.name);
+  }
+  const attrs = { ...parseAttributes(s.attributes), ...parseAttributes(t.attributes) };
+  if (Object.keys(attrs).length && JSON.stringify(attrs) !== JSON.stringify(parseAttributes(t.attributes))) {
+    sets.push("attributes = ?");
+    binds.push(JSON.stringify(attrs));
+  }
+  if (Number(s.is_favorite) === 1) sets.push("is_favorite = 1");
+  const now = nowIso();
+  sets.push("updated_at = ?", "version = version + 1");
+  binds.push(now);
+
+  const stmts: D1PreparedStatement[] = [];
+  for (const i of drop) stmts.push(env.DB.prepare("DELETE FROM garment_images WHERE id = ?").bind(i.id));
+  if (move.length) stmts.push(env.DB.prepare("UPDATE garment_images SET garment_id = ?, is_primary = 0 WHERE garment_id = ?").bind(targetId, sourceId));
+  // 主圖：透明圖優先，其次沿用 target 原本的主圖
+  stmts.push(env.DB.prepare("UPDATE garment_images SET is_primary = 0 WHERE garment_id = ?").bind(targetId));
+  stmts.push(
+    env.DB.prepare(
+      `UPDATE garment_images SET is_primary = 1 WHERE id = (
+         SELECT id FROM garment_images WHERE garment_id = ? AND image_type != 'thumbnail' AND mime_type NOT IN ('image/heic','image/heif')
+         ORDER BY CASE WHEN image_type = 'processed' AND has_alpha = 1 THEN 0 WHEN image_type = 'processed' THEN 1 ELSE 2 END,
+                  CASE WHEN id IN (${tImgs.map(() => "?").join(",") || "''"}) THEN 0 ELSE 1 END, created_at LIMIT 1)`,
+    ).bind(targetId, ...tImgs.map((i) => i.id)),
+  );
+  stmts.push(env.DB.prepare("UPDATE OR IGNORE outfit_items SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
+  stmts.push(env.DB.prepare("UPDATE import_jobs SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
+  stmts.push(env.DB.prepare(`UPDATE garments SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, targetId));
+  stmts.push(env.DB.prepare("DELETE FROM garments WHERE id = ?").bind(sourceId));
+  await env.DB.batch(stmts);
+  if (drop.length) await env.IMAGES.delete(drop.map((d) => d.r2_key)).catch((e) => console.error("merge: R2 delete failed", e));
+  await audit(env, actor, "garment.merge", targetId, { source: sourceId, moved: move.length, dropped: drop.length });
+  return { garment_id: targetId, merged_from: sourceId, images_moved: move.length, duplicates_dropped: drop.length };
 }

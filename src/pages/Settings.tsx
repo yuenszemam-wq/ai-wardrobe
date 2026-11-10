@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, Garment, formatBytes, formatDate, uploadImage } from "../api";
-import { Button, Field, inputCls, Link, PageTitle, toast } from "../components/ui";
-import { makeThumbnail } from "../imageProcessing";
+import { api, AppSettings, formatDate } from "../api";
+import { Button, copyText, Field, inputCls, Link, PageTitle, setSettingsCache, toast, useSettings } from "../components/ui";
 import { CopyBlock } from "./ImportCenter";
 
 interface TokenRow {
@@ -18,12 +17,9 @@ export default function Settings({ username, onLogout }: { username: string | nu
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [name, setName] = useState("ChatGPT");
   const [fresh, setFresh] = useState<{ name: string; url: string } | null>(null);
-  const [usage, setUsage] = useState<{ day: string; name: string | null; actor: string; calls: number; upload_bytes: number }[]>([]);
-  const [maint, setMaint] = useState("");
 
   const load = () => {
     api<{ tokens: TokenRow[] }>("/api/tokens").then((r) => setTokens(r.tokens));
-    api<{ usage: typeof usage }>("/api/usage").then((r) => setUsage(r.usage.filter((u) => u.actor !== "login_fail").slice(0, 10)));
   };
   useEffect(load, []);
 
@@ -37,37 +33,13 @@ export default function Settings({ username, onLogout }: { username: string | nu
     }
   }
 
-  async function backfillThumbs() {
-    setMaint("檢查中…");
-    const r = await api<{ garments: Garment[] }>("/api/garments?limit=200&status=all");
-    const todo = r.garments.filter((g) => g.primary_image_id && !g.thumb_image_id);
-    let n = 0;
-    for (const g of todo) {
-      try {
-        setMaint(`正在產生縮圖 ${n + 1}/${todo.length}`);
-        const blob = await (await fetch(`/api/images/${g.primary_image_id}`, { credentials: "same-origin" })).blob();
-        const thumb = await makeThumbnail(blob);
-        await uploadImage("/api/images/upload", { garment_id: g.id, image_type: "thumbnail", derived_from: g.primary_image_id! }, thumb, "thumb.webp");
-        n++;
-      } catch {
-        /* 繼續處理下一件 */
-      }
-    }
-    setMaint(todo.length ? `已為 ${n} 件衣物產生縮圖` : "所有衣物已有縮圖");
-  }
-
-  async function orphans(del: boolean) {
-    const r = await api<{ scanned: number; orphans: number; deleted: number }>("/api/maintenance/orphans", { method: "POST", json: { delete: del } });
-    setMaint(del ? `已刪除 ${r.deleted} 個孤兒檔案` : `R2 共 ${r.scanned} 個檔案，其中 ${r.orphans} 個沒有資料庫記錄`);
-  }
-
   const active = tokens.filter((t) => !t.revoked_at);
 
   return (
     <div>
       <PageTitle>設定</PageTitle>
 
-      <Link to="/taxonomy" className="mb-4 flex items-center justify-between rounded-3xl bg-white px-4 py-4 ring-1 ring-ink/5">
+      <Link to="/taxonomy" className="paper mb-5 flex items-center justify-between px-4 py-4">
         <span>
           <span className="block font-serif text-lg font-bold">分類管理</span>
           <span className="block text-[13px] text-mauve">主分類、子分類、屬性及選項：自由增加、改名、刪除、排序</span>
@@ -75,9 +47,9 @@ export default function Settings({ username, onLogout }: { username: string | nu
         <span className="text-mauve">›</span>
       </Link>
 
-      <section className="rounded-3xl bg-ink p-4 text-rose">
-        <h2 className="font-serif text-lg font-bold">連接 ChatGPT／Claude</h2>
-        <p className="mt-1 text-[13px] text-rose/80">
+      <section className="frame pat-dots p-4">
+        <h2 className="font-serif text-lg font-bold text-gold-soft">連接 ChatGPT／Claude</h2>
+        <p className="mt-1 text-[13px] text-mauve">
           每個 AI 用一條獨立網址，方便日後個別停用。網址本身就是密碼，請勿分享。
         </p>
         <div className="mt-3 flex gap-2">
@@ -123,42 +95,10 @@ export default function Settings({ username, onLogout }: { username: string | nu
         )}
       </section>
 
-      <section className="mt-6">
-        <h2 className="font-serif text-lg font-bold">AI 使用量</h2>
-        <p className="mt-1 text-[13px] text-mauve">每條連接每日上限 3,000 次呼叫及 800 MB 上傳，防止意外大量使用。</p>
-        {usage.length === 0 ? (
-          <p className="mt-2 text-sm text-mauve">暫時未有紀錄。</p>
-        ) : (
-          <table className="mt-2 w-full text-left text-[13px]">
-            <thead className="text-mauve">
-              <tr><th className="py-1 font-normal">日期</th><th className="font-normal">連接</th><th className="font-normal">呼叫</th><th className="font-normal">上傳</th></tr>
-            </thead>
-            <tbody>
-              {usage.map((u) => (
-                <tr key={u.day + u.actor} className="border-t border-ink/5">
-                  <td className="py-1.5">{u.day.slice(5)}</td>
-                  <td className="truncate">{u.name || u.actor}</td>
-                  <td>{u.calls}</td>
-                  <td>{formatBytes(u.upload_bytes)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <AiCommandEditor />
 
-      <section className="mt-6">
-        <h2 className="font-serif text-lg font-bold">維護</h2>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={backfillThumbs}>補回缺少的縮圖</Button>
-          <Button variant="ghost" onClick={() => orphans(false)}>檢查孤兒檔案</Button>
-          <Button variant="danger" onClick={() => confirm("刪除 R2 中沒有資料庫記錄、超過 1 小時的檔案？") && orphans(true)}>清理孤兒檔案</Button>
-        </div>
-        {maint && <p className="mt-2 text-[13px] text-mauve">{maint}</p>}
-      </section>
-
-      <section className="mt-6">
-        <h2 className="font-serif text-lg font-bold">帳戶</h2>
+      <section className="mt-7">
+        <h2 className="font-serif text-lg font-bold text-gold-soft">帳戶</h2>
         <Field label="登入身份">
           <p className="text-[15px]">{username}</p>
         </Field>
@@ -174,5 +114,63 @@ export default function Settings({ username, onLogout }: { username: string | nu
         </Button>
       </section>
     </div>
+  );
+}
+
+/** 「交給 AI 填寫」按鈕複製的指令：可自行修改寫法，或還原預設 */
+function AiCommandEditor() {
+  const settings = useSettings();
+  const [text, setText] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (settings && text === null) setText(settings.ai_command);
+  }, [settings, text]);
+  if (!settings || text === null) return null;
+  const changed = text.trim() !== settings.ai_command;
+
+  async function save(value: string) {
+    setBusy(true);
+    try {
+      const next = await api<AppSettings>("/api/settings", { method: "PUT", json: { ai_command: value } });
+      setSettingsCache(next);
+      setText(next.ai_command);
+      toast(next.ai_command_is_default ? "已還原預設指令" : "已儲存指令");
+    } catch (e) {
+      toast((e as Error).message, "err");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="frame mt-5 p-4">
+      <h2 className="font-serif text-lg font-bold text-gold-soft">AI 指令</h2>
+      <p className="mt-1 text-[13px] text-mauve">按「交給 AI 填寫」時會複製這段文字。可以改成你自己的寫法，例如加上「名稱用日文原名」「不用查品牌」。</p>
+      <textarea className={`${inputCls} mt-3 min-h-52 text-[14px] leading-relaxed`} value={text} onChange={(e) => setText(e.target.value)} aria-label="AI 指令" maxLength={4000} />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button disabled={busy || !changed || !text.trim()} onClick={() => save(text)}>
+          {busy ? "儲存中…" : "儲存"}
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={async () => {
+            const ok = await copyText(text);
+            toast(ok ? "已複製" : "未能自動複製，請長按文字複製", ok ? "ok" : "err");
+          }}
+        >
+          複製
+        </Button>
+        {!settings.ai_command_is_default && (
+          <button
+            type="button"
+            disabled={busy}
+            className="ml-auto text-[13px] text-amethyst-deep underline underline-offset-4"
+            onClick={() => confirm("還原為預設指令？你修改過的寫法會被取代。") && save("")}
+          >
+            還原預設
+          </button>
+        )}
+      </div>
+    </section>
   );
 }

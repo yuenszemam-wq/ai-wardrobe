@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { attributesFor, attributeValues, isColumnAttribute, Taxonomy } from "../../shared/taxonomy";
-import { AI_STATUS_LABEL, api, displayName, formatBytes, formatDate, Garment, GarmentImage, STATUS_LABEL, uploadImage } from "../api";
-import { Button, Field, inputCls, Link, PickChips, ProgressBar, Spinner, toast } from "../components/ui";
+import { AI_STATUS_LABEL, api, displayName, formatBytes, formatDate, Garment, GarmentImage, imageUrl, STATUS_LABEL, uploadImage } from "../api";
+import { IconChevronLeft, IconClose, IconHeart, IconMerge, IconPencil } from "../components/icons";
+import { AiHandoffButton, Button, Field, inputCls, Link, money, PickChips, ProgressBar, Sheet, Spinner, toast } from "../components/ui";
+import { fillQueue } from "../fillQueue";
 import { useTaxonomy } from "../taxonomy";
 import { makeThumbnail, prepareForUpload } from "../imageProcessing";
 import { navigate } from "../router";
@@ -17,13 +19,17 @@ const FIELD_LABEL: Record<string, string> = {
   pattern: "圖案描述",
   season: "季節",
   attributes: "屬性",
+  price: "價錢",
+  notes: "備註",
 };
 
 export default function GarmentDetail({ id }: { id: string }) {
   const [g, setG] = useState<Garment | null>(null);
   const [err, setErr] = useState("");
   const [viewId, setViewId] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  // 上傳後直接進入填寫資料（/g/:id?edit=1）
+  const [editing, setEditing] = useState(() => new URLSearchParams(location.search).get("edit") === "1");
+  const [merging, setMerging] = useState(false);
   const [checker, setChecker] = useState(false);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const tax = useTaxonomy();
@@ -40,6 +46,9 @@ export default function GarmentDetail({ id }: { id: string }) {
   }
 
   useEffect(() => {
+    setG(null);
+    setViewId(null);
+    setEditing(new URLSearchParams(location.search).get("edit") === "1");
     load().then((data) => data && backfillThumbnail(data).then((did) => did && load()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -79,52 +88,95 @@ export default function GarmentDetail({ id }: { id: string }) {
     }
   }
 
+  const queue = fillQueue.position(id);
+  const pending = g.ai_status && g.ai_status !== "done";
+
+  function nextInQueue() {
+    const next = fillQueue.next(id);
+    if (next) navigate(`/g/${next}?edit=1`, true);
+    else {
+      fillQueue.clear();
+      navigate("/?tab=todo#todo", true);
+    }
+  }
+
   return (
     <div>
-      <div className="pt-4">
-        <button type="button" onClick={() => history.back()} className="text-[14px] text-amethyst-deep">
-          ‹ 返回
+      <div className="flex items-center justify-between gap-2 pt-4">
+        <button type="button" onClick={() => (queue ? (fillQueue.clear(), navigate("/wardrobe", true)) : history.back())} className="btn-dark flex items-center gap-1 rounded-full py-1.5 pl-2 pr-3.5 text-[13px]">
+          <IconChevronLeft className="text-[15px]" />
+          {queue ? "結束填寫" : "返回"}
         </button>
+        {queue && (
+          <span className="text-[13px] text-mauve">
+            填寫資料 {queue.index + 1}／{queue.total}
+          </span>
+        )}
+        {!editing && (
+          <button type="button" onClick={() => setEditing(true)} className="btn-jewel flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[14px]">
+            <IconPencil className="text-[14px]" />
+            編輯資料
+          </button>
+        )}
       </div>
 
-      <div className="mt-3 lg:grid lg:grid-cols-2 lg:gap-8">
+      <div className="mt-4 lg:grid lg:grid-cols-2 lg:gap-8">
         <div>
-          <div className={`relative aspect-[3/4] overflow-hidden ${checker ? "checker rounded-2xl" : "arch"}`}>
-            {shown ? (
-              <img
-                src={shown.url}
-                alt={displayName(g)}
-                className={`absolute inset-0 h-full w-full object-contain ${checker ? "p-2" : "p-[6%] pt-[12%]"}`}
-                decoding="async"
-              />
-            ) : (
-              <div className="absolute inset-0 grid place-items-center text-mauve">未有圖片</div>
+          <div className={`relative mx-auto ${editing ? "max-w-[13rem]" : "max-w-sm"} lg:max-w-none`}>
+            <div className={`relative aspect-[3/4] overflow-hidden ${checker ? "checker rounded-2xl" : "arch"}`}>
+              {shown ? (
+                <img
+                  src={shown.url}
+                  alt={displayName(g)}
+                  className={`absolute inset-0 h-full w-full object-contain ${checker ? "p-2" : "px-[7%] pb-[6%] pt-[17%]"}`}
+                  decoding="async"
+                />
+              ) : (
+                <div className="absolute inset-0 grid place-items-center text-mauve">未有圖片</div>
+              )}
+            </div>
+            {/* 刪除目前顯示的這張圖：右上角的小交叉 */}
+            {shown && (
+              <button
+                type="button"
+                aria-label="刪除此圖"
+                className="btn-dark absolute right-0 top-0 grid h-8 w-8 place-items-center rounded-full text-[14px]"
+                onClick={async () => {
+                  if (!confirm("確定刪除這張圖片？R2 中的檔案亦會刪除。")) return;
+                  await api(`/api/images/${shown.id}`, { method: "DELETE" });
+                  setViewId(null);
+                  toast("已刪除圖片");
+                  load();
+                }}
+              >
+                <IconClose />
+              </button>
             )}
           </div>
-          {shown && (
-            <div className="mt-2 flex items-center justify-between text-[12px] text-mauve">
+          {shown && !editing && (
+            <div className="mt-2 flex items-center justify-between gap-2 text-[12px] text-mauve">
               <span>
                 {shown.image_type === "processed" ? "去背圖" : shown.variant === "preview" ? "HEIC 原檔預覽" : "原始照片"}｜{shown.width}×{shown.height}｜{formatBytes(shown.file_size)}
                 {shown.has_alpha ? "｜透明" : ""}
                 {heicOriginal ? `｜HEIC 原檔 ${formatBytes(heicOriginal.file_size)} 已保存` : ""}
-                {!(g.images || []).some((i) => i.image_type === "processed") ? "｜等待去背" : ""}
+                {!(g.images || []).some((i) => i.image_type === "processed") ? "｜未有去背圖" : ""}
               </span>
-              <button type="button" className="text-amethyst-deep" onClick={() => setChecker((v) => !v)}>
+              <button type="button" className="shrink-0 text-amethyst-deep" onClick={() => setChecker((v) => !v)}>
                 {checker ? "一般背景" : "檢查透明"}
               </button>
             </div>
           )}
           {fullImages.length > 1 && (
-            <div className="scrollbar-none mt-3 flex gap-2 overflow-x-auto">
+            <div className="scrollbar-none mt-3 flex justify-center gap-2 overflow-x-auto">
               {fullImages.map((im) => (
                 <button
                   key={im.id}
                   type="button"
                   onClick={() => setViewId(im.id)}
-                  className={`relative h-20 w-16 shrink-0 overflow-hidden rounded-xl bg-rose-soft ${shown?.id === im.id ? "ring-2 ring-amethyst" : ""}`}
+                  className={`relative h-20 w-16 shrink-0 overflow-hidden rounded-xl bg-rose-soft ${shown?.id === im.id ? "ring-2 ring-[#f2a7c3]" : "ring-1 ring-gold/50"}`}
                 >
                   <img src={thumbFor(g, im)} alt="" loading="lazy" className="h-full w-full object-contain" />
-                  {im.is_primary && <span className="absolute inset-x-0 bottom-0 bg-ink/80 text-center text-[10px] text-rose">主圖</span>}
+                  <span className="absolute inset-x-0 bottom-0 bg-ink/80 text-center text-[10px] text-rose">{im.is_primary ? "主圖" : im.image_type === "processed" ? "去背圖" : "原相"}</span>
                 </button>
               ))}
             </div>
@@ -134,12 +186,17 @@ export default function GarmentDetail({ id }: { id: string }) {
               <ProgressBar value={uploadPct} />
             </div>
           )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <FileButton label="加入去背圖" onFile={(f) => addImage(f, "processed")} disabled={uploadPct !== null} />
-            <FileButton label="加入原相" onFile={(f) => addImage(f, "original")} disabled={uploadPct !== null} variant="ghost" />
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            <FileButton label="＋ 去背圖" onFile={(f) => addImage(f, "processed")} disabled={uploadPct !== null} />
+            <FileButton label="＋ 原相" onFile={(f) => addImage(f, "original")} disabled={uploadPct !== null} />
+            <button type="button" onClick={() => setMerging(true)} className="chip inline-flex min-h-9 items-center gap-1 rounded-full px-3.5 text-[13px]">
+              <IconMerge className="text-[14px]" />
+              合併同一件
+            </button>
             {shown && !shown.is_primary && (
-              <Button
-                variant="ghost"
+              <button
+                type="button"
+                className="chip-on inline-flex min-h-9 items-center rounded-full px-3.5 text-[13px]"
                 onClick={async () => {
                   await api(`/api/images/${shown.id}/primary`, { method: "POST" });
                   toast("已設為主圖");
@@ -147,52 +204,43 @@ export default function GarmentDetail({ id }: { id: string }) {
                 }}
               >
                 設為主圖
-              </Button>
-            )}
-            {shown && (
-              <Button
-                variant="danger"
-                onClick={async () => {
-                  if (!confirm("確定刪除這張圖片？R2 中的檔案亦會刪除。")) return;
-                  await api(`/api/images/${shown.id}`, { method: "DELETE" });
-                  setViewId(null);
-                  toast("已刪除圖片");
-                  load();
-                }}
-              >
-                刪除此圖
-              </Button>
+              </button>
             )}
           </div>
         </div>
 
         <div className="mt-6 lg:mt-0">
           <div className="flex items-start justify-between gap-3">
-            <h1 className="font-serif text-[24px] font-bold leading-snug">{displayName(g)}</h1>
+            <h1 className="font-serif text-[24px] font-bold leading-snug text-gold-soft">{displayName(g)}</h1>
             <button
               type="button"
               aria-label={g.is_favorite ? "取消收藏" : "收藏"}
               onClick={() => patch({ is_favorite: !g.is_favorite }, g.is_favorite ? "已取消收藏" : "已收藏")}
-              className={`text-[26px] leading-none ${g.is_favorite ? "text-amethyst" : "text-mauve/50"}`}
+              className={`text-[26px] leading-none ${g.is_favorite ? "text-[#f2a7c3]" : "text-mauve/60"}`}
             >
-              ♥
+              <IconHeart filled={g.is_favorite} />
             </button>
           </div>
           <p className="mt-1 text-[13px] text-mauve">
             {STATUS_LABEL[g.status]}
-            {g.ai_status && g.ai_status !== "done" ? `｜${AI_STATUS_LABEL[g.ai_status]}` : ""}｜{formatDate(g.created_at)} 加入{g.source ? `｜來源：${g.source}` : ""}
+            {pending ? `｜${AI_STATUS_LABEL[g.ai_status!]}` : ""}｜{formatDate(g.created_at)} 加入{g.source ? `｜來源：${g.source}` : ""}
           </p>
           {g.ai_status === "pending_review" && (
-            <Link to="/?tab=pending_review" className="mt-3 block rounded-2xl bg-ink px-4 py-3 text-[14px] text-rose">
+            <Link to="/?tab=pending_review" className="frame mt-3 block px-4 py-3 text-[14px]">
               AI 已提交整理建議，按此到主頁「待整理」對比及確認 →
             </Link>
           )}
-          {g.locked_fields && g.locked_fields.length > 0 && (
-            <p className="mt-1 text-[12px] text-mauve">已人工修正（AI 不會覆寫）：{g.locked_fields.map((f) => FIELD_LABEL[f] || f).join("、")}</p>
+
+          {/* 未整理的衣物：自己填，或把指令交給 AI */}
+          {pending && g.ai_status !== "pending_review" && (
+            <div className="frame pat-dots mt-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <p className="min-w-0 flex-1 text-[13px] text-mauve">不想逐項填？複製指令，貼到已連接電子衣櫃的 Claude／ChatGPT，AI 會查看圖片後提交建議。</p>
+              <AiHandoffButton />
+            </div>
           )}
 
-          {g.status === "review" && (
-            <div className="mt-4 rounded-2xl bg-rose-soft p-4 text-sm">
+          {g.status === "review" && !editing && (
+            <div className="paper mt-4 p-4 text-sm">
               <p className="font-medium">此衣物待你確認</p>
               {g.uncertain_fields.length > 0 && (
                 <p className="mt-1 text-mauve">AI 未能確定：{g.uncertain_fields.map((f) => FIELD_LABEL[f] || f).join("、")}</p>
@@ -200,9 +248,6 @@ export default function GarmentDetail({ id }: { id: string }) {
               {g.ai_note && <p className="mt-1 text-mauve">{g.ai_note}</p>}
               <div className="mt-3 flex gap-2">
                 <Button onClick={() => patch({ confirm: true }, "已確認入庫")}>確認入庫</Button>
-                <Button variant="ghost" onClick={() => setEditing(true)}>
-                  修改分類
-                </Button>
               </div>
             </div>
           )}
@@ -211,24 +256,44 @@ export default function GarmentDetail({ id }: { id: string }) {
             <EditForm
               g={g}
               tax={tax}
+              saveLabel={pending ? (queue && queue.index + 1 < queue.total ? "入庫，下一件" : "儲存並入庫") : "儲存"}
+              onSkip={queue ? nextInQueue : undefined}
               onCancel={() => setEditing(false)}
               onSave={async (body) => {
-                await patch(body);
-                setEditing(false);
+                // 待整理的衣物：儲存即確認入庫
+                await patch(pending ? { ...body, confirm: true } : body, pending ? "已儲存並入庫" : "已儲存");
+                if (queue) nextInQueue();
+                else setEditing(false);
               }}
+              // 只儲存已填的部分，保持「待 AI 辨認」：已填的欄位會鎖定，AI 不會覆寫
+              onSaveDraft={
+                pending
+                  ? async (body) => {
+                      await patch(body, "已儲存，其餘可交給 AI 填寫");
+                      if (queue) nextInQueue();
+                      else setEditing(false);
+                    }
+                  : undefined
+              }
             />
           ) : (
             <>
+              {/* 沒有填寫的欄位不顯示 */}
               <dl className="mt-5 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-2.5 text-[15px]">
                 <Row k="主分類" v={g.category} uncertain={g.uncertain_fields.includes("category")} />
                 <Row k="子分類" v={g.subcategory} />
                 <Row k="品牌" v={g.brand} uncertain={g.uncertain_fields.includes("brand")} />
+                <Row k="價錢" v={g.price != null ? `HK${money(g.price)}` : null} />
                 {shownAttributes(tax, g).map((a) => (
                   <Row key={a.id} k={a.name} v={attributeValues(g, a.id).join("、")} uncertain={isColumnAttribute(a.id) && g.uncertain_fields.includes(a.id)} />
                 ))}
-                {g.pattern && <Row k="圖案描述" v={g.pattern} />}
-                {g.notes && <Row k="備註" v={g.notes} />}
+                <Row k="圖案描述" v={g.pattern} />
+                <Row k="備註" v={g.notes} />
               </dl>
+              {!hasAnyDetail(tax, g) && <p className="mt-5 text-[14px] text-mauve">仍未填寫資料。按上方「編輯資料」開始填寫。</p>}
+              {g.locked_fields && g.locked_fields.length > 0 && (
+                <p className="mt-4 text-[12px] text-mauve">已人工修正（AI 不會覆寫）：{g.locked_fields.map((f) => FIELD_LABEL[f] || f).join("、")}</p>
+              )}
               {g.outfits && g.outfits.length > 0 && (
                 <div className="mt-4 text-sm">
                   <span className="text-mauve">出現在穿搭：</span>
@@ -239,8 +304,7 @@ export default function GarmentDetail({ id }: { id: string }) {
                   ))}
                 </div>
               )}
-              <div className="mt-6 flex flex-wrap gap-2">
-                <Button onClick={() => setEditing(true)}>編輯資料</Button>
+              <div className="mt-7 flex flex-wrap gap-2 border-t border-gold/25 pt-4">
                 {g.status !== "archived" ? (
                   <Button variant="ghost" onClick={() => patch({ status: "archived" }, "已封存")}>
                     封存
@@ -253,7 +317,7 @@ export default function GarmentDetail({ id }: { id: string }) {
                 <Button
                   variant="danger"
                   onClick={async () => {
-                    if (!confirm(`確定永久刪除「${g.name}」及其所有圖片？此動作無法復原。`)) return;
+                    if (!confirm(`確定永久刪除「${displayName(g)}」及其所有圖片？此動作無法復原。`)) return;
                     await api(`/api/garments/${id}`, { method: "DELETE" });
                     toast("已刪除");
                     navigate("/wardrobe", true);
@@ -266,8 +330,78 @@ export default function GarmentDetail({ id }: { id: string }) {
           )}
         </div>
       </div>
+
+      {merging && (
+        <MergeSheet
+          g={g}
+          onClose={() => setMerging(false)}
+          onMerged={async () => {
+            setMerging(false);
+            setViewId(null);
+            await load();
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/** 揀選另一件衣物（同一件衣服的原相或透明圖），把它的圖片併入目前這一件 */
+function MergeSheet({ g, onClose, onMerged }: { g: Garment; onClose: () => void; onMerged: () => Promise<void> }) {
+  const [list, setList] = useState<Garment[] | null>(null);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    // 最近上傳的排最前：同一批上傳的另一張相通常就在頭幾件
+    api<{ garments: Garment[] }>("/api/garments?limit=200&status=all&sort=updated").then((r) => setList(r.garments.filter((x) => x.id !== g.id)));
+  }, [g.id]);
+  const kw = q.trim().toLowerCase();
+  const shown = (list ?? []).filter((x) => !kw || `${displayName(x)} ${x.brand ?? ""} ${x.subcategory ?? ""}`.toLowerCase().includes(kw));
+
+  async function merge(other: Garment) {
+    if (busy) return;
+    if (!confirm(`把「${displayName(other)}」的圖片併入「${displayName(g)}」？\n「${displayName(other)}」這個項目會被移除，圖片及已填資料會保留在這一件。`)) return;
+    setBusy(true);
+    try {
+      await api(`/api/garments/${g.id}/merge`, { method: "POST", json: { source_id: other.id } });
+      fillQueue.remove(other.id);
+      toast("已合併，透明圖會作主圖");
+      await onMerged();
+    } catch (e) {
+      toast((e as Error).message, "err");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet title="合併同一件衣服" onClose={onClose}>
+      <p className="text-[13px] text-mauve">同一件衣服分別上傳了透明圖和原相？揀選另一件，它的圖片會搬到這一件，並以透明圖作主圖。</p>
+      <input type="search" className={`${inputCls} mt-3 rounded-full py-2`} placeholder="搜尋名稱、品牌…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋衣物" />
+      {!list ? (
+        <Spinner />
+      ) : shown.length === 0 ? (
+        <p className="py-8 text-center text-[13px] text-mauve">沒有其他衣物</p>
+      ) : (
+        <ul className="mt-3 grid grid-cols-3 gap-x-3 gap-y-3">
+          {shown.slice(0, 60).map((x) => (
+            <li key={x.id}>
+              <button type="button" disabled={busy} onClick={() => merge(x)} className="block w-full text-center disabled:opacity-50">
+                <span className="arch relative block aspect-[3/4] overflow-hidden">
+                  {(x.thumb_image_id || x.primary_image_id) && <img src={imageUrl(x.thumb_image_id || x.primary_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain px-[9%] pb-[8%] pt-[20%]" />}
+                </span>
+                <span className="mt-1 block truncate text-[11px]">{displayName(x)}</span>
+                <span className="block text-[10px] text-mauve">{x.has_processed ? "有透明圖" : "只有原相"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Sheet>
+  );
+}
+
+function hasAnyDetail(tax: Taxonomy, g: Garment) {
+  return Boolean(g.category || g.subcategory || g.brand || g.price != null || g.pattern || g.notes || tax.attributes.some((a) => attributeValues(g, a.id).length));
 }
 
 function thumbFor(g: Garment, im: GarmentImage) {
@@ -290,28 +424,24 @@ async function backfillThumbnail(g: Garment): Promise<boolean> {
   }
 }
 
-/** 顯示：適用於此主分類的屬性，加上任何已有值的屬性 */
+/** 顯示：只列出已有值的屬性（未填的欄位在預覽時隱藏） */
 function shownAttributes(tax: Taxonomy, g: Garment) {
-  const fit = new Set(attributesFor(tax, g.category).map((a) => a.id));
-  return tax.attributes.filter((a) => fit.has(a.id) || attributeValues(g, a.id).length > 0);
+  return tax.attributes.filter((a) => attributeValues(g, a.id).length > 0);
 }
 
 function Row({ k, v, uncertain }: { k: string; v: string | null | undefined; uncertain?: boolean }) {
+  if (!v && !uncertain) return null;
   return (
     <>
       <dt className="text-mauve">{k}</dt>
-      <dd className={uncertain ? "text-wine" : ""}>{v || (uncertain ? "AI 未能確定" : "—")}</dd>
+      <dd className={`whitespace-pre-line ${uncertain && !v ? "text-wine" : ""}`}>{v || "AI 未能確定"}</dd>
     </>
   );
 }
 
-function FileButton({ label, onFile, disabled, variant = "soft" }: { label: string; onFile: (f: File) => void; disabled?: boolean; variant?: "soft" | "ghost" }) {
+function FileButton({ label, onFile, disabled }: { label: string; onFile: (f: File) => void; disabled?: boolean }) {
   return (
-    <label
-      className={`inline-flex min-h-11 cursor-pointer items-center rounded-full px-5 text-[15px] ${
-        variant === "soft" ? "bg-rose" : "ring-1 ring-amethyst/30 text-amethyst-deep"
-      } ${disabled ? "pointer-events-none opacity-40" : ""}`}
-    >
+    <label className={`chip inline-flex min-h-9 cursor-pointer items-center rounded-full px-3.5 text-[13px] ${disabled ? "pointer-events-none opacity-40" : ""}`}>
       {label}
       <input
         type="file"
@@ -340,9 +470,26 @@ function initialAttrs(tax: Taxonomy, g: Garment): AttrState {
   return out;
 }
 
-function EditForm({ g, tax, onSave, onCancel }: { g: Garment; tax: Taxonomy; onSave: (b: Record<string, unknown>) => Promise<void>; onCancel: () => void }) {
+function EditForm({
+  g,
+  tax,
+  onSave,
+  onCancel,
+  onSkip,
+  onSaveDraft,
+  saveLabel = "儲存",
+}: {
+  g: Garment;
+  tax: Taxonomy;
+  onSave: (b: Record<string, unknown>) => Promise<void>;
+  onCancel: () => void;
+  onSkip?: () => void;
+  onSaveDraft?: (b: Record<string, unknown>) => Promise<void>;
+  saveLabel?: string;
+}) {
+  const [price, setPrice] = useState(g.price != null ? String(g.price) : "");
   const [f, setF] = useState({
-    name: g.name,
+    name: g.name_is_placeholder ? "" : g.name,
     category: g.category || "",
     subcategory: g.subcategory || "",
     brand: g.brand || "",
@@ -358,8 +505,9 @@ function EditForm({ g, tax, onSave, onCancel }: { g: Garment; tax: Taxonomy; onS
 
   function buildBody(): Record<string, unknown> {
     const body: Record<string, unknown> = {};
-    const initial = { name: g.name, category: g.category || "", subcategory: g.subcategory || "", brand: g.brand || "", pattern: g.pattern || "", notes: g.notes || "" };
-    for (const [k, v] of Object.entries(f)) if (v !== initial[k as keyof typeof initial]) body[k] = v;
+    const initial = { name: g.name_is_placeholder ? "" : g.name, category: g.category || "", subcategory: g.subcategory || "", brand: g.brand || "", pattern: g.pattern || "", notes: g.notes || "" };
+    for (const [k, v] of Object.entries(f)) if (v !== initial[k as keyof typeof initial] && !(k === "name" && !v.trim())) body[k] = v;
+    if (price.trim() !== (g.price != null ? String(g.price) : "")) body.price = price.trim();
     // 只送出有改動的欄位：被改動的欄位會被鎖定，AI 之後不會覆寫
     const before = initialAttrs(tax, g);
     const same = (a: string[] = [], b: string[] = []) => a.join("|") === b.join("|");
@@ -392,7 +540,7 @@ function EditForm({ g, tax, onSave, onCancel }: { g: Garment; tax: Taxonomy; onS
       }}
     >
       <Field label="名稱">
-        <input className={inputCls} value={f.name} onChange={set("name")} required />
+        <input className={inputCls} value={f.name} onChange={set("name")} required={!g.name_is_placeholder} placeholder={g.name_is_placeholder ? `${displayName(g)}（可稍後再改）` : undefined} />
       </Field>
       <div>
         <p className="mb-1.5 text-[13px] text-mauve">主分類</p>
@@ -409,9 +557,14 @@ function EditForm({ g, tax, onSave, onCancel }: { g: Garment; tax: Taxonomy; onS
           <PickChips options={subs} value={f.subcategory ? [f.subcategory] : []} extra onChange={(v) => setF((cur) => ({ ...cur, subcategory: v[0] ?? "" }))} />
         </div>
       )}
-      <Field label="品牌">
-        <input className={inputCls} value={f.brand} onChange={set("brand")} />
-      </Field>
+      <div className="grid grid-cols-[1fr_8.5rem] gap-3">
+        <Field label="品牌">
+          <input className={inputCls} value={f.brand} onChange={set("brand")} />
+        </Field>
+        <Field label="價錢（HK$）">
+          <input className={inputCls} inputMode="decimal" placeholder="例如 1280" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d.,]/g, ""))} />
+        </Field>
+      </div>
       {visible.map((a) => (
         <div key={a.id}>
           <p className="mb-1.5 text-[13px] text-mauve">
@@ -434,16 +587,27 @@ function EditForm({ g, tax, onSave, onCancel }: { g: Garment; tax: Taxonomy; onS
       <Field label="備註">
         <textarea className={`${inputCls} min-h-24`} value={f.notes} onChange={set("notes")} />
       </Field>
-      <div className="sticky bottom-20 z-10 flex gap-2 bg-lace/95 py-2 backdrop-blur">
+      <div className="sticky bottom-20 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-ink/95 px-4 py-2 backdrop-blur">
         <Button type="submit" disabled={busy}>
-          {busy ? "儲存中…" : "儲存"}
+          {busy ? "儲存中…" : saveLabel}
         </Button>
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          取消
-        </Button>
-        <Link to="/taxonomy" className="ml-auto self-center text-[13px] text-amethyst-deep underline underline-offset-4">
-          管理分類
-        </Link>
+        {onSaveDraft && (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onSaveDraft(buildBody());
+              setBusy(false);
+            }}
+          >
+            只儲存
+          </Button>
+        )}
+        <button type="button" onClick={onSkip ?? onCancel} className="ml-auto px-2 text-[14px] text-mauve underline underline-offset-4">
+          {onSkip ? "略過" : "取消"}
+        </button>
       </div>
     </form>
   );

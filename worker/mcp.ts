@@ -13,7 +13,7 @@ import { aiQueue, claimGarments, submitSuggestion } from "./ai";
 import { getTaxonomy } from "./taxonomy";
 import { Actor, Env, HttpError, json, requireScope } from "./util";
 
-const SERVER_VERSION = "0.3.0";
+const SERVER_VERSION = "0.4.0";
 const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS = `你正在操作使用者的私人「AI Wardrobe 智能電子衣櫃」。
@@ -23,6 +23,7 @@ const INSTRUCTIONS = `你正在操作使用者的私人「AI Wardrobe 智能電�
 3) 用 submit_ai_suggestion 提交：garment_id、base_version（清單中的 version）、idempotency_key（例如 garment_id-YYYYMMDD-1）、image_id、vision_checked=true 及欄位。不清楚的欄位留空並列入 uncertain_fields；無法辨認就 outcome="failed" 並寫 failure_reason。
 4) 品牌：只有找到品牌官方或可靠來源、款式可對應時才 brand_confidence="confirmed" 並附 source_urls；印花系列一致但版本未能區分用 "likely"；只是風格相似用 "unconfirmed"。未確認的品牌不會寫入 brand。證據來自 AI 生成或去背圖時設 brand_evidence_from_generated_image=true。
 5) 建議只會放入 App 的「AI 待整理」等使用者確認，不會直接改正式資料；不要用 update_garment 改待整理衣物。
+6) 使用者可能同時上傳同一件衣服的透明去背圖和原相（清單中 has_processed_image=true 即該件有透明去背圖）。先看完整批圖片，再判斷哪些是同一件衣服：是的話，在「原相」那一件的建議填 same_garment_as（＝透明圖那件的 garment_id），兩件都照常填寫資料。只在印花、剪裁、顏色、裝飾都吻合時才填；只是款式相似不要填。
 圖片一律以原始二進位存入私人 R2，成功後才建立衣物記錄。
 【首選流程，最多 10 件一批】
 A. 圖片是使用者在對話中附上的檔案：呼叫 import_garment_files，把檔案放入 files（伺服器會用 download_url 下載原檔），並在 items 提供每件衣物資料、file_name、expected_width／expected_height。
@@ -107,6 +108,7 @@ const suggestionFields = {
   source_type: { type: "string", description: "官網／Lolibrary／官方社交媒體／二手交易／其他" },
   brand_note: { type: "string" },
   brand_evidence_from_generated_image: { type: "boolean" },
+  same_garment_as: { type: "string", description: "如果這張相與清單中另一件衣物是同一件衣服（例如一張透明去背圖、一張原相），填另一件的 garment_id；使用者會在 App 確認後才合併" },
 };
 
 const TOOLS = [

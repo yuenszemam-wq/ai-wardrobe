@@ -123,3 +123,37 @@ export const IconSparkle = (p: P) => (
     <path d="M12 2c.700 5.200 2.800 7.300 8 8-5.200.700-7.300 2.800-8 8-.700-5.200-2.800-7.300-8-8 5.200-.700 7.300-2.800 8-8z" />
   </Svg>
 );
+export const IconClose = (p: P) => (
+  <Svg {...p}>
+    <path d="m6 6 12 12M18 6 6 18" />
+  </Svg>
+);
+export const IconPencil = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 20l1-4.500L16.500 4l3.500 3.500L8.500 19z" />
+    <path d="m14 6.500 3.500 3.500" />
+  </Svg>
+);
+export const IconChevronRight = (p: P) => (
+  <Svg {...p}>
+    <path d="m9.500 5 7 7-7 7" />
+  </Svg>
+);
+export const IconChart = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3.500a8.500 8.500 0 1 0 8.500 8.500H12z" />
+    <path d="M15 3.800A8.500 8.500 0 0 1 20.200 9H15z" />
+  </Svg>
+);
+export const IconMerge = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 4v4c0 3 6 3 6 7v5M18 4v4c0 3-6 3-6 7" />
+    <path d="m9 17 3 3 3-3" />
+  </Svg>
+);
+export const IconCamera = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 8h3.500L9 5.500h6L16.500 8H20v11H4z" />
+    <circle cx="12" cy="13" r="3.500" />
+  </Svg>
+);

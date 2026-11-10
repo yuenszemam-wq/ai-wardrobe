@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Taxonomy } from "../../shared/taxonomy";
 import { AI_STATUS_LABEL, AiNormalized, AiStatus, api, BRAND_CONFIDENCE_LABEL, displayName, formatDate, imageUrl, ReviewItem } from "../api";
-import { Button, Empty, inputCls, Link, PickChips, Spinner, toast } from "../components/ui";
+import { AiHandoffButton, Button, Empty, inputCls, Link, PickChips, Spinner, toast } from "../components/ui";
 import { usePath, navigate } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
-import { AI_COMMAND, CopyBlock } from "./ImportCenter";
 
 const TABS: { key: string; label: string; statuses: AiStatus[] }[] = [
   { key: "todo", label: "全部未完成", statuses: ["pending_ai", "ai_processing", "pending_review", "failed", "needs_rework"] },
@@ -129,7 +128,7 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
   }
 
   return (
-    <section id="todo" className="paper bow mt-9 scroll-mt-20 px-4 pb-4 pt-6">
+    <section id="todo" className="paper bow mt-9 scroll-mt-20 px-4 pb-4 pt-7">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="font-serif text-xl font-bold tracking-[0.08em]">待整理</h2>
         <select className="rounded-full bg-white px-3 py-1.5 text-[13px] ring-1 ring-ink/10" value={sort} onChange={(e) => setParam("sort", e.target.value === "newest" ? "" : e.target.value)} aria-label="排序">
@@ -158,12 +157,10 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
       </div>
 
       {counts && counts.pending_ai + counts.needs_rework > 0 && (
-        <section className="mt-4 rounded-3xl bg-ink p-4 text-rose">
-          <p className="text-[14px]">
-            有 <b>{counts.pending_ai + counts.needs_rework}</b> 件等待 AI 辨認。AI 分析要由你在 Claude／ChatGPT 對話中觸發，App 不會自行辨認。複製以下指令：
-          </p>
-          <CopyBlock text={AI_COMMAND} />
-        </section>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <span className="text-[13px] text-mauve">{counts.pending_ai + counts.needs_rework} 件等待辨認</span>
+          <AiHandoffButton compact count={counts.pending_ai + counts.needs_rework} />
+        </div>
       )}
 
       {items.length > 0 && (
@@ -340,8 +337,54 @@ function ReviewCard({ g, selected, onToggle, open, onOpen, onChanged }: { g: Rev
           )}
         </div>
       </div>
+      {g.merge_target && <MergeSuggestion g={g} onDone={onChanged} />}
       {open && n && g.suggestion && <Compare g={g} n={n} suggestionId={g.suggestion.suggestion_id} onDone={onChanged} tax={tax} />}
     </li>
+  );
+}
+
+/** AI 認為這張相與另一件是同一件衣服：確認後把這一件的圖片併入對方（透明圖作主圖） */
+function MergeSuggestion({ g, onDone }: { g: ReviewItem; onDone: () => Promise<void> }) {
+  const t = g.merge_target!;
+  const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  if (hidden) return null;
+  // 有透明圖的一件作為保留的一件
+  const keep = !t.has_processed && g.has_processed ? g : t;
+  const drop = keep === t ? g : t;
+  return (
+    <div className="mt-3 flex items-center gap-3 rounded-2xl bg-rose-soft p-2.5">
+      <div className="arch relative h-16 w-12 shrink-0 overflow-hidden" style={{ boxShadow: "none" }}>
+        {(t.thumb_image_id || t.primary_image_id) && <img src={imageUrl(t.thumb_image_id || t.primary_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1 pt-2.5" />}
+      </div>
+      <div className="min-w-0 flex-1 text-[13px]">
+        <p>
+          AI 認為這與「<b>{displayName(t)}</b>」是同一件衣服
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          <Button
+            className="min-h-8 px-3.5 text-[13px]"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await api(`/api/garments/${keep.id}/merge`, { method: "POST", json: { source_id: drop.id } });
+                toast("已合併成同一件衣物");
+                await onDone();
+              } catch (e) {
+                toast((e as Error).message, "err");
+                setBusy(false);
+              }
+            }}
+          >
+            合併
+          </Button>
+          <Button variant="ghost" className="min-h-8 px-3.5 text-[13px]" disabled={busy} onClick={() => setHidden(true)}>
+            不是同一件
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

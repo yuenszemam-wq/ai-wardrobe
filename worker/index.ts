@@ -1,5 +1,6 @@
 import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./auth";
-import { createGarment, deleteGarment, getGarment, listGarments, stats, updateGarment } from "./garments";
+import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, updateGarment } from "./garments";
+import { deleteHomeBg, getSettings, serveHomeBg, updateSettings, uploadHomeBg } from "./settings";
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
 import { handleMcp } from "./mcp";
@@ -94,6 +95,32 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     return stats(env);
   }
 
+  if (path === "/api/analysis" && method === "GET") {
+    requireScope(actor, "read");
+    return json(await analysis(env));
+  }
+
+  // ───── 使用者設定：AI 指令、主頁背景 ─────
+  if (path === "/api/settings") {
+    if (method === "GET") {
+      requireScope(actor, "read");
+      return json(await getSettings(env));
+    }
+    if (method === "PUT" || method === "PATCH") {
+      requireSession(actor);
+      return json(await updateSettings(env, actor, await readJson(req)));
+    }
+  }
+  if (path === "/api/settings/home-bg") {
+    if (method === "GET") {
+      requireSession(actor);
+      return serveHomeBg(req, env);
+    }
+    requireSession(actor);
+    if (method === "POST" || method === "PUT") return uploadHomeBg(req, env, actor, url);
+    if (method === "DELETE") return deleteHomeBg(env, actor);
+  }
+
   // ───── 衣物 ─────
   if (path === "/api/garments") {
     if (method === "GET") {
@@ -124,6 +151,15 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       await deleteGarment(env, actor, id);
       return json({ ok: true });
     }
+  }
+
+  // ───── 合併：把另一件衣物（同一件衣服的原相／透明圖）併入這一件 ─────
+  m = path.match(/^\/api\/garments\/([\w-]+)\/merge$/);
+  if (m && method === "POST") {
+    requireSession(actor);
+    const body = await readJson<{ source_id?: string }>(req);
+    await mergeGarments(env, actor, m[1], String(body.source_id || ""));
+    return json(await getGarment(env, m[1]));
   }
 
   // ───── 批量入庫：把選取的待整理衣物一次轉為正式衣物 ─────
