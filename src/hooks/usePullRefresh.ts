@@ -13,7 +13,7 @@ export function usePullRefresh(refresh: () => void, disabled: boolean) {
     const begin = (event: TouchEvent) => {
       reset();
       if (window.scrollY > 0 || event.touches.length !== 1) return;
-      if ((event.target as Element).closest('input, textarea, select, button, a, [role="dialog"]')) return;
+      if ((event.target as Element).closest('input, textarea, select, button, [role="dialog"]')) return;
       start = { x: event.touches[0].clientX, y: event.touches[0].clientY };
     };
     const move = (event: TouchEvent) => {
