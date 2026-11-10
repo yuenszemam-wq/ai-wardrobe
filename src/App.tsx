@@ -1,5 +1,6 @@
 import { ReactElement, useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { IconCrown, IconDress, IconGear, IconHome, IconPlus, IconSparkle } from "./components/icons";
 import { Link, Spinner, Toast } from "./components/ui";
 import { match, navigate, usePath } from "./router";
 import GarmentDetail from "./pages/GarmentDetail";
@@ -65,17 +66,20 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-screen max-w-5xl">
-      <header className="safe-top sticky top-0 z-30 bg-ink text-rose">
+      <header className="safe-top lace-b sticky top-0 z-30 bg-ink">
         <div className="flex h-12 items-center justify-between px-4">
-          <Link to="/" className="font-serif text-[17px] tracking-[0.12em] text-rose">
-            ✝ 電子衣櫃
+          <Link to="/" className="flex items-center gap-2 font-serif text-[18px] tracking-[0.16em] text-gold-soft">
+            <IconSparkle className="text-[11px] text-gold" />
+            電子衣櫃
+            <IconSparkle className="text-[11px] text-gold" />
           </Link>
-          <Link to="/import" className="rounded-full bg-velvet px-3 py-1 text-[13px] text-rose">
-            ＋ 上傳
+          <Link to="/import" className="btn-dark flex items-center gap-1 rounded-full px-3.5 py-1 text-[13px]">
+            <IconPlus className="text-[13px]" />
+            上傳
           </Link>
         </div>
       </header>
-      <main className="px-4 pb-28">{page}</main>
+      <main className="px-4 pb-32 pt-2">{page}</main>
       <TabBar path={path} />
       <Toast />
     </div>
@@ -83,24 +87,29 @@ export default function App() {
 }
 
 const TABS = [
-  { to: "/", label: "首頁", icon: "⌂", test: (p: string) => p === "/" },
-  { to: "/wardrobe", label: "衣櫃", icon: "♛", test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
-  { to: "/import", label: "上傳", icon: "✚", test: (p: string) => p.startsWith("/import") },
-  { to: "/outfits", label: "穿搭", icon: "❦", test: (p: string) => p.startsWith("/outfits") },
-  { to: "/settings", label: "設定", icon: "⚙", test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
+  { to: "/", label: "首頁", Icon: IconHome, test: (p: string) => p === "/" },
+  { to: "/wardrobe", label: "衣櫃", Icon: IconCrown, test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
+  { to: "/import", label: "上傳", Icon: IconPlus, test: (p: string) => p.startsWith("/import") },
+  { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") },
+  { to: "/settings", label: "設定", Icon: IconGear, test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
 ];
 
 function TabBar({ path }: { path: string }) {
   const clean = path.split("?")[0];
   return (
-    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 bg-ink/95 backdrop-blur" aria-label="主選單">
+    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-gold/50 bg-ink" aria-label="主選單">
       <div className="mx-auto grid max-w-5xl grid-cols-5">
         {TABS.map((t) => {
           const active = t.test(clean);
+          const upload = t.to === "/import";
           return (
-            <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-0.5 pb-1 pt-2 text-[11px] ${active ? "text-rose" : "text-mauve"}`}>
-              <span className={`text-[19px] leading-none ${active ? "text-rose" : ""}`} aria-hidden>
-                {t.icon}
+            <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-0.5 pb-0.5 pt-1.5 text-[11px] ${active ? "text-gold-soft" : "text-mauve"}`}>
+              <span
+                className={`grid h-9 w-9 place-items-center rounded-full text-[21px] ${
+                  active ? "btn-jewel -mt-3.5" : upload ? "border border-gold/60 text-gold-soft" : ""
+                }`}
+              >
+                <t.Icon />
               </span>
               <span>{t.label}</span>
             </Link>

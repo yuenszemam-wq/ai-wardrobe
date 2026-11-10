@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, Garment, STATUS_LABEL } from "../api";
+import { IconFilter, IconSearch } from "../components/icons";
 import { Button, Chips, ColumnSwitch, Empty, GarmentTile, GRID_COLS, Link, PageTitle, Spinner, inputCls, useColumns } from "../components/ui";
 import { navigate, usePath } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
@@ -75,7 +76,8 @@ export default function Wardrobe() {
     <div>
       <PageTitle
         action={
-          <button type="button" onClick={() => setShowFilters((v) => !v)} className="rounded-full bg-white px-3 py-1.5 text-[13px] ring-1 ring-ink/10">
+          <button type="button" onClick={() => setShowFilters((v) => !v)} className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] ${activeFilters || showFilters ? "chip-on" : "btn-dark"}`}>
+            <IconFilter className="text-[14px]" />
             篩選{activeFilters ? `（${activeFilters}）` : ""}
           </button>
         }
@@ -83,9 +85,11 @@ export default function Wardrobe() {
         我的衣櫃
       </PageTitle>
 
+      <div className="relative">
+        <IconSearch className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-[18px] text-[#8a6d80]" />
       <input
         type="search"
-        className={inputCls}
+        className={`${inputCls} rounded-full pl-11`}
         placeholder="搜尋名稱、品牌、圖案…"
         value={q}
         onChange={(e) => {
@@ -95,6 +99,7 @@ export default function Wardrobe() {
           debounce.current = window.setTimeout(() => setParam("q", v.trim()), 350);
         }}
       />
+      </div>
 
       <div className="mt-3">
         <Chips options={tax.categories.map((c) => c.name)} value={category} onChange={(v) => setParam("category", v)} />
@@ -106,7 +111,7 @@ export default function Wardrobe() {
       )}
 
       {showFilters && (
-        <div className="mt-3 space-y-3 rounded-3xl bg-rose-soft p-4">
+        <div className="paper mt-3 space-y-3 p-4">
           <div>
             <p className="mb-1 text-[13px] text-mauve">風格</p>
             <Chips options={optionNames(tax, "style")} value={style} onChange={(v) => setParam("style", v)} />

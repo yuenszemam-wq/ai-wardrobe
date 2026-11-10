@@ -1,73 +1,271 @@
 @import "tailwindcss";
 
+/*
+ * 主題：絲絨衣帽間。
+ * 深紫絲絨作舞台，玫瑰金細線作框，奶油色卡片放衣物，緞帶蝴蝶結是唯一的招牌裝飾。
+ */
 @theme {
-  --color-ink: #1a1320;       /* 絲絨黑紫：外框 */
-  --color-velvet: #2c2036;    /* 深紫：卡片於深色底 */
-  --color-amethyst: #8e5bb8;  /* 紫：主要動作 */
-  --color-amethyst-deep: #6b3f93;
-  --color-rose: #f6d7e3;      /* 淡粉：衣物襯紙 */
-  --color-rose-soft: #fbeaf1;
-  --color-lace: #fffafc;      /* 蕾絲白：內容底色 */
-  --color-mauve: #8a7896;     /* 次要文字 */
-  --color-wine: #9b2c4d;      /* 錯誤／刪除 */
-  --font-serif: "Noto Serif TC", "Songti TC", serif;
+  --color-ink: #1c0e1a;          /* 絲絨最深處：頁首、選單、深色文字 */
+  --color-plum: #2a1526;         /* 頁面底色 */
+  --color-velvet: #3b1f35;       /* 深色面板 */
+  --color-amethyst: #8f4d7c;     /* 桑紫：主要動作 */
+  --color-amethyst-deep: #e8bfd3;/* 連結文字（深色底上是粉金；淺色卡片內會換成深桑紫，見下） */
+  --color-rose: #f3dcd8;         /* 胭脂粉 */
+  --color-rose-soft: #f9ece7;    /* 奶油卡片 */
+  --color-lace: #fdf6f1;         /* 蕾絲白 */
+  --color-white: #fffaf6;        /* 「白」統一帶暖調，避免在絲絨底上刺眼 */
+  --color-mauve: #b79bae;        /* 次要文字（隨底色切換） */
+  --color-wine: #f28ba3;         /* 錯誤／刪除（隨底色切換） */
+  --color-gold: #d9b391;         /* 玫瑰金：框線、標題 */
+  --color-gold-soft: #f0d9c0;
+  --color-cream: #f6e7df;        /* 深色底上的主要文字 */
+  --font-serif: "Noto Serif TC", "Songti TC", "Source Han Serif TC", serif;
   --font-sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
 }
 
-html,
-body,
-#root {
-  min-height: 100%;
-}
-body {
-  margin: 0;
-  background: var(--color-lace);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  /* html 與 body 都用深色實底：iOS 把網頁加到主畫面後，狀態列後面的模糊色取自這裡，
+     以前是白色所以頂部會出現一片模糊白邊。 */
+  html {
+    background-color: var(--color-ink);
+  }
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    background-color: var(--color-plum);
+    color: var(--color-cream);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* 絲絨布幕：直向的柔和褶紋，固定在背景 */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(110% 55% at 50% 0%, rgb(143 77 124 / 0.3), transparent 62%),
+      repeating-linear-gradient(90deg, transparent 0 34px, rgb(0 0 0 / 0.13) 52px, transparent 70px, rgb(255 255 255 / 0.022) 86px, transparent 104px),
+      var(--color-plum);
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* 防止 iPhone 自動放大 */
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
+  }
 }
 
-/* 拱窗形衣物框：整個 App 唯一的裝飾性造型 */
-.arch {
-  border-radius: 50% 50% 14px 14px / 30% 30% 14px 14px;
-  background:
-    radial-gradient(120% 70% at 50% 0%, #fff 0%, var(--color-rose-soft) 55%, var(--color-rose) 100%);
-  box-shadow: inset 0 0 0 1px rgb(142 91 184 / 0.14);
-}
-.arch-dark {
-  border-radius: 50% 50% 14px 14px / 30% 30% 14px 14px;
-  background: var(--color-velvet);
-}
+@layer components {
+  /* ── 底色範圍：淺色卡片內自動用深色字，深色面板內自動用淺色字 ── */
+  [class^="bg-white"], [class*=" bg-white"],
+  [class^="bg-rose"], [class*=" bg-rose"],
+  [class^="bg-lace"], [class*=" bg-lace"],
+  .paper, .arch, .checker {
+    --color-mauve: #8a6d80;
+    --color-amethyst-deep: #6b3059;
+    --color-wine: #a12c4b;
+    --chip-bg: rgb(255 250 246 / 0.85);
+    --chip-line: rgb(28 14 26 / 0.14);
+    color: var(--color-ink);
+    color-scheme: light;
+  }
+  [class^="bg-ink"], [class*=" bg-ink"],
+  [class^="bg-velvet"], [class*=" bg-velvet"],
+  [class^="bg-plum"], [class*=" bg-plum"],
+  [class^="bg-amethyst"], [class*=" bg-amethyst"],
+  .frame, .btn-jewel {
+    --color-mauve: #b79bae;
+    --color-amethyst-deep: #e8bfd3;
+    --color-wine: #f28ba3;
+    --chip-bg: rgb(255 255 255 / 0.05);
+    --chip-line: rgb(217 179 145 / 0.45);
+    color: var(--color-cream);
+    color-scheme: dark;
+  }
 
-/* 透明圖片的棋盤底，用於檢查去背 */
-.checker {
-  background-color: #fff;
-  background-image:
-    linear-gradient(45deg, #f1e4ea 25%, transparent 25%),
-    linear-gradient(-45deg, #f1e4ea 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #f1e4ea 75%),
-    linear-gradient(-45deg, transparent 75%, #f1e4ea 75%);
-  background-size: 20px 20px;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  /* 玫瑰金雙線框的深色面板 */
+  .frame {
+    position: relative;
+    border-radius: 18px;
+    border: 1px solid rgb(217 179 145 / 0.55);
+    background: linear-gradient(180deg, rgb(74 39 66 / 0.92), rgb(43 21 38 / 0.94));
+    box-shadow:
+      inset 0 0 0 3px rgb(28 14 26 / 0.45),
+      inset 0 0 0 4px rgb(217 179 145 / 0.2),
+      0 10px 24px rgb(0 0 0 / 0.28);
+  }
+  .frame-hot {
+    background: linear-gradient(180deg, #a35c8f, #7a3d69);
+    border-color: var(--color-gold-soft);
+  }
+
+  /* 奶油色卡片：放衣物和內容 */
+  .paper {
+    position: relative;
+    border-radius: 20px;
+    border: 1px solid var(--color-gold);
+    background: radial-gradient(130% 80% at 50% 0%, var(--color-white), var(--color-rose-soft) 55%, var(--color-rose));
+    box-shadow:
+      inset 0 0 0 3px rgb(255 250 246 / 0.7),
+      inset 0 0 0 4px rgb(217 179 145 / 0.45),
+      0 10px 24px rgb(0 0 0 / 0.3);
+  }
+
+  /* 衣物框（列表、表單內的小預覽） */
+  .arch {
+    border-radius: 14px;
+    background: radial-gradient(120% 75% at 50% 0%, var(--color-white) 0%, var(--color-rose-soft) 55%, var(--color-rose) 100%);
+    box-shadow: inset 0 0 0 1px rgb(217 179 145 / 0.7);
+  }
+  /* 拱形銘牌：首頁的衣物總數、登入頁 */
+  .arch-dark {
+    position: relative;
+    border-radius: 50% 50% 12px 12px / 28% 28% 12px 12px;
+    border: 1px solid var(--color-gold);
+    background: linear-gradient(180deg, #5a2f50, #2f1729);
+    box-shadow:
+      inset 0 0 0 3px rgb(28 14 26 / 0.5),
+      inset 0 0 0 4px rgb(217 179 145 / 0.3),
+      0 12px 26px rgb(0 0 0 / 0.35);
+    color: var(--color-cream);
+  }
+
+  /* 緞帶蝴蝶結：掛在卡片頂部中央 */
+  .bow::before,
+  .bow-sm::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 60px;
+    height: 30px;
+    transform: translate(-50%, -52%);
+    z-index: 2;
+    pointer-events: none;
+    background: center / contain no-repeat
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23d6a3c2'/%3E%3Cstop offset='1' stop-color='%23874673'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg stroke='%23542545' stroke-width='.7' stroke-linejoin='round'%3E%3Cpath d='M30 15 22.5 31l4.6-3 3.6 3.4L33 17z' fill='%23874673'/%3E%3Cpath d='M34 15l7.5 16-4.6-3-3.6 3.4L31 17z' fill='%239a5586'/%3E%3Cpath d='M32 13C23 2 7 0 3.5 5.5 0.500 11 6 22 14.500 22 22 22 28 17.500 32 13z' fill='url(%23g)'/%3E%3Cpath d='M32 13C41 2 57 0 60.500 5.500 63.500 11 58 22 49.500 22 42 22 36 17.500 32 13z' fill='url(%23g)'/%3E%3Cellipse cx='32' cy='13.500' rx='4.600' ry='5.200' fill='%23a8648f'/%3E%3C/g%3E%3Cpath d='M9 8c4-2 11-.500 16 4M55 8c-4-2-11-.500-16 4' fill='none' stroke='%23f3dcd8' stroke-opacity='.55' stroke-width='.9' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='13.500' r='2.300' fill='%23f6e7df' stroke='%23d9b391' stroke-width='.6'/%3E%3C/svg%3E");
+    filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.3));
+  }
+  .bow-sm::before {
+    width: 34px;
+    height: 17px;
+  }
+
+  /* 蕾絲荷葉邊：頁首下緣 */
+  .lace-b::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 9px;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 50% -1px, transparent 5.5px, rgb(217 179 145 / 0.5) 6px, rgb(217 179 145 / 0.5) 6.8px, transparent 7.3px) 0 0 / 16px 9px repeat-x,
+      radial-gradient(circle at 50% 0, var(--color-ink) 6.2px, transparent 6.8px) 0 0 / 16px 9px repeat-x;
+  }
+
+  /* 標題兩側的小星飾 */
+  .orn::before,
+  .orn::after {
+    content: "";
+    display: inline-block;
+    width: 0.62em;
+    height: 0.62em;
+    vertical-align: 0.08em;
+    background: var(--color-gold);
+    clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  }
+  .orn::before {
+    margin-right: 0.45em;
+  }
+  .orn::after {
+    margin-left: 0.45em;
+  }
+  .orn-l::after {
+    display: none;
+  }
+
+  /* 主要按鈕：桑紫緞面＋金邊 */
+  .btn-jewel {
+    border: 1px solid var(--color-gold);
+    background: linear-gradient(180deg, #a9628f 0%, #8f4d7c 45%, #6f3760 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.28),
+      inset 0 0 0 2px rgb(28 14 26 / 0.22),
+      0 6px 14px rgb(0 0 0 / 0.3);
+    color: var(--color-white);
+  }
+  .btn-jewel:active {
+    filter: brightness(0.9);
+  }
+  .btn-dark {
+    border: 1px solid rgb(217 179 145 / 0.6);
+    background: linear-gradient(180deg, #4a2742, #2f1729);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 6px 14px rgb(0 0 0 / 0.3);
+    color: var(--color-cream);
+  }
+  .btn-dark:active {
+    filter: brightness(1.2);
+  }
+
+  /* 選擇標籤 */
+  .chip {
+    border: 1px solid var(--chip-line, rgb(217 179 145 / 0.45));
+    background: var(--chip-bg, rgb(255 255 255 / 0.05));
+    color: inherit;
+  }
+  .chip-on {
+    border: 1px solid var(--color-gold);
+    background: linear-gradient(180deg, #a35c8f, #7a3d69);
+    color: var(--color-white);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
+  }
+
+  /* 透明圖片的棋盤底，用於檢查去背及穿搭畫布 */
+  .checker {
+    background-color: var(--color-white);
+    background-image:
+      linear-gradient(45deg, #efdfe0 25%, transparent 25%),
+      linear-gradient(-45deg, #efdfe0 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #efdfe0 75%),
+      linear-gradient(-45deg, transparent 75%, #efdfe0 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  }
+  /* 穿搭畫布的對位格線 */
+  .guides::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 999;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, transparent calc(50% - 0.5px), rgb(143 77 124 / 0.7) calc(50% - 0.5px), rgb(143 77 124 / 0.7) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+      linear-gradient(90deg, rgb(143 77 124 / 0.28) 1px, transparent 1px) 0 0 / 25% 100%,
+      linear-gradient(0deg, rgb(143 77 124 / 0.28) 1px, transparent 1px) 0 0 / 100% 12.5%;
+  }
 }
 
 .safe-bottom {
-  padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+  padding-bottom: calc(env(safe-area-inset-bottom) + 0.4rem);
 }
 .safe-top {
   padding-top: env(safe-area-inset-top);
-}
-
-:focus-visible {
-  outline: 2px solid var(--color-amethyst);
-  outline-offset: 2px;
-}
-
-input,
-select,
-textarea {
-  font-size: 16px; /* 防止 iPhone 自動放大 */
 }
 
 @media (prefers-reduced-motion: reduce) {
