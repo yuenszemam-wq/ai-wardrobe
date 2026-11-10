@@ -159,13 +159,16 @@ export interface IntakeResult {
   preview_id: string | null;
   thumbnail_id: string | null;
   analysis_id: string | null;
+  /** 瀏覽器自動去背後的透明圖（只有原檔沒有透明、且去背圖通過驗證才有） */
+  cutout_id: string | null;
   warnings: string[];
 }
 
 /**
  * App 上傳一張相 = 一件待整理衣物。
  * multipart 欄位：file（原檔，原樣保存）、sha256（瀏覽器計算的原檔 SHA-256）、
- *   preview（HEIC 的 JPEG 預覽，可選）、thumbnail（480px，可選）、analysis（約 1600px 供 AI 辨認，可選）。
+ *   preview（HEIC 的 JPEG 預覽，可選）、thumbnail（480px，可選）、analysis（約 1600px 供 AI 辨認，可選）、
+ *   cutout（瀏覽器自動去背的透明 PNG，可選；原檔仍原樣保存為 original，去背圖另存為 processed 並成為主圖）。
  * 冪等：同一張相（SHA-256 相同）重傳只會得到同一件衣物，不會重複建立。
  */
 export async function intakeUpload(req: Request, env: Env, actor: Actor): Promise<IntakeResult> {
@@ -214,6 +217,7 @@ export async function intakeUpload(req: Request, env: Env, actor: Actor): Promis
       preview_id: null,
       thumbnail_id: null,
       analysis_id: null,
+      cutout_id: null,
       warnings: ["衣櫃已有同一張相片，沒有重複建立"],
     };
   }
@@ -251,13 +255,34 @@ export async function intakeUpload(req: Request, env: Env, actor: Actor): Promis
     } else warnings.push("HEIC 原檔已保存，但沒有預覽圖；部分瀏覽器可能無法顯示");
   }
 
+  // 自動去背圖：原檔沒有透明通道時，瀏覽器可另外附上去背後的透明 PNG。
+  // 嚴格驗證（必須有透明通道；非 HEIC 時尺寸必須與原檔完全相同），任何問題只產生警告，原檔不受影響。
+  let cutoutId: string | null = null;
+  const cutout = blob("cutout");
+  if (cutout && !info.hasAlpha) {
+    try {
+      const cutBytes = new Uint8Array(await cutout.arrayBuffer());
+      const ci = parseImage(cutBytes);
+      if (!ci.hasAlpha) warnings.push("自動去背圖沒有透明通道，已忽略");
+      else if (!isHeif && (ci.width !== info.width || ci.height !== info.height)) {
+        warnings.push(`自動去背圖尺寸（${ci.width}×${ci.height}）與原檔（${info.width}×${info.height}）不同，已忽略`);
+      } else {
+        const c = await storeImage(env, { owner: "garment", ownerId: garmentId, imageType: "processed", isPrimary: true, bytes: cutBytes, derivedFrom: main.id, actor });
+        cutoutId = c.id;
+      }
+    } catch (e) {
+      warnings.push(`自動去背圖未能保存：${(e as Error).message}`);
+    }
+  }
+
   const base = previewId ?? main.id;
   let thumbId: string | null = null;
   let analysisId: string | null = null;
   const thumb = blob("thumbnail");
   if (thumb) {
     try {
-      thumbId = (await storeImage(env, { owner: "garment", ownerId: garmentId, imageType: "thumbnail", bytes: new Uint8Array(await thumb.arrayBuffer()), derivedFrom: base, actor })).id;
+      // 有去背圖時，縮圖屬於去背圖（列表按主圖揀縮圖）
+      thumbId = (await storeImage(env, { owner: "garment", ownerId: garmentId, imageType: "thumbnail", bytes: new Uint8Array(await thumb.arrayBuffer()), derivedFrom: cutoutId ?? base, actor })).id;
     } catch (e) {
       warnings.push(`縮圖未能保存：${(e as Error).message}`);
     }
@@ -291,6 +316,7 @@ export async function intakeUpload(req: Request, env: Env, actor: Actor): Promis
     preview_id: previewId,
     thumbnail_id: thumbId,
     analysis_id: analysisId,
+    cutout_id: cutoutId,
     warnings,
   };
 }

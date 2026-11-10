@@ -67,10 +67,25 @@ App 選相（最多 30 張，同時 3 張）→ /api/intake → R2 原檔 + D1�
 | `preview` | HEIC 的原尺寸 JPEG 預覽（`variant = 'preview'`，設為主圖） |
 | `thumbnail` | 480px WebP 縮圖，只供列表 |
 | `analysis` | 約 1600px 辨認圖（`image_type = 'thumbnail'`、`variant = 'analysis'`），由原圖縮小、未經 AI 改動 |
+| `cutout` | 可選。瀏覽器自動去背後的透明 PNG（見下方「自動去背」）。存為 `processed`、成為主圖，縮圖改屬於它；原檔仍是 `original` |
 
 - 一張相＝一件衣物，名稱「待整理衣物 NNN」（`display_no`，`name_is_placeholder = 1`），UUID 不會作顯示名稱。
 - 冪等：衣物 `client_key = intake:{sha256}`；同一張相重傳、同時送出兩次都只會有一件。衣櫃已有同一張相 → 200 `duplicate`。
 - 已去背的透明 PNG／WebP 直接存為 `processed`。
+
+#### 自動去背（`src/cutout.ts`，瀏覽器端，不用 AI、不收費）
+
+上傳中心在瀏覽器內判斷每張圖：
+
+| 偵測結果 | 處理 |
+| --- | --- |
+| 已有真透明 | 不處理，照舊存為 `processed` |
+| 假透明（棋盤格被畫進像素）、純色／近乎純色背景 | 從四邊 flood fill，只清除「連著邊緣」的背景色；清 1–2 px 灰白邊並柔化邊緣；被衣服圍住、同時含兩種棋盤色的洞也會清除。產生原尺寸透明 PNG 當 `cutout` 上傳 |
+| 複雜實景背景、超過 12 MP、整張都像背景 | 不處理，原檔照存，上傳中心顯示原因（需要 AI 去背才能處理） |
+
+- 原檔永遠原樣保存（`original`，SHA-256 不變）；去背圖是另一張 `processed`（`derived_from` 指向原檔）。
+- 伺服器驗證 `cutout`：必須有透明通道、非 HEIC 時尺寸必須與原檔完全相同；任何問題只產生警告，不影響原檔。原檔已有真透明時不收 `cutout`。
+- 限制：白色布料若直接貼著圖片邊緣，會和白色棋盤格連成一片而被一併清除；蕾絲孔等很小的洞（約小於 1.5 格）可能留有少量棋盤格殘影。
 - 寫入後**讀回驗證**：R2 `head()` 的大小及 SHA-256 必須一致，否則回滾。主圖失敗會刪除剛建立、仍無圖片的衣物記錄。
 
 ### AI 狀態（`garments.ai_status`）
@@ -252,5 +267,6 @@ npm i -D esbuild sharp && node test/e2e.mjs
 ```bash
 node test/upload-slots.mjs
 node test/staging.mjs      # D1 暫存匯入（22 項：分段、SHA-256、截斷、縮小、JPEG、去重）
-node test/ai-intake.mjs    # V2 批量上傳及 AI 待整理（63 項：10 張上傳、逐位元／SHA-256、HEIC、去重、並發、簽名網址、MCP 讀圖、建議驗證、版本、鎖定欄位、品牌分級、D1 提交、確認、批量）
+node test/cutout.mjs [假透明圖片]   # 自動去背（11 項；需要 Node 22.18+ 及 sharp；附圖片路徑時輸出去背結果到 test/.tmp/）
+node test/ai-intake.mjs    # V2 批量上傳及 AI 待整理（75 項，含 12 項自動去背圖：10 張上傳、逐位元／SHA-256、HEIC、去重、並發、簽名網址、MCP 讀圖、建議驗證、版本、鎖定欄位、品牌分級、D1 提交、確認、批量）
 ```
