@@ -1,7 +1,8 @@
+import { BulkEditSheet } from "../components/BulkEditSheet";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, Garment, STATUS_LABEL } from "../api";
 import { IconFilter, IconSearch } from "../components/icons";
-import { Button, Chips, ColumnSwitch, Empty, GarmentTile, GRID_COLS, Link, Spinner, useColumns } from "../components/ui";
+import { Button, Chips, ColumnSwitch, Empty, GarmentTile, GRID_COLS, Link, Spinner, useColumns, toast } from "../components/ui";
 import { navigate, usePath } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
 
@@ -13,7 +14,11 @@ export default function Wardrobe() {
   const [next, setNext] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const debounce = useRef<number>();
+  const debounce = useRef<number | undefined>(undefined);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [revision, setRevision] = useState(0);
   const tax = useTaxonomy();
   const [cols, setCols] = useColumns("aw:wardrobe-cols", 3);
 
@@ -47,6 +52,7 @@ export default function Wardrobe() {
   useEffect(() => {
     let alive = true;
     setItems(null);
+    setSelected(new Set());
     const p = new URLSearchParams(params);
     p.set("limit", "60");
     api<{ garments: Garment[]; next_offset: number | null }>(`/api/garments?${p}`).then((r) => {
@@ -57,7 +63,7 @@ export default function Wardrobe() {
     return () => {
       alive = false;
     };
-  }, [params]);
+  }, [params, revision]);
 
   async function more() {
     if (next === null) return;
@@ -173,6 +179,14 @@ export default function Wardrobe() {
         </div>
       )}
 
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button variant="ghost" onClick={() => { setSelecting(v => !v); setSelected(new Set()); }}>{selecting ? '結束多選' : '批量修改'}</Button>
+        {selecting && <>
+          <Button variant="ghost" onClick={() => setSelected(new Set((items || []).slice(0, 100).map(g => g.id)))}>全選已載入（最多100件）</Button>
+          <Button variant="ghost" onClick={() => setSelected(new Set())}>取消全選</Button>
+          <Button disabled={!selected.size} onClick={() => setBulkOpen(true)}>修改 {selected.size} 件</Button>
+        </>}
+      </div>
       <div className="mt-3 flex items-center justify-between">
         <span className="flex items-center gap-2 text-[13px] text-mauve">
           {items ? `${items.length}${next !== null ? "+" : ""} 件` : ""}
@@ -199,7 +213,9 @@ export default function Wardrobe() {
           <>
             <div className={`grid ${GRID_COLS[cols]}`}>
               {items.map((g) => (
-                <GarmentTile key={g.id} g={g} size={cols >= 4 ? "sm" : "md"} showPrice={sort.startsWith("price")} />
+                <GarmentTile key={g.id} g={g} selected={selecting ? selected.has(g.id) : undefined} onSelect={selecting ? () => setSelected(cur => {
+                  const next = new Set(cur); if (next.has(g.id)) next.delete(g.id); else if (next.size < 100) next.add(g.id); else toast('每次最多選取100件', 'err'); return next;
+                }) : undefined} size={cols >= 4 ? "sm" : "md"} showPrice={sort.startsWith("price")} />
               ))}
             </div>
             {next !== null && (
@@ -212,6 +228,10 @@ export default function Wardrobe() {
           </>
         )}
       </div>
+      {bulkOpen && <BulkEditSheet garments={(items || []).filter(g => selected.has(g.id))} onClose={() => { setBulkOpen(false); setRevision(v => v + 1); }} onUpdated={(ids) => {
+        setSelected(cur => new Set([...cur].filter(id => !ids.includes(id))));
+        if (ids.length) toast(`已更新 ${ids.length} 件衣物`);
+      }} />}
     </div>
   );
 }

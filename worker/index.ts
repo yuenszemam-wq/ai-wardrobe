@@ -1,3 +1,4 @@
+import { bulkEdit, splitGarment } from "./organize";
 import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./auth";
 import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, updateGarment } from "./garments";
 import { deleteHomeBg, getSettings, serveHomeBg, updateSettings, uploadHomeBg } from "./settings";
@@ -160,6 +161,16 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     const body = await readJson<{ source_id?: string }>(req);
     await mergeGarments(env, actor, m[1], String(body.source_id || ""));
     return json(await getGarment(env, m[1]));
+  }
+
+  if (path === "/api/garments/bulk-edit" && method === "POST") {
+    requireSession(actor);
+    return json(await bulkEdit(env, actor, await readJson(req)));
+  }
+  m = path.match(/^\/api\/garments\/([\w-]+)\/split$/);
+  if (m && method === "POST") {
+    requireSession(actor);
+    return json(await splitGarment(env, actor, m[1], await readJson(req)));
   }
 
   // ───── 批量入庫：把選取的待整理衣物一次轉為正式衣物 ─────

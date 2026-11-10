@@ -1,3 +1,4 @@
+import { SplitSheet } from "../components/SplitSheet";
 import { useEffect, useState } from "react";
 import { attributesFor, attributeValues, isColumnAttribute, Taxonomy } from "../../shared/taxonomy";
 import { AI_STATUS_LABEL, api, displayName, formatBytes, formatDate, Garment, GarmentImage, imageUrl, STATUS_LABEL, uploadImage } from "../api";
@@ -30,6 +31,7 @@ export default function GarmentDetail({ id }: { id: string }) {
   // 上傳後直接進入填寫資料（/g/:id?edit=1）
   const [editing, setEditing] = useState(() => new URLSearchParams(location.search).get("edit") === "1");
   const [merging, setMerging] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   const [checker, setChecker] = useState(false);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const tax = useTaxonomy();
@@ -193,6 +195,7 @@ export default function GarmentDetail({ id }: { id: string }) {
               <IconMerge className="text-[14px]" />
               合併同一件
             </button>
+            <button type="button" onClick={() => setSplitting(true)} className="chip min-h-9 rounded-full px-3.5 text-[13px]">拆開圖片</button>
             {shown && !shown.is_primary && (
               <button
                 type="button"
@@ -331,6 +334,7 @@ export default function GarmentDetail({ id }: { id: string }) {
         </div>
       </div>
 
+      {splitting && <SplitSheet id={id} onClose={() => setSplitting(false)} onSplit={(r) => { setSplitting(false); setG(r.source); setViewId(null); }} />}
       {merging && (
         <MergeSheet
           g={g}
@@ -531,7 +535,7 @@ function EditForm({
 
   return (
     <form
-      className="mt-5 space-y-4"
+      className="mt-5 space-y-4 pb-24"
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
@@ -587,7 +591,7 @@ function EditForm({
       <Field label="備註">
         <textarea className={`${inputCls} min-h-24`} value={f.notes} onChange={set("notes")} />
       </Field>
-      <div className="detail-actions sticky z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-ink/95 px-4 py-2 backdrop-blur">
+      <div className="detail-actions z-30 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-ink/95 px-4 py-2 backdrop-blur">
         <Button type="submit" disabled={busy}>
           {busy ? "儲存中…" : saveLabel}
         </Button>

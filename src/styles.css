@@ -322,11 +322,20 @@
   padding-bottom: calc(env(safe-area-inset-bottom) + 0.4rem);
 }
 :root {
-  --tabbar-inset: max(8px, calc(env(safe-area-inset-bottom, 0px) - 10px));
+  --tabbar-inset: max(0px, calc(env(safe-area-inset-bottom, 0px) - 10px));
   --tabbar-height: calc(59px + var(--tabbar-inset));
 }
 .app-tabbar { padding-bottom: var(--tabbar-inset); }
-.detail-actions { bottom: calc(var(--tabbar-height) + 8px); }
+.detail-actions {
+  position: fixed;
+  bottom: var(--tabbar-height);
+  left: 0;
+  right: 0;
+  max-width: 64rem;
+  margin: 0 auto;
+  background: var(--color-ink);
+}
+.app-tabbar { border-top: 1px solid rgb(217 179 145 / 0.4); }
 .safe-top {
   padding-top: env(safe-area-inset-top);
 }

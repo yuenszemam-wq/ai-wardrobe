@@ -1,4 +1,4 @@
-import { ReactElement, useCallback, useEffect, useState } from "react";
+import { ReactElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { IconCrown, IconDress, IconGear, IconHome, IconPlus, IconSparkle } from "./components/icons";
 import { Link, Spinner, Toast } from "./components/ui";
@@ -98,9 +98,19 @@ const TABS = [
 
 /** 底部選單：選中的項目在原位亮起（不再向上跳起） */
 function TabBar({ path }: { path: string }) {
+  const bar = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const measure = () => document.documentElement.style.setProperty("--tabbar-height", `${el.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const clean = path.split("?")[0];
   return (
-    <nav className="app-tabbar lace-t fixed inset-x-0 bottom-0 z-30 bg-ink" aria-label="主選單">
+    <nav ref={bar} className="app-tabbar pat-stripe fixed inset-x-0 bottom-0 z-30 bg-ink" aria-label="主選單">
       <div className="pat-stripe">
         <div className="mx-auto grid max-w-5xl grid-cols-5">
           {TABS.map((t) => {

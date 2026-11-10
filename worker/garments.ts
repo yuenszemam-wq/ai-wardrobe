@@ -22,6 +22,7 @@ export interface GarmentInput {
   needs_review?: unknown;
   ai_note?: unknown;
   confirm?: unknown;
+  expected_version?: number;
 }
 
 export interface NormalizedGarment {
@@ -176,7 +177,7 @@ export function normalizeAttributes(raw: unknown): string | null {
   return Object.keys(out).length ? JSON.stringify(out) : null;
 }
 
-function parseAttributes(v: unknown): Record<string, unknown> {
+export function parseAttributes(v: unknown): Record<string, unknown> {
   if (typeof v !== "string" || !v) return {};
   try {
     const o = JSON.parse(v);
@@ -247,6 +248,7 @@ export async function createGarment(env: Env, actor: Actor, input: GarmentInput,
 export async function updateGarment(env: Env, actor: Actor, id: string, input: GarmentInput): Promise<{ skipped_locked: string[] }> {
   const cur = await env.DB.prepare("SELECT * FROM garments WHERE id = ?").bind(id).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
+  if (input.expected_version !== undefined && input.expected_version !== Number(cur.version)) throw new HttpError(409, "version_conflict", "衣物已更新，請重新載入");
   const { values, uncertain } = normalizeGarment(input, true);
   const locked = new Set(parseJsonArray(cur.locked_fields));
   const skipped: string[] = [];
@@ -292,7 +294,8 @@ export async function updateGarment(env: Env, actor: Actor, id: string, input: G
   if (!sets.length) return { skipped_locked: skipped };
   sets.push("updated_at = ?", "version = version + 1");
   binds.push(nowIso());
-  await env.DB.prepare(`UPDATE garments SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id).run();
+  const changed = await env.DB.prepare(`UPDATE garments SET ${sets.join(", ")} WHERE id = ? AND version = ?`).bind(...binds, id, cur.version).run();
+  if (!changed.meta.changes) throw new HttpError(409, "version_conflict", "衣物已更新，請重新載入");
   await audit(env, actor, "garment.update", id, { fields: Object.keys(values), skipped_locked: skipped });
   return { skipped_locked: skipped };
 }

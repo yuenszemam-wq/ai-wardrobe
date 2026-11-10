@@ -1,3 +1,4 @@
+import { SplitSheet } from "../components/SplitSheet";
 import { PointerEvent as ReactPointerEvent, DragEvent, useEffect, useRef, useState } from "react";
 import { api, AiStatus, AI_STATUS_LABEL, Garment, ApiError, formatBytes, intakeUpload } from "../api";
 import { AiHandoffButton, Button, Link, ProgressBar, toast } from "../components/ui";
@@ -27,6 +28,7 @@ interface Item {
   progress: number;
   message?: string;
   garmentId?: string;
+  imageId?: string;
   name?: string;
   aiStatus?: AiStatus | null;
 }
@@ -55,6 +57,7 @@ export default function UploadCenter() {
   const runningRef = useRef(false);
   const mergingRef = useRef(false);
   const [merging, setMerging] = useState(false);
+  const [splitId, setSplitId] = useState<string | null>(null);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const drag = useRef<{ id: string; pointer: number; x: number; y: number; moved: boolean } | null>(null);
@@ -163,6 +166,7 @@ export default function UploadCenter() {
             state: r.duplicate ? "duplicate" : "done",
             progress: 1,
             garmentId: r.garment_id,
+            imageId: r.image.id,
             name: r.name,
             aiStatus: r.duplicate ? undefined : "pending_ai",
             message: `${r.name}｜${dims}｜${formatBytes(r.image.file_size)}${p.isHeif ? "｜HEIC 原檔" : ""}${p.warning ? `｜${p.warning}` : ""}${cutoutText(r.duplicate, r.cutout_id, p.cutoutKind, p.cutoutNote)}${r.warnings[0] && !r.duplicate ? `｜${r.warnings[0]}` : ""}`,
@@ -313,6 +317,7 @@ export default function UploadCenter() {
                       onClick={() => mergeSource && mergeSource !== i.garmentId ? void mergeInto(mergeSource, i.garmentId!) : setMergeSource(mergeSource ? null : i.garmentId!)}>
                       {mergeSource === i.garmentId ? "取消選取" : mergeSource ? "合併到這件" : "選取合併"}
                     </button>
+                    <button type="button" disabled={running || merging} onClick={() => setSplitId(i.garmentId!)} className="min-h-11 px-2">拆開</button>
                     {!merging && <Link to={`/g/${i.garmentId}?edit=1`} className="underline underline-offset-4">填寫</Link>}
                   </div>
                 )}
@@ -337,6 +342,14 @@ export default function UploadCenter() {
           )}
         </>
       )}
+      {splitId && <SplitSheet id={splitId} onClose={() => setSplitId(null)} onSplit={(r) => {
+        setItems((cur) => cur.map((item) => {
+          if (item.garmentId !== splitId) return item;
+          const g = item.imageId && r.moved_image_ids.includes(item.imageId) ? r.garment : r.source;
+          return { ...item, garmentId: g.id, name: g.name, aiStatus: g.ai_status };
+        }));
+        setSplitId(null); setMergeSource(null);
+      }} />}
     </section>
   );
 }
