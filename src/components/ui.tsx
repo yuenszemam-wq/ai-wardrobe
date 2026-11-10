@@ -189,7 +189,7 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
   }, []);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center" role="dialog" aria-modal aria-label={title} onClick={onClose}>
-      <div className="frame pat-dots max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-b-none p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:rounded-b-[18px]" onClick={(e) => e.stopPropagation()}>
+      <div className="frame sheet-surface max-h-[88dvh] w-full max-w-lg overflow-y-auto rounded-b-none p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:rounded-b-[18px]" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="font-serif text-lg font-bold tracking-[0.08em] text-gold-soft">{title}</h2>
           <button type="button" aria-label="關閉" onClick={onClose} className="chip grid h-8 w-8 place-items-center rounded-full text-[15px]">

@@ -1,3 +1,4 @@
+import { AttributeChoices } from "../components/GarmentChoices";
 import { usePullRefresh } from "../hooks/usePullRefresh";
 import { BulkEditSheet } from "../components/BulkEditSheet";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -179,7 +180,7 @@ export default function Wardrobe() {
           </div>
           <div>
             <p className="mb-1 text-[13px] text-mauve">顏色</p>
-            <Chips options={optionNames(tax, "primary_color")} value={color} onChange={(v) => setParam("color", v)} />
+            <AttributeChoices id="primary_color" options={optionNames(tax, "primary_color")} value={color ? [color] : []} onChange={(v) => setParam("color", v[0] || "")} />
           </div>
           <div>
             <p className="mb-1 text-[13px] text-mauve">季節</p>

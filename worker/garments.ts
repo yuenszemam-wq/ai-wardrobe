@@ -166,6 +166,15 @@ export function normalizeAttributes(raw: unknown): string | null {
   const tax = currentTaxonomy();
   const out: Record<string, string | string[]> = {};
   for (const [k, v] of Object.entries(obj).slice(0, 60)) {
+    if (k === "original_name" || k === "source_url") {
+      const value = str(v, k === "original_name" ? 300 : 2048);
+      if (value && k === "source_url") {
+        try { const url = new URL(value); if (!["https:", "http:"].includes(url.protocol)) throw new Error(); }
+        catch { throw new HttpError(400, "bad_url", "連結必須是有效的 http 或 https 網址"); }
+      }
+      if (value) out[k] = value;
+      continue;
+    }
     if (isColumnAttribute(k)) continue; // 風格／顏色／季節用原有欄位
     const attr = tax.attributes.find((a) => a.id === k);
     if (!attr) continue;
@@ -535,7 +544,7 @@ export async function analysis(env: Env) {
     for (const s of splitMulti(g.season)) bump(season, s, price);
     bump(month, String(g.created_at).slice(0, 7), price);
     for (const [k, v] of Object.entries(g.attributes)) {
-      if (k === "brand_confidence") continue;
+      if (["brand_confidence", "original_name", "source_url"].includes(k)) continue;
       const m = extra.get(k) ?? new Map<string, Bucket>();
       for (const x of Array.isArray(v) ? v : [v]) if (x) bump(m, String(x), price);
       extra.set(k, m);

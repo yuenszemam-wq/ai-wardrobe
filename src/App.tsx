@@ -69,7 +69,7 @@ export default function App() {
   return (
     <div className="mx-auto min-h-screen max-w-5xl">
       <header className="safe-top lace-b sticky top-0 z-30 bg-ink">
-        <div className="pat-stripe flex h-10 items-center justify-between px-4">
+        <div className="flex h-10 items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2 font-serif text-[18px] tracking-[0.16em] text-gold-soft">
             <IconSparkle className="text-[10px] text-gold" />
             電子衣櫃
@@ -110,13 +110,13 @@ function TabBar({ path }: { path: string }) {
   }, []);
   const clean = path.split("?")[0];
   return (
-    <nav ref={bar} className="app-tabbar pat-stripe fixed inset-x-0 bottom-0 z-30 bg-ink" aria-label="主選單">
-      <div className="pat-stripe">
+    <nav ref={bar} className="app-tabbar fixed inset-x-0 bottom-0 z-30 bg-ink" aria-label="主選單">
+      <div>
         <div className="mx-auto grid max-w-5xl grid-cols-5">
           {TABS.map((t) => {
             const active = t.test(clean);
             return (
-              <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-0.5 pb-0.5 pt-1 text-[11px] ${active ? "text-gold-soft" : "text-mauve"}`}>
+              <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-1 pb-2 pt-2 text-[11px] ${active ? "text-gold-soft" : "text-mauve"}`}>
                 <span className={`grid h-9 w-9 place-items-center rounded-full text-[21px] ${active ? "btn-jewel" : t.to === "/import" ? "border border-gold/60 text-gold-soft" : "border border-transparent"}`} aria-hidden>
                   <t.Icon />
                 </span>

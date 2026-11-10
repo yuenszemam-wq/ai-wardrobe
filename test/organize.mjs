@@ -38,6 +38,20 @@ for(const set of [{confirm:true},{ai_status:'done'},{name:''},{price:-10},{statu
 }
 check('批量最多100件',(await call('/api/garments/bulk-edit',{garment_ids:Array(101).fill(a.id),set:{brand:'x'}})).status===400);
 check('批量修改需要登入',(await call('/api/garments/bulk-edit',{garment_ids:[a.id],set:{brand:'x'}},false)).status===401);
+// Free-text metadata persists without a schema migration and survives unrelated edits.
+const originalName = '星月の庭 '.repeat(20).trim();
+const sourceUrl = 'https://example.com/product?name=' + 'a'.repeat(150);
+r=await call('/api/garments/bulk-edit',{garment_ids:[a.id],set:{attributes:{original_name:originalName,source_url:sourceUrl}}});
+check('原文名稱及長網址可儲存',r.data.results[0].ok);
+aa=(await call(`/api/garments/${a.id}`)).data;
+check('原文和網址讀回不被40字截斷',aa.attributes.original_name===originalName&&aa.attributes.source_url===sourceUrl);
+await call('/api/garments/bulk-edit',{garment_ids:[a.id],set:{attributes:{condition:'良好'}}});
+aa=(await call(`/api/garments/${a.id}`)).data;
+check('修改其他屬性保留原文連結',aa.attributes.source_url===sourceUrl&&aa.attributes.original_name===originalName);
+check('拒絕可執行網址',(await call('/api/garments/bulk-edit',{garment_ids:[a.id],set:{attributes:{source_url:'javascript:alert(1)'}}})).status===400);
+await call('/api/garments/bulk-edit',{garment_ids:[a.id],set:{attributes:{source_url:null}}});
+aa=(await call(`/api/garments/${a.id}`)).data;
+check('清空連結保留其他屬性',!aa.attributes.source_url&&aa.attributes.original_name===originalName&&aa.attributes.condition==='良好');
 // Two original-image families, each with a derived cutout/thumbnail.
 for(const [id,parent,type] of [['a-root',null,'original'],['a-cut','a-root','processed'],['a-thumb','a-cut','thumbnail'],['b-root',null,'original'],['b-cut','b-root','processed'],['b-thumb','b-cut','thumbnail']]){
  await env.DB.prepare('INSERT INTO garment_images (id,garment_id,image_type,r2_key,mime_type,width,height,file_size,sha256,has_alpha,is_primary,derived_from,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,a.id,type,id,'image/png',100,100,4,id,type==='processed'?1:0,id==='a-cut'?1:0,parent,new Date().toISOString()).run();

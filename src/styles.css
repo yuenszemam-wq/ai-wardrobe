@@ -40,6 +40,7 @@
   body {
     margin: 0;
     background-color: var(--color-plum);
+    background-image: repeating-linear-gradient(90deg, #2a1526 0 12px, #321b2e 12px 24px);
     color: var(--color-cream);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -47,7 +48,7 @@
   }
   /* 絲絨布幕：直向的柔和褶紋，固定在背景 */
   body::before {
-    content: "";
+    content: none;
     position: fixed;
     inset: 0;
     z-index: -1;
@@ -322,9 +323,9 @@
   padding-bottom: calc(env(safe-area-inset-bottom) + 0.4rem);
 }
 :root {
-  --tabbar-height: 59px;
+  --tabbar-height: calc(73px + env(safe-area-inset-bottom, 0px));
 }
-.app-tabbar { padding-bottom: 0; }
+.app-tabbar { padding-bottom: env(safe-area-inset-bottom, 0px); background: #3b1f35; }
 .detail-actions {
   position: fixed;
   bottom: var(--tabbar-height);
@@ -352,3 +353,5 @@
 .scrollbar-none {
   scrollbar-width: none;
 }
+
+.sheet-surface { background: #2a1526; background-image: none; box-shadow: 0 -8px 36px rgb(0 0 0 / 0.4); }

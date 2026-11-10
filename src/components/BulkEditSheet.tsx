@@ -1,8 +1,9 @@
+import { AttributeChoices, BrandInput } from "./GarmentChoices";
 import { useState } from 'react';
 import { isColumnAttribute } from '../../shared/taxonomy';
 import { api, Garment, STATUS_LABEL } from '../api';
 import { useTaxonomy } from '../taxonomy';
-import { Button, inputCls, PickChips, Sheet } from './ui';
+import { Button, inputCls, Sheet } from './ui';
 
 export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garment[]; onClose:()=>void; onUpdated:(ids:string[])=>void }) {
   const tax=useTaxonomy();
@@ -11,7 +12,7 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const fields=[
-    {id:'name',name:'衣物名稱'}, {id:'brand',name:'品牌'},
+    {id:'name',name:'衣物名稱'}, {id:'original_name',name:'名稱原文'}, {id:'source_url',name:'連結'}, {id:'brand',name:'品牌'},
     {id:'category',name:'主分類',options:tax.categories.map(c=>c.name)},
     {id:'subcategory',name:'子分類',options:tax.categories.filter(c=>!values.category||c.name===values.category).flatMap(c=>c.subs.map(s=>s.name))},
     ...tax.attributes.map(a=>({id:a.id,name:a.name,options:a.options.map(o=>o.name),multi:a.multi,max:a.max_select})),
@@ -27,7 +28,7 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
       const clear=modes[field.id]==='clear';
       const value=clear?null:values[field.id];
       if(!clear&&(value===undefined||value===''||(Array.isArray(value)&&!value.length))){setError(`請填寫「${field.name}」，或明確選擇清空`);return;}
-      if(tax.attributes.some(a=>a.id===field.id)&&!isColumnAttribute(field.id)) attrs[field.id]=value;
+      if(['original_name','source_url'].includes(field.id)||(tax.attributes.some(a=>a.id===field.id)&&!isColumnAttribute(field.id))) attrs[field.id]=value;
       else patch[field.id]=field.id==='is_favorite'?value==='收藏':field.id==='status'?Object.keys(STATUS_LABEL).find(k=>STATUS_LABEL[k]===value):value;
     }
     if(Object.keys(attrs).length)patch.attributes=attrs;
@@ -48,9 +49,9 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
         <label className="flex flex-1 items-center gap-2 text-sm"><input type="checkbox" disabled={busy} checked={!!modes[field.id]} onChange={e=>setModes(m=>({...m,[field.id]:e.target.checked?'set':''}))}/>{field.name}</label>
         {modes[field.id]&&!['name','status','is_favorite'].includes(field.id)&&<select aria-label={`${field.name}修改方式`} disabled={busy} className="chip rounded px-2 py-1 text-sm" value={modes[field.id]} onChange={e=>setModes(m=>({...m,[field.id]:e.target.value}))}><option value="set">設為</option><option value="clear">清空</option></select>}
       </div>
-      {modes[field.id]==='set'&&<div className="mt-2">{'options' in field ? <PickChips options={field.options||[]} value={Array.isArray(values[field.id])?values[field.id] as string[]:values[field.id]?[String(values[field.id])]:[]} multi={'multi' in field?field.multi:false} max={'max' in field?field.max:undefined}
+      {modes[field.id]==='set'&&<div className="mt-2">{field.id==='brand'?<BrandInput disabled={busy} value={String(values.brand||'')} onChange={brand=>setValues(cur=>({...cur,brand}))}/>: 'options' in field ? <AttributeChoices id={field.id} options={field.options||[]} value={Array.isArray(values[field.id])?values[field.id] as string[]:values[field.id]?[String(values[field.id])]:[]} multi={'multi' in field?field.multi:false} max={'max' in field?field.max:undefined}
         onChange={v=>setValues(cur=>({...cur,[field.id]:'multi' in field&&field.multi?v:v[0]||'',...(field.id==='category'?{subcategory:''}:{})}))}/>
-        :<input aria-label={field.name} disabled={busy} className={inputCls} inputMode={field.id==='price'?'decimal':undefined} value={String(values[field.id]||'')} onChange={e=>setValues(v=>({...v,[field.id]:e.target.value}))}/>}</div>}
+        :<input type={field.id==='source_url'?'url':'text'} aria-label={field.name} disabled={busy} className={inputCls} inputMode={field.id==='price'?'decimal':undefined} value={String(values[field.id]||'')} onChange={e=>setValues(v=>({...v,[field.id]:e.target.value}))}/>}</div>}
       {modes[field.id]==='clear'&&<p className="mt-2 text-sm text-wine">將清空所選衣物的這個欄位</p>}
     </div>)}</div>
     {error&&<p role="alert" className="my-3 text-sm text-wine">{error}</p>}

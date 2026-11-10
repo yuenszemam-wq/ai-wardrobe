@@ -1,3 +1,4 @@
+import { AttributeChoices, BrandInput } from "../components/GarmentChoices";
 import { SplitSheet } from "../components/SplitSheet";
 import { useEffect, useState } from "react";
 import { attributesFor, attributeValues, isColumnAttribute, Taxonomy } from "../../shared/taxonomy";
@@ -285,6 +286,8 @@ export default function GarmentDetail({ id }: { id: string }) {
               <dl className="mt-5 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-2.5 text-[15px]">
                 <Row k="主分類" v={g.category} uncertain={g.uncertain_fields.includes("category")} />
                 <Row k="子分類" v={g.subcategory} />
+                <Row k="名稱原文" v={String(g.attributes?.original_name || "")} />
+                {typeof g.attributes?.source_url === "string" && /^https?:\/\//i.test(g.attributes.source_url) && <><dt className="text-mauve">連結</dt><dd className="min-w-0 break-all"><a href={g.attributes.source_url} target="_blank" rel="noopener noreferrer" className="text-gold-soft underline">{g.attributes.source_url}</a></dd></>}
                 <Row k="品牌" v={g.brand} uncertain={g.uncertain_fields.includes("brand")} />
                 <Row k="價錢" v={g.price != null ? `HK${money(g.price)}` : null} />
                 {shownAttributes(tax, g).map((a) => (
@@ -497,6 +500,8 @@ function EditForm({
     category: g.category || "",
     subcategory: g.subcategory || "",
     brand: g.brand || "",
+    original_name: String(g.attributes?.original_name || ""),
+    source_url: String(g.attributes?.source_url || ""),
     pattern: g.pattern || "",
     notes: g.notes || "",
   });
@@ -509,8 +514,8 @@ function EditForm({
 
   function buildBody(): Record<string, unknown> {
     const body: Record<string, unknown> = {};
-    const initial = { name: g.name_is_placeholder ? "" : g.name, category: g.category || "", subcategory: g.subcategory || "", brand: g.brand || "", pattern: g.pattern || "", notes: g.notes || "" };
-    for (const [k, v] of Object.entries(f)) if (v !== initial[k as keyof typeof initial] && !(k === "name" && !v.trim())) body[k] = v;
+    const initial = { name: g.name_is_placeholder ? "" : g.name, category: g.category || "", subcategory: g.subcategory || "", brand: g.brand || "", original_name: String(g.attributes?.original_name || ""), source_url: String(g.attributes?.source_url || ""), pattern: g.pattern || "", notes: g.notes || "" };
+    for (const [k, v] of Object.entries(f)) if (!["original_name", "source_url"].includes(k) && v !== initial[k as keyof typeof initial] && !(k === "name" && !v.trim())) body[k] = v;
     if (price.trim() !== (g.price != null ? String(g.price) : "")) body.price = price.trim();
     // 只送出有改動的欄位：被改動的欄位會被鎖定，AI 之後不會覆寫
     const before = initialAttrs(tax, g);
@@ -528,6 +533,10 @@ function EditForm({
       if (def && !visibleIds.has(k)) continue;
       nextObj[k] = def && !def.multi ? v[0] : v;
     }
+    delete nextObj.original_name;
+    delete nextObj.source_url;
+    if (f.original_name.trim()) nextObj.original_name = f.original_name.trim();
+    if (f.source_url.trim()) nextObj.source_url = f.source_url.trim();
     const prevObj = JSON.stringify(Object.fromEntries(Object.entries(g.attributes ?? {}).sort()));
     if (JSON.stringify(Object.fromEntries(Object.entries(nextObj).sort())) !== prevObj) body.attributes = nextObj;
     return body;
@@ -546,6 +555,8 @@ function EditForm({
       <Field label="名稱">
         <input className={inputCls} value={f.name} onChange={set("name")} required={!g.name_is_placeholder} placeholder={g.name_is_placeholder ? `${displayName(g)}（可稍後再改）` : undefined} />
       </Field>
+      <Field label="名稱原文"><input className={inputCls} maxLength={300} value={f.original_name} onChange={set("original_name")} placeholder="日文／英文原名" /></Field>
+      <Field label="連結"><input type="url" className={inputCls} maxLength={2048} value={f.source_url} onChange={set("source_url")} placeholder="https://…" /></Field>
       <div>
         <p className="mb-1.5 text-[13px] text-mauve">主分類</p>
         <PickChips
@@ -563,7 +574,7 @@ function EditForm({
       )}
       <div className="grid grid-cols-[1fr_8.5rem] gap-3">
         <Field label="品牌">
-          <input className={inputCls} value={f.brand} onChange={set("brand")} />
+          <BrandInput value={f.brand} onChange={brand=>setF(cur=>({...cur,brand}))} />
         </Field>
         <Field label="價錢（HK$）">
           <input className={inputCls} inputMode="decimal" placeholder="例如 1280" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d.,]/g, ""))} />
@@ -575,7 +586,7 @@ function EditForm({
             {a.name}
             {a.multi ? <span className="ml-1 text-[11px]">（多選{a.max_select ? `，最多 ${a.max_select} 個` : ""}）</span> : null}
           </p>
-          <PickChips
+          <AttributeChoices id={a.id}
             options={a.options.map((o) => o.name)}
             value={attrs[a.id] ?? []}
             multi={a.multi}
