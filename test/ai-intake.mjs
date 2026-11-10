@@ -354,6 +354,86 @@ check("首頁統計更新", st.ai_done === 7 && st.ai_review === 0, st.ai);
 r = await call("GET", "/api/garments?identified=0&limit=50");
 check("衣櫃可篩選「未辨認」", (await j(r)).garments.length === 6);
 
+console.log("\n⑯ 自動去背圖（瀏覽器附上 cutout）");
+{
+  // 沒有透明通道的「假 PNG」：棋盤格 + 深色衣服；去背圖＝同尺寸、背景透明
+  const W = 400, H = 500;
+  const fake = (seed) => {
+    const rgb = Buffer.alloc(W * H * 3), rgba = Buffer.alloc(W * H * 4);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const inside = x > 100 + seed && x < 300 && y > 80 && y < 420;
+      const v = inside ? 40 : (Math.floor(x / 18.5) + Math.floor(y / 18.5)) % 2 ? 229 : 254;
+      rgb.set([v, v, v], (y * W + x) * 3);
+      rgba.set([v, v, v, inside ? 255 : 0], (y * W + x) * 4);
+    }
+    return { rgb, rgba };
+  };
+  const png = async (buf, ch) => new Uint8Array(await sharp(buf, { raw: { width: W, height: H, channels: ch } }).png().toBuffer());
+  const fakeForm = async (seed, { cutoutBytes, withCutout = true } = {}) => {
+    const { rgb, rgba } = fake(seed);
+    const original = await png(rgb, 3);
+    const cutoutPng = cutoutBytes ?? (await png(rgba, 4));
+    const thumb = new Uint8Array(await sharp(rgba, { raw: { width: W, height: H, channels: 4 } }).resize(200).webp().toBuffer());
+    const form = intakeForm(original, `fake_${seed}.png`, { sha: await hex(original), type: "image/png", thumb });
+    if (withCutout) form.set("cutout", new Blob([cutoutPng], { type: "image/png" }), "cutout.png");
+    return { form, original, cutoutPng };
+  };
+
+  let { form, original, cutoutPng } = await fakeForm(0);
+  r = await call("POST", "/api/intake", { form });
+  b = await j(r);
+  check("假透明原圖 + 去背圖 → 201，回傳 cutout_id", r.status === 201 && !!b.cutout_id, b);
+  const orig = await env.DB.prepare("SELECT * FROM garment_images WHERE id = ?").bind(b.image.id).first();
+  const proc = await env.DB.prepare("SELECT * FROM garment_images WHERE id = ?").bind(b.cutout_id ?? "").first();
+  check("原檔仍是 original，位元組與 SHA-256 與上傳時完全相同", orig?.image_type === "original" && orig.has_alpha === 0 && Buffer.compare(Buffer.from(env.IMAGES.objects.get(orig.r2_key).bytes), Buffer.from(original)) === 0 && orig.sha256 === (await hex(original)), orig);
+  check("去背圖存為 processed：有透明通道、同尺寸、由原檔衍生", proc?.image_type === "processed" && proc.has_alpha === 1 && proc.width === W && proc.height === H && proc.derived_from === orig.id && proc.sha256 === (await hex(cutoutPng)), proc);
+  check("去背圖成為主圖，原檔不再是主圖", proc?.is_primary === 1 && orig.is_primary === 0);
+  const th = await env.DB.prepare("SELECT derived_from FROM garment_images WHERE id = ?").bind(b.thumbnail_id ?? "").first();
+  check("縮圖屬於去背圖", th?.derived_from === b.cutout_id, th);
+  r = await call("GET", `/api/garments/${b.garment_id}`);
+  const gd = await j(r);
+  check("衣物詳情：has_processed、主圖是去背圖", gd.images.some((i) => i.image_type === "processed" && i.is_primary && i.has_alpha) && gd.images.some((i) => i.image_type === "original" && !i.is_primary), gd.images);
+
+  // 重傳同一張 → 去重，不會多出去背圖
+  const cntBefore = (await env.DB.prepare("SELECT COUNT(*) AS n FROM garment_images WHERE garment_id = ?").bind(b.garment_id).first()).n;
+  r = await call("POST", "/api/intake", { form: (await fakeForm(0)).form });
+  const again = await j(r);
+  check("重傳同一張 → 去重，沒有多出圖片", again.duplicate === true && again.garment_id === b.garment_id && (await env.DB.prepare("SELECT COUNT(*) AS n FROM garment_images WHERE garment_id = ?").bind(b.garment_id).first()).n === cntBefore, again);
+
+  // 尺寸不符：拒收去背圖，只警告；原檔照樣保存
+  const small = new Uint8Array(await sharp(Buffer.alloc(100 * 120 * 4), { raw: { width: 100, height: 120, channels: 4 } }).png().toBuffer());
+  r = await call("POST", "/api/intake", { form: (await fakeForm(1, { cutoutBytes: small })).form });
+  b = await j(r);
+  const cnt1 = await env.DB.prepare("SELECT COUNT(*) AS n FROM garment_images WHERE garment_id = ? AND image_type = 'processed'").bind(b.garment_id).first();
+  check("去背圖尺寸不符 → 忽略並警告，原檔照樣保存", r.status === 201 && b.cutout_id === null && cnt1.n === 0 && b.warnings.some((w) => w.includes("尺寸")) && b.image.image_type === "original", b);
+
+  // 去背圖沒有透明通道：忽略
+  const noAlpha = (await png(fake(2).rgb, 3));
+  r = await call("POST", "/api/intake", { form: (await fakeForm(2, { cutoutBytes: noAlpha })).form });
+  b = await j(r);
+  check("去背圖沒有透明通道 → 忽略並警告", r.status === 201 && b.cutout_id === null && b.warnings.some((w) => w.includes("透明通道")), b);
+
+  // 去背圖不是圖片：忽略，不影響原檔
+  r = await call("POST", "/api/intake", { form: (await fakeForm(3, { cutoutBytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]) })).form });
+  b = await j(r);
+  check("去背圖損壞 → 忽略並警告，原檔照樣保存", r.status === 201 && b.cutout_id === null && b.warnings.length > 0 && b.image.image_type === "original", b);
+
+  // 原檔本身已有真透明：不收 cutout
+  const real = fake(4).rgba;
+  const realPng = await png(real, 4);
+  const f2 = intakeForm(realPng, "real_alpha.png", { sha: await hex(realPng), type: "image/png" });
+  f2.set("cutout", new Blob([cutoutPng], { type: "image/png" }), "cutout.png");
+  r = await call("POST", "/api/intake", { form: f2 });
+  b = await j(r);
+  const cnt2 = await env.DB.prepare("SELECT COUNT(*) AS n FROM garment_images WHERE garment_id = ? AND image_type = 'processed'").bind(b.garment_id).first();
+  check("原檔已有真透明 → 存為 processed，不再收 cutout", r.status === 201 && b.cutout_id === null && b.image.image_type === "processed" && cnt2.n === 1, b);
+
+  // 沒有附 cutout：行為與以前一樣
+  r = await call("POST", "/api/intake", { form: (await fakeForm(5, { withCutout: false })).form });
+  b = await j(r);
+  check("沒有附去背圖 → 與以前相同（original、cutout_id 為 null）", r.status === 201 && b.cutout_id === null && b.image.image_type === "original", b);
+}
+
 console.log(`\n結果：${passed} 通過，${failures.length} 失敗`);
 if (failures.length) {
   console.log("失敗項目：\n - " + failures.join("\n - "));

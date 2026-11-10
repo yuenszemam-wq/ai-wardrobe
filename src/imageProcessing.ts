@@ -5,6 +5,8 @@
  * - 另外產生 480px WebP 縮圖（保留透明），與高清圖分開上傳。
  */
 
+import { autoCutout, BackgroundKind, MAX_CUTOUT_PIXELS } from "./cutout";
+
 const PASS_THROUGH = new Set(["image/png", "image/jpeg", "image/webp"]);
 export const THUMB_MAX = 480;
 
@@ -44,7 +46,9 @@ async function decode(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   }
 }
 
-function dims(src: ImageBitmap | HTMLImageElement) {
+type Drawable = ImageBitmap | HTMLImageElement | HTMLCanvasElement;
+
+function dims(src: Drawable) {
   return src instanceof HTMLImageElement ? { w: src.naturalWidth, h: src.naturalHeight } : { w: src.width, h: src.height };
 }
 
@@ -134,6 +138,9 @@ export interface IntakePrepared {
   preview: Blob | null; // HEIC 的原尺寸 JPEG 預覽
   thumbnail: Blob | null; // 480px
   analysis: Blob | null; // 約 1600px，給 AI 辨認
+  cutout: Blob | null; // 自動去背後的透明 PNG（原尺寸）；沒有去背時為 null。原檔永遠另外保存
+  cutoutKind?: BackgroundKind; // 偵測到的背景類型
+  cutoutNote?: string; // 沒有自動去背的原因（給使用者看）
   warning?: string;
 }
 
@@ -152,7 +159,7 @@ export async function sha256Hex(blob: Blob): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function scaled(src: ImageBitmap | HTMLImageElement, max: number, alpha: boolean): Promise<Blob> {
+async function scaled(src: Drawable, max: number, alpha: boolean): Promise<Blob> {
   const { w, h } = dims(src);
   const scale = Math.min(1, max / Math.max(w, h));
   const canvas = document.createElement("canvas");
@@ -183,6 +190,29 @@ function alphaOf(src: ImageBitmap | HTMLImageElement): boolean {
   return false;
 }
 
+/**
+ * 自動去背：圖片沒有真正透明、而背景是棋盤格（假 PNG）或純色時，產生原尺寸透明 PNG。
+ * 原檔不會被改動；去背圖另外上傳，由伺服器存成「去背圖」。
+ */
+async function tryCutout(src: Drawable, w: number, h: number): Promise<{ blob: Blob; canvas: HTMLCanvasElement; kind: BackgroundKind } | { note?: string; kind: BackgroundKind }> {
+  if (w * h > MAX_CUTOUT_PIXELS) return { kind: "unknown", note: "圖片太大，沒有自動去背" };
+  await new Promise((r) => setTimeout(r, 0)); // 讓畫面先更新，避免凍結
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(src, 0, 0);
+  const pixels = ctx.getImageData(0, 0, w, h);
+  const result = autoCutout(pixels);
+  if (!result.applied) {
+    canvas.width = canvas.height = 0;
+    return { kind: result.kind, note: result.kind === "transparent" ? undefined : result.reason };
+  }
+  ctx.putImageData(pixels, 0, 0);
+  const blob = await canvasToBlob(canvas, "image/png");
+  return { blob, canvas, kind: result.kind };
+}
+
 /** 準備一張相：計算原檔 SHA-256、解碼一次產生縮圖及辨認圖；HEIC 另產生原尺寸 JPEG 預覽 */
 export async function prepareIntake(file: File): Promise<IntakePrepared> {
   const mime = await sniffType(file);
@@ -193,7 +223,7 @@ export async function prepareIntake(file: File): Promise<IntakePrepared> {
     src = await decode(file);
   } catch {
     // 例如 Windows Chrome 不能解碼 HEIC：原檔照傳，由伺服器保存
-    return { original: file, filename: file.name, sha256: sha, mime, width: 0, height: 0, isHeif, preview: null, thumbnail: null, analysis: null, warning: "此瀏覽器未能預覽這張相，原檔仍會保存" };
+    return { original: file, filename: file.name, sha256: sha, mime, width: 0, height: 0, isHeif, preview: null, thumbnail: null, analysis: null, cutout: null, warning: "此瀏覽器未能預覽這張相，原檔仍會保存" };
   }
   const { w, h } = dims(src);
   try {
@@ -207,9 +237,28 @@ export async function prepareIntake(file: File): Promise<IntakePrepared> {
       preview = await canvasToBlob(canvas, "image/jpeg", 0.92);
       canvas.width = canvas.height = 0; // 釋放記憶體
     }
-    const thumbnail = await scaled(src, THUMB_MAX, alpha);
+    let cutout: Blob | null = null;
+    let cutoutKind: BackgroundKind | undefined;
+    let cutoutNote: string | undefined;
+    let thumbSource: Drawable = src;
+    let cutoutCanvas: HTMLCanvasElement | null = null;
+    if (!alpha) {
+      try {
+        const c = await tryCutout(src, w, h);
+        cutoutKind = c.kind;
+        if ("blob" in c) {
+          cutout = c.blob;
+          cutoutCanvas = c.canvas;
+          thumbSource = c.canvas; // 縮圖用去背後的圖（保留透明）
+        } else cutoutNote = c.note;
+      } catch {
+        cutoutNote = "自動去背失敗，原檔已保存";
+      }
+    }
+    const thumbnail = await scaled(thumbSource, THUMB_MAX, alpha || cutout !== null);
     const analysis = Math.max(w, h) > THUMB_MAX ? await scaled(src, ANALYSIS_MAX, alpha) : null;
-    return { original: file, filename: file.name, sha256: sha, mime, width: w, height: h, isHeif, preview, thumbnail, analysis };
+    if (cutoutCanvas) cutoutCanvas.width = cutoutCanvas.height = 0; // 釋放記憶體
+    return { original: file, filename: file.name, sha256: sha, mime, width: w, height: h, isHeif, preview, thumbnail, analysis, cutout, cutoutKind, cutoutNote };
   } finally {
     if ("close" in src) src.close();
   }

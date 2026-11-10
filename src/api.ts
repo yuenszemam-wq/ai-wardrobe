@@ -220,12 +220,13 @@ export interface IntakeResult {
   duplicate: boolean;
   verified: boolean;
   image: { id: string; width: number; height: number; file_size: number; sha256: string; mime_type: string; image_type: string };
+  cutout_id?: string | null; // 自動去背圖已由伺服器保存時才有
   warnings: string[];
 }
 
 /** 批量上傳：一張相＝一件待整理衣物（multipart，附進度） */
 export function intakeUpload(
-  parts: { file: Blob; filename: string; sha256: string; preview?: Blob | null; thumbnail?: Blob | null; analysis?: Blob | null },
+  parts: { file: Blob; filename: string; sha256: string; preview?: Blob | null; thumbnail?: Blob | null; analysis?: Blob | null; cutout?: Blob | null },
   onProgress?: (ratio: number) => void,
   signal?: AbortSignal,
 ): Promise<IntakeResult> {
@@ -256,6 +257,7 @@ export function intakeUpload(
     if (parts.preview) fd.set("preview", parts.preview, "preview.jpg");
     if (parts.thumbnail) fd.set("thumbnail", parts.thumbnail, "thumb");
     if (parts.analysis) fd.set("analysis", parts.analysis, "analysis");
+    if (parts.cutout) fd.set("cutout", parts.cutout, "cutout.png");
     xhr.send(fd);
   });
 }

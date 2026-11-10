@@ -8,6 +8,7 @@ import { navigate } from "../router";
  * 批量上傳：一張相＝一件「待整理衣物」。
  * - 每批最多 30 張；同時上傳 3 張，減少 iPhone 記憶體壓力。
  * - 原檔原樣上傳（不縮小、不重新壓縮）；瀏覽器另外產生縮圖、AI 辨認圖、HEIC 預覽。
+ * - 圖片不是真透明、而背景是棋盤格（假 PNG）或純色時，瀏覽器自動去背並另存為「去背圖」（主圖），原檔照樣保留。
  * - 伺服器以 SHA-256 核對及去重：重試或重選同一張相不會重複建立。
  */
 
@@ -29,12 +30,18 @@ interface Item {
 
 const STATE_TEXT: Record<ItemState, string> = {
   waiting: "等待上傳",
-  preparing: "準備中（計算校驗碼）",
+  preparing: "準備中（校驗碼、自動去背）",
   uploading: "上傳中",
   done: "已保存",
   duplicate: "衣櫃已有這張相",
   failed: "失敗",
 };
+
+function cutoutText(duplicate: boolean, cutoutId: string | null | undefined, kind?: string, note?: string) {
+  if (duplicate) return "";
+  if (cutoutId) return `｜已自動去背（${kind === "checkerboard" ? "假透明棋盤格" : "純色背景"}），原檔已保留`;
+  return note ? `｜${note}` : "";
+}
 
 export default function UploadCenter() {
   const [items, setItems] = useState<Item[]>([]);
@@ -85,7 +92,7 @@ export default function UploadCenter() {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const r = await intakeUpload(
-            { file: p.original, filename: p.filename, sha256: p.sha256, preview: p.preview, thumbnail: p.thumbnail, analysis: p.analysis },
+            { file: p.original, filename: p.filename, sha256: p.sha256, preview: p.preview, thumbnail: p.thumbnail, analysis: p.analysis, cutout: p.cutout },
             (ratio) => update(item.key, { progress: ratio * 0.97 }),
           );
           const dims = `${r.image.width}×${r.image.height}`;
@@ -94,7 +101,7 @@ export default function UploadCenter() {
             progress: 1,
             garmentId: r.garment_id,
             name: r.name,
-            message: `${r.name}｜${dims}｜${formatBytes(r.image.file_size)}${p.isHeif ? "｜HEIC 原檔" : ""}${p.warning ? `｜${p.warning}` : ""}${r.warnings[0] && !r.duplicate ? `｜${r.warnings[0]}` : ""}`,
+            message: `${r.name}｜${dims}｜${formatBytes(r.image.file_size)}${p.isHeif ? "｜HEIC 原檔" : ""}${p.warning ? `｜${p.warning}` : ""}${cutoutText(r.duplicate, r.cutout_id, p.cutoutKind, p.cutoutNote)}${r.warnings[0] && !r.duplicate ? `｜${r.warnings[0]}` : ""}`,
           });
           return;
         } catch (e) {
