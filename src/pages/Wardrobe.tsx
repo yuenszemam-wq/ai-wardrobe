@@ -81,7 +81,7 @@ export default function Wardrobe() {
       </h1>
 
       {/* 搜尋及篩選：捲動時固定在頁首下方，只佔兩行 */}
-      <div className="lace-b sticky z-20 -mx-4 bg-ink/95 px-4 pb-1.5 pt-2 backdrop-blur" style={{ top: "calc(env(safe-area-inset-top) + 3rem)" }}>
+      <div className="lace-b sticky z-20 -mx-4 bg-ink/95 px-4 pb-1.5 pt-2 backdrop-blur" style={{ top: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
         <div className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[#8a6d80]" />

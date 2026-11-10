@@ -1,4 +1,5 @@
 import { GARMENT_FIELDS, isColumnAttribute, joinMulti, LEGACY_COLOR, LEGACY_SEASON, LEGACY_SUBCATEGORY, splitMulti } from "../shared/taxonomy";
+import { transparentImageSql } from "./transparent";
 import { currentTaxonomy } from "./taxonomy";
 import { Actor, Env, HttpError, audit, json, newId, nowIso, parseJsonArray, str, strArray } from "./util";
 
@@ -200,6 +201,7 @@ export function garmentToJson(r: Record<string, unknown>) {
 
 const LIST_SELECT = `
   SELECT g.*,
+    ${transparentImageSql()} AS transparent_image_id,
     (SELECT p.id FROM garment_images p WHERE p.garment_id = g.id AND p.is_primary = 1 LIMIT 1) AS primary_image_id,
     (SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail' AND t.variant IS NULL
        ORDER BY CASE WHEN t.derived_from IN (SELECT p2.id FROM garment_images p2 WHERE p2.garment_id = g.id AND p2.is_primary = 1) THEN 0 ELSE 1 END,
@@ -371,6 +373,7 @@ export async function listGarments(env: Env, params: URLSearchParams) {
       binds.push(...list);
     }
   }
+  if (params.get("transparent") === "1") where.push(`${transparentImageSql()} IS NOT NULL`);
   const identified = params.get("identified");
   if (identified === "1") where.push("(g.ai_status IS NULL OR g.ai_status = 'done')");
   else if (identified === "0") where.push("g.ai_status IS NOT NULL AND g.ai_status != 'done'");
@@ -586,6 +589,7 @@ export async function mergeGarments(env: Env, actor: Actor, targetId: string, so
     [targetId, sourceId].map((id) => env.DB.prepare("SELECT * FROM garments WHERE id = ?").bind(id).first<Record<string, unknown>>()),
   );
   if (!t || !s) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
+  if (t.status === "archived" || s.status === "archived") throw new HttpError(409, "garment_archived", "已封存的衣物不能合併");
 
   const { results: tImgs } = await env.DB.prepare("SELECT id, image_type, sha256 FROM garment_images WHERE garment_id = ?").bind(targetId).all<{ id: string; image_type: string; sha256: string }>();
   const { results: sImgs } = await env.DB.prepare("SELECT id, image_type, sha256, r2_key, derived_from FROM garment_images WHERE garment_id = ?")
@@ -618,6 +622,12 @@ export async function mergeGarments(env: Env, actor: Actor, targetId: string, so
     binds.push(JSON.stringify(attrs));
   }
   if (Number(s.is_favorite) === 1) sets.push("is_favorite = 1");
+  // Merging photos is not identification. Either unfinished record keeps the result in the AI queue.
+  const needsAi = [t, s].some((g) => g.ai_status && g.ai_status !== "done");
+  if (needsAi) sets.push("ai_status = 'pending_ai'", "ai_claimed_at = NULL", "ai_claimed_by = NULL", "ai_error = NULL");
+  const locks = [...new Set([...parseJsonArray(t.locked_fields), ...parseJsonArray(s.locked_fields)])];
+  sets.push("locked_fields = ?");
+  binds.push(JSON.stringify(locks));
   const now = nowIso();
   sets.push("updated_at = ?", "version = version + 1");
   binds.push(now);
@@ -638,6 +648,10 @@ export async function mergeGarments(env: Env, actor: Actor, targetId: string, so
   stmts.push(env.DB.prepare("UPDATE OR IGNORE outfit_items SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
   stmts.push(env.DB.prepare("UPDATE import_jobs SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
   stmts.push(env.DB.prepare(`UPDATE garments SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, targetId));
+  // Retain links for moved images; refresh stale AI suggestions after the image set changes.
+  stmts.push(env.DB.prepare("DELETE FROM ai_image_links WHERE garment_id IN (?, ?) AND image_id NOT IN (SELECT id FROM garment_images)").bind(targetId, sourceId));
+  stmts.push(env.DB.prepare("UPDATE ai_image_links SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
+  stmts.push(env.DB.prepare("UPDATE ai_suggestions SET status = 'superseded' WHERE garment_id = ? AND status IN ('submitted','valid')").bind(targetId));
   stmts.push(env.DB.prepare("DELETE FROM garments WHERE id = ?").bind(sourceId));
   await env.DB.batch(stmts);
   if (drop.length) await env.IMAGES.delete(drop.map((d) => d.r2_key)).catch((e) => console.error("merge: R2 delete failed", e));

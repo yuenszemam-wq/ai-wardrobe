@@ -587,7 +587,7 @@ function EditForm({
       <Field label="備註">
         <textarea className={`${inputCls} min-h-24`} value={f.notes} onChange={set("notes")} />
       </Field>
-      <div className="sticky bottom-20 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-ink/95 px-4 py-2 backdrop-blur">
+      <div className="detail-actions sticky z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-ink/95 px-4 py-2 backdrop-blur">
         <Button type="submit" disabled={busy}>
           {busy ? "儲存中…" : saveLabel}
         </Button>

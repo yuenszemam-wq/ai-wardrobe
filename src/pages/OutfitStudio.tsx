@@ -1,3 +1,4 @@
+import { TransparentImage, hasTransparentPixels } from "../components/TransparentImage";
 import { PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, displayName, Garment, imageUrl } from "../api";
 import { IconChevronLeft, IconChevronRight, IconCopy, IconDress, IconGrid, IconImage, IconLayers, IconPlus, IconRedo, IconSave, IconSearch, IconTrash, IconUndo } from "../components/icons";
@@ -102,7 +103,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
       setOutfitImage(null);
       setLoaded(true);
     } else setLoaded(false);
-    api<{ garments: Garment[] }>("/api/garments?limit=200&status=active").then((r) => setGarments(r.garments));
+    api<{ garments: Garment[] }>("/api/garments?limit=200&status=active&transparent=1").then((r) => setGarments(r.garments));
     if (id) {
       api<{
         name: string; notes: string | null; is_favorite: boolean; status: string;
@@ -176,7 +177,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
       update((cur) => cur.filter((p) => p.garment_id !== g.id));
       if (selected === g.id) setSelected(null);
     } else {
-      update((cur) => [...cur, { garment_id: g.id, name: displayName(g), category: g.category, image_id: g.primary_image_id || g.thumb_image_id, ...slotFor(g.category) }]);
+      update((cur) => [...cur, { garment_id: g.id, name: displayName(g), category: g.category, image_id: g.transparent_image_id || null, ...slotFor(g.category) }]);
       setSelected(g.id);
     }
   }
@@ -323,6 +324,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
         const img = new Image();
         img.src = imageUrl(p.image_id)!;
         await img.decode();
+        if (!hasTransparentPixels(img)) continue;
         // 與畫面一致：在方框內按比例完整顯示（object-contain）
         const bw = (p.w / 100) * W, bh = (p.h / 100) * H;
         const s = Math.min(bw / img.naturalWidth, bh / img.naturalHeight);
@@ -433,7 +435,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
                 <div className={`flex items-center gap-0.5 rounded-xl p-0.5 lg:gap-1 lg:py-1 lg:pl-1.5 ${p.garment_id === selected ? "chip-on" : "chip"}`}>
                   <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setSelected(p.garment_id)} aria-label={`選取 ${p.name}`}>
                     <span className="relative block h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-rose-soft lg:h-10 lg:w-8">
-                      {p.image_id && <img src={imageUrl(p.image_id)} alt="" className="h-full w-full object-contain" loading="lazy" />}
+                      {p.image_id && <TransparentImage src={imageUrl(p.image_id)} alt="" className="h-full w-full object-contain" loading="lazy" />}
                     </span>
                     <span className="hidden min-w-0 flex-1 text-[13px] lg:block">
                       <span className="block truncate">{p.category || "單品"}</span>
@@ -465,7 +467,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
               onPointerCancel={onUp}
             >
               {picked.length === 0 && outfitImage ? (
-                <img src={imageUrl(outfitImage)} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                <TransparentImage src={imageUrl(outfitImage)} alt="" className="absolute inset-0 h-full w-full object-cover" />
               ) : picked.length === 0 ? (
                 <div className="absolute inset-0 grid place-items-center px-4 pt-8 text-center text-[13px] leading-relaxed text-mauve">在右邊點選衣物，這裡會即時組合預覽</div>
               ) : (
@@ -483,9 +485,9 @@ export default function OutfitStudio({ id }: { id?: string }) {
                       onWheel={(e) => onWheel(e, p.garment_id)}
                     >
                       {p.image_id ? (
-                        <img src={imageUrl(p.image_id)} alt={p.name} draggable={false} className="pointer-events-none h-full w-full object-contain" />
+                        <TransparentImage src={imageUrl(p.image_id)} alt={p.name} draggable={false} className="pointer-events-none h-full w-full object-contain" />
                       ) : (
-                        <div className="grid h-full w-full place-items-center rounded-xl bg-white/70 text-[11px] text-mauve">{p.name}</div>
+                        <div className="grid h-full w-full place-items-center rounded-xl bg-white/70 text-[11px] text-mauve">{p.name}｜待補透明圖</div>
                       )}
                       {isSel && (
                         <div
@@ -523,7 +525,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
           ) : (
             <div className="grid grid-cols-1 gap-y-1 px-0.5 lg:grid-cols-2 lg:gap-x-2.5">
               {visible.map((g) => (
-                <GarmentTile key={g.id} g={g} size="sm" selected={picked.some((p) => p.garment_id === g.id)} onSelect={() => toggle(g)} />
+                <GarmentTile transparentOnly key={g.id} g={g} size="sm" selected={picked.some((p) => p.garment_id === g.id)} onSelect={() => toggle(g)} />
               ))}
             </div>
           )}

@@ -122,6 +122,7 @@ export interface Garment {
   uncertain_fields: string[];
   ai_note: string | null;
   source: string | null;
+  transparent_image_id?: string | null;
   primary_image_id: string | null;
   thumb_image_id: string | null;
   image_count: number;

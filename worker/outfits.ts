@@ -1,3 +1,4 @@
+import { transparentImageSql } from "./transparent";
 import { Actor, Env, HttpError, audit, newId, nowIso, str } from "./util";
 
 interface OutfitInput {
@@ -16,7 +17,7 @@ export async function listOutfits(env: Env, params: URLSearchParams) {
   const { results } = await env.DB.prepare(
     `SELECT o.*,
        (SELECT COUNT(*) FROM outfit_items i WHERE i.outfit_id = o.id) AS item_count,
-       (SELECT oi.id FROM outfit_images oi WHERE oi.outfit_id = o.id ORDER BY oi.is_primary DESC LIMIT 1) AS image_id
+       (SELECT oi.id FROM outfit_images oi WHERE oi.outfit_id = o.id AND oi.has_alpha = 1 AND oi.image_type = 'processed' ORDER BY oi.is_primary DESC LIMIT 1) AS image_id
      FROM outfits o WHERE ${where}${fav} ORDER BY o.created_at DESC LIMIT 200`,
   )
     .bind(...binds)
@@ -25,9 +26,8 @@ export async function listOutfits(env: Env, params: URLSearchParams) {
   for (const o of results) {
     const { results: items } = await env.DB.prepare(
       `SELECT i.garment_id, i.position, i.layer_order, i.x, i.y, i.w, i.h, g.name, g.category,
-         COALESCE((SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail' ORDER BY t.created_at DESC LIMIT 1),
-                  (SELECT p.id FROM garment_images p WHERE p.garment_id = g.id AND p.is_primary = 1 LIMIT 1)) AS image_id
-       FROM outfit_items i JOIN garments g ON g.id = i.garment_id WHERE i.outfit_id = ? ORDER BY i.layer_order, i.position LIMIT 12`,
+         ${transparentImageSql()} AS image_id
+       FROM outfit_items i JOIN garments g ON g.id = i.garment_id WHERE i.outfit_id = ? ORDER BY i.layer_order, i.position`,
     )
       .bind(o.id)
       .all();
@@ -41,14 +41,14 @@ export async function getOutfit(env: Env, id: string) {
   if (!o) throw new HttpError(404, "outfit_not_found", "找不到這套穿搭");
   const { results: items } = await env.DB.prepare(
     `SELECT i.garment_id, i.position, i.layer_order, i.x, i.y, i.w, i.h, g.name, g.category, g.subcategory, g.style,
-       (SELECT p.id FROM garment_images p WHERE p.garment_id = g.id AND p.is_primary = 1 LIMIT 1) AS image_id,
-       (SELECT t.id FROM garment_images t WHERE t.garment_id = g.id AND t.image_type = 'thumbnail' ORDER BY t.created_at DESC LIMIT 1) AS thumb_image_id
+       ${transparentImageSql()} AS image_id,
+       ${transparentImageSql()} AS thumb_image_id
      FROM outfit_items i JOIN garments g ON g.id = i.garment_id WHERE i.outfit_id = ? ORDER BY i.layer_order, i.position`,
   )
     .bind(id)
     .all();
   const { results: images } = await env.DB.prepare(
-    "SELECT id, image_type, width, height, has_alpha, is_primary FROM outfit_images WHERE outfit_id = ? ORDER BY is_primary DESC, created_at",
+    "SELECT id, image_type, width, height, has_alpha, is_primary FROM outfit_images WHERE outfit_id = ? AND has_alpha = 1 AND image_type = 'processed' ORDER BY is_primary DESC, created_at",
   )
     .bind(id)
     .all();

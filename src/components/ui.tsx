@@ -1,3 +1,4 @@
+import { TransparentImage } from "./TransparentImage";
 import { ButtonHTMLAttributes, CSSProperties, ReactNode, useEffect, useState } from "react";
 import { AI_STATUS_LABEL, api, AppSettings, displayName, Garment, imageUrl } from "../api";
 import { navigate } from "../router";
@@ -61,15 +62,16 @@ export function Button({
 }
 
 /** 衣物卡：圓拱形窗，頂部掛小蝴蝶結；縮圖 lazy loading，沒有縮圖時才載入高清主圖 */
-export function GarmentTile({ g, size = "md", selected, onSelect, showPrice }: { g: Garment; size?: "sm" | "md" | "xs"; selected?: boolean; onSelect?: () => void; showPrice?: boolean }) {
-  const src = imageUrl(g.thumb_image_id || g.primary_image_id);
+export function GarmentTile({ g, size = "md", selected, onSelect, showPrice, transparentOnly = false }: { transparentOnly?: boolean; g: Garment; size?: "sm" | "md" | "xs"; selected?: boolean; onSelect?: () => void; showPrice?: boolean }) {
+  const src = imageUrl(transparentOnly ? g.transparent_image_id : g.thumb_image_id || g.primary_image_id);
+  const ImageComponent = transparentOnly ? TransparentImage : "img";
   const badge = g.ai_status && g.ai_status !== "done" ? AI_STATUS_LABEL[g.ai_status] : g.status === "review" ? "待確認" : "";
   const inner = (
     <div className="relative">
       <div className={`arch arch-base relative aspect-[3/4] ${selected ? "outline-2 outline-offset-2 outline-gold-soft" : ""}`}>
         <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
           {src ? (
-            <img src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain px-[9%] pb-[9%] pt-[20%]" />
+            <ImageComponent src={src} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain px-[9%] pb-[9%] pt-[20%]" />
           ) : (
             <div className="absolute inset-0 grid place-items-center pt-[14%] text-[12px] text-mauve">未有圖片</div>
           )}

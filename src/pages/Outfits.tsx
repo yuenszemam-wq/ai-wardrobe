@@ -1,3 +1,4 @@
+import { TransparentImage } from "../components/TransparentImage";
 import { useEffect, useState } from "react";
 import { api, imageUrl, STATUS_LABEL } from "../api";
 import { IconDress, IconHeart } from "../components/icons";
@@ -65,12 +66,12 @@ export default function Outfits() {
 
 /** 穿搭縮圖：已排版的按儲存位置縮小顯示；否則顯示成品照或頭四件單品 */
 export function OutfitPreview({ o }: { o: OutfitSummary }) {
-  if (!o.image_id && o.items.some((it) => it.x !== null))
+  if (o.items.some((it) => it.x !== null))
     return (
       <div className="relative aspect-[3/4] overflow-hidden rounded-[14px] bg-white ring-1 ring-gold/50">
         {o.items.map((it, i) =>
           it.image_id && it.x !== null ? (
-            <img
+            <TransparentImage
               key={it.garment_id}
               src={imageUrl(it.image_id)}
               alt=""
@@ -84,12 +85,12 @@ export function OutfitPreview({ o }: { o: OutfitSummary }) {
     );
   return (
     <div className="grid aspect-[3/4] grid-cols-2 gap-1 overflow-hidden rounded-[14px] bg-white ring-1 ring-gold/50">
-      {o.image_id ? (
-        <img src={imageUrl(o.image_id)} alt="" loading="lazy" className="col-span-2 row-span-2 h-full w-full object-cover" />
+      {!o.items.length && o.image_id ? (
+        <TransparentImage src={imageUrl(o.image_id)} alt="" loading="lazy" className="col-span-2 row-span-2 h-full w-full object-cover" />
       ) : (
         o.items.slice(0, 4).map((it) => (
           <div key={it.garment_id} className="relative">
-            {it.image_id && <img src={imageUrl(it.image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1" />}
+            {it.image_id && <TransparentImage src={imageUrl(it.image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1" />}
           </div>
         ))
       )}

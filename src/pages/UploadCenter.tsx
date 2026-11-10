@@ -1,12 +1,12 @@
-import { DragEvent, useEffect, useRef, useState } from "react";
-import { ApiError, formatBytes, intakeUpload } from "../api";
+import { PointerEvent as ReactPointerEvent, DragEvent, useEffect, useRef, useState } from "react";
+import { api, AiStatus, AI_STATUS_LABEL, Garment, ApiError, formatBytes, intakeUpload } from "../api";
 import { AiHandoffButton, Button, Link, ProgressBar, toast } from "../components/ui";
 import { fillQueue } from "../fillQueue";
 import { fileKey, prepareIntake } from "../imageProcessing";
 import { navigate } from "../router";
 
 /**
- * 上傳：一張相＝一件「待整理衣物」。選相後馬上開始上傳，完成後直接進入填寫資料。
+ * 上傳：一張相＝一件「待整理衣物」。選相後馬上開始上傳，完成後可拖拉合併，再選擇填寫資料。
  * - 可以同時選透明圖和原相；同一件衣服的兩張相可在填寫資料時「合併同一件」，或交給 AI 歸類後確認合併。
  * - 每批最多 30 張；同時上傳 3 張，減少 iPhone 記憶體壓力。
  * - 原檔原樣上傳（不縮小、不重新壓縮）；瀏覽器另外產生縮圖、AI 辨認圖、HEIC 預覽。
@@ -28,6 +28,7 @@ interface Item {
   message?: string;
   garmentId?: string;
   name?: string;
+  aiStatus?: AiStatus | null;
 }
 
 const STATE_TEXT: Record<ItemState, string> = {
@@ -52,6 +53,60 @@ export default function UploadCenter() {
   const itemsRef = useRef<Item[]>([]);
   itemsRef.current = items;
   const runningRef = useRef(false);
+  const mergingRef = useRef(false);
+  const [merging, setMerging] = useState(false);
+  const [mergeSource, setMergeSource] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const drag = useRef<{ id: string; pointer: number; x: number; y: number; moved: boolean } | null>(null);
+
+  async function mergeInto(source: string, target: string) {
+    if (source === target || runningRef.current || mergingRef.current) return;
+    mergingRef.current = true;
+    setMerging(true);
+    try {
+      const result = await api<Garment>(`/api/garments/${target}/merge`, { method: "POST", json: { source_id: source } });
+      setItems((cur) => cur.map((i) => i.garmentId === source || i.garmentId === target
+        ? { ...i, garmentId: target, name: result.name, aiStatus: result.ai_status } : i));
+      fillQueue.remove(source);
+      setMergeSource(null);
+      toast("已合併圖片，AI 辨認狀態已保留");
+    } catch (e) {
+      toast((e as Error).message, "err");
+    } finally {
+      mergingRef.current = false;
+      setMerging(false);
+    }
+  }
+
+  function targetAt(x: number, y: number) {
+    return document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-merge-id]")?.dataset.mergeId || null;
+  }
+  function startMerge(e: ReactPointerEvent<HTMLButtonElement>, id: string) {
+    if (runningRef.current || mergingRef.current || e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { id, pointer: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+  }
+  function moveMerge(e: ReactPointerEvent<HTMLButtonElement>) {
+    const d = drag.current;
+    if (!d || d.pointer !== e.pointerId) return;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8) d.moved = true;
+    if (!d.moved) return;
+    const target = targetAt(e.clientX, e.clientY);
+    setMergeSource(d.id);
+    setDropTarget(target !== d.id ? target : null);
+    if (e.clientY < 90) window.scrollBy(0, -12);
+    else if (e.clientY > window.innerHeight - 100) window.scrollBy(0, 12);
+  }
+  function endMerge(e: ReactPointerEvent<HTMLButtonElement>) {
+    const d = drag.current;
+    drag.current = null;
+    setDropTarget(null);
+    if (!d || d.pointer !== e.pointerId) return;
+    const target = targetAt(e.clientX, e.clientY);
+    if (e.type === "pointerup" && d.moved && target && target !== d.id) void mergeInto(d.id, target);
+    else setMergeSource(null);
+  }
 
   useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.preview)), []);
 
@@ -77,7 +132,7 @@ export default function UploadCenter() {
   }
 
   async function pick(list: FileList | File[] | null) {
-    if (!list || !list.length) return;
+    if (!list || !list.length || mergingRef.current) return;
     const files = Array.from(list).filter((f) => f.type.startsWith("image/") || /\.(heic|heif|jpe?g|png|webp)$/i.test(f.name));
     const room = MAX_FILES - itemsRef.current.filter((i) => i.state !== "done" && i.state !== "duplicate").length;
     if (files.length > room) toast(`每批最多 ${MAX_FILES} 張，已加入前 ${Math.max(room, 0)} 張`, "err");
@@ -87,7 +142,7 @@ export default function UploadCenter() {
       if (itemsRef.current.some((i) => i.key === key) || added.some((i) => i.key === key)) continue; // 同一張相不重複加入
       added.push({ file: f, key, preview: URL.createObjectURL(f), state: "waiting", progress: 0 });
     }
-    setItems((cur) => [...cur.filter((i) => i.state !== "done" && i.state !== "duplicate"), ...added]);
+    setItems((cur) => [...cur, ...added]);
   }
 
   async function uploadOne(item: Item) {
@@ -109,6 +164,7 @@ export default function UploadCenter() {
             progress: 1,
             garmentId: r.garment_id,
             name: r.name,
+            aiStatus: r.duplicate ? undefined : "pending_ai",
             message: `${r.name}｜${dims}｜${formatBytes(r.image.file_size)}${p.isHeif ? "｜HEIC 原檔" : ""}${p.warning ? `｜${p.warning}` : ""}${cutoutText(r.duplicate, r.cutout_id, p.cutoutKind, p.cutoutNote)}${r.warnings[0] && !r.duplicate ? `｜${r.warnings[0]}` : ""}`,
           });
           return;
@@ -127,7 +183,8 @@ export default function UploadCenter() {
 
   /** 剛上傳成功的衣物：按上傳次序進入填寫資料 */
   function goFill() {
-    const ids = itemsRef.current.filter((i) => (i.state === "done" || i.state === "duplicate") && i.garmentId).map((i) => i.garmentId!);
+    if (mergingRef.current || runningRef.current) return;
+    const ids = [...new Set(itemsRef.current.filter((i) => (i.state === "done" || i.state === "duplicate") && i.garmentId).map((i) => i.garmentId!))];
     if (!ids.length) return;
     fillQueue.start(ids);
     navigate(`/g/${ids[0]}?edit=1`);
@@ -152,8 +209,7 @@ export default function UploadCenter() {
       if (cur.some((i) => i.state === "waiting")) return;
       if (failed) toast(`${failed} 張未能上傳，其他已保存；可按「重試失敗項目」`, "err");
       else if (ok) {
-        toast(ok === 1 ? "已上傳，請填寫資料" : `已上傳 ${ok} 件，逐件填寫資料`);
-        setTimeout(goFill, 700);
+        toast(`已上傳 ${ok} 張，可拖拉合併同一件衣物`);
       } else toast("這些相片衣櫃已經有了");
     } finally {
       runningRef.current = false;
@@ -167,6 +223,13 @@ export default function UploadCenter() {
     if (!running) pick(e.dataTransfer.files);
   }
 
+  // Multiple photos remain visible together after merging; one card per garment.
+  const groups = items.reduce<Item[][]>((all, item) => {
+    const existing = item.garmentId && all.find((group) => group[0].garmentId === item.garmentId);
+    if (existing) existing.push(item); else all.push([item]);
+    return all;
+  }, []);
+  const garmentCount = groups.filter((group) => group[0].garmentId).length;
   const total = items.length;
   const finished = items.filter((i) => i.state === "done" || i.state === "duplicate").length;
   const failed = items.filter((i) => i.state === "failed").length;
@@ -183,14 +246,14 @@ export default function UploadCenter() {
         onDrop={onDrop}
         className={`pat-dots flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
           dragging ? "border-amethyst bg-rose" : "border-amethyst/50 bg-white"
-        } ${running ? "pointer-events-none opacity-60" : ""}`}
+        } ${running || merging ? "pointer-events-none opacity-60" : ""}`}
       >
         <span className="mt-2 font-serif text-[18px] font-bold text-amethyst-deep">{total ? "再選相片" : "選擇相片"}</span>
         <span className="mt-1 text-[12px] text-mauve">選好即自動上傳｜最多 {MAX_FILES} 張｜HEIC、JPG、PNG、WebP</span>
         <input type="file" accept={ACCEPT} multiple className="sr-only" onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
       </label>
       <p className="mt-3 text-[12px] leading-relaxed text-mauve">
-        一張相＝一件衣物，原檔完整保存。可以同時選<b>透明圖</b>和<b>原相</b>：同一件衣服的兩張相，可在填寫資料時按「合併同一件」，或交給 AI 整理時歸類。
+        原檔完整保存。上傳後，按住「拖拉合併」拖到同一件衣服的另一張相上；亦可先點「選取合併」，再點目標。合併只整理圖片，不會標記為已辨認。
       </p>
 
       {total > 0 && (
@@ -209,11 +272,18 @@ export default function UploadCenter() {
           </div>
 
           <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {items.map((i) => (
-              <li key={i.key} className="flex items-center gap-3 rounded-2xl bg-white p-2 pr-3">
+            {groups.map(([i, ...photos]) => (
+              <li key={i.key} data-merge-id={i.garmentId} aria-busy={merging}
+                className={`flex flex-wrap items-center gap-3 rounded-2xl bg-white p-2 pr-3 ${dropTarget === i.garmentId ? "ring-2 ring-amethyst" : ""} ${mergeSource === i.garmentId ? "opacity-60" : ""}`}>
+                {dropTarget === i.garmentId && <div className="w-full text-sm text-amethyst-deep">放手合併到這一件</div>}
                 <img src={i.preview} alt="" className="checker h-16 w-12 shrink-0 rounded-lg object-cover" onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13px]">{i.name || i.file.name}</div>
+                  {i.aiStatus && i.aiStatus !== "done" && <span className="chip-on rounded-full px-2 py-0.5 text-[10px]">{AI_STATUS_LABEL[i.aiStatus]}</span>}
+                  {photos.length > 0 && <div className="mt-1 flex flex-wrap gap-1" aria-label={`已合併 ${photos.length + 1} 張相片`}>
+                    {photos.map((photo) => <img key={photo.key} src={photo.preview} alt="已合併相片" className="h-10 w-8 rounded object-contain" />)}
+                    <span className="text-[11px]">共 {photos.length + 1} 張</span>
+                  </div>}
                   {i.state === "uploading" || i.state === "preparing" ? (
                     <div className="mt-1.5">
                       <ProgressBar value={i.progress} />
@@ -231,15 +301,26 @@ export default function UploadCenter() {
                   </button>
                 )}
                 {(i.state === "done" || i.state === "duplicate") && i.garmentId && (
-                  <Link to={`/g/${i.garmentId}?edit=1`} className="shrink-0 text-[12px] text-amethyst-deep underline underline-offset-4">
-                    填寫
-                  </Link>
+                  <div className="flex w-full items-center justify-end gap-2 text-[12px] text-amethyst-deep">
+                    <button type="button" disabled={running || merging} style={{ touchAction: "none" }}
+                      className="min-h-11 select-none rounded-xl border border-gold px-2 disabled:opacity-40"
+                      aria-label={`拖拉合併 ${i.name || i.file.name}`}
+                      onPointerDown={(e) => startMerge(e, i.garmentId!)} onPointerMove={moveMerge}
+                      onPointerUp={endMerge} onPointerCancel={endMerge} onLostPointerCapture={() => { drag.current = null; setDropTarget(null); }}>
+                      ↔ 拖拉合併
+                    </button>
+                    <button type="button" disabled={running || merging} className="min-h-11 px-2 disabled:opacity-40"
+                      onClick={() => mergeSource && mergeSource !== i.garmentId ? void mergeInto(mergeSource, i.garmentId!) : setMergeSource(mergeSource ? null : i.garmentId!)}>
+                      {mergeSource === i.garmentId ? "取消選取" : mergeSource ? "合併到這件" : "選取合併"}
+                    </button>
+                    {!merging && <Link to={`/g/${i.garmentId}?edit=1`} className="underline underline-offset-4">填寫</Link>}
+                  </div>
                 )}
               </li>
             ))}
           </ul>
 
-          {!running && (
+          {!running && !merging && (
             <div className="mt-4 flex flex-wrap items-center gap-2">
               {failed > 0 && (
                 <Button variant="ghost" onClick={() => run(true)}>
@@ -248,7 +329,7 @@ export default function UploadCenter() {
               )}
               {finished > 0 && (
                 <>
-                  <Button onClick={goFill}>填寫資料{finished > 1 ? `（${finished} 件）` : ""}</Button>
+                  <Button onClick={goFill}>填寫資料{garmentCount > 1 ? `（${garmentCount} 件）` : ""}</Button>
                   <AiHandoffButton />
                 </>
               )}

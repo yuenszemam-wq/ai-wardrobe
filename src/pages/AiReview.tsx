@@ -164,7 +164,7 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
       )}
 
       {items.length > 0 && (
-        <div className="sticky top-12 z-20 -mx-4 mt-3 flex flex-wrap items-center gap-2 bg-lace/95 px-4 py-2 backdrop-blur">
+        <div style={{ top: "calc(env(safe-area-inset-top) + 2.5rem)" }} className="sticky z-20 -mx-4 mt-3 flex flex-wrap items-center gap-2 bg-lace/95 px-4 py-2 backdrop-blur">
           <button
             type="button"
             className="text-[13px] text-amethyst-deep underline underline-offset-4"

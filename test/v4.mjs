@@ -219,9 +219,9 @@ check("R2 檔案沒有被刪除或搬動", [...env.IMAGES.objects.keys()].length
 r = await call("GET", `/api/garments/${g2.garment_id}`);
 check("被合併的那件已移除", r.status === 404);
 check("穿搭改為指向合併後的衣物", m.outfits?.some((o) => o.name === "含原相那件"), m.outfits);
-r = await call("GET", "/api/ai/review?ai_status=pending_review");
+r = await call("GET", "/api/ai/review?ai_status=pending_ai");
 rev = await j(r);
-check("合併後待確認清單只餘一件", rev.items.filter((x) => [g1.garment_id, g2.garment_id].includes(x.id)).length === 1 && !rev.items.find((x) => x.id === g1.garment_id).merge_target);
+check("合併後回到待 AI 辨認，清單只餘一件", rev.items.filter((x) => [g1.garment_id, g2.garment_id].includes(x.id)).length === 1 && !rev.items.find((x) => x.id === g1.garment_id).merge_target);
 r = await call("POST", `/api/garments/${g1.garment_id}/merge`, { body: { source_id: g1.garment_id } });
 check("不能與自己合併", r.status === 400);
 r = await call("POST", `/api/garments/${g1.garment_id}/merge`, { body: { source_id: "gar_nope" } });
@@ -245,6 +245,40 @@ m = await j(r);
 check("兩件有同一張相時只保留一張，仍有主圖", r.status === 200 && m.images.length === 1 && m.images[0].is_primary === true, m.images);
 const token2 = await tool(token, "list_garments", {});
 check("AI 權杖不能合併衣物（只限 App 登入）", !token2.isError && (await worker.fetch(new Request(`${ORIGIN}/api/garments/${x1.id}/merge`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ source_id: a.id }) }), env)).status >= 400);
+
+// Regression: pending photos must stay pending even when dropped onto a completed garment.
+const target = await j(await call("POST", "/api/garments", { body: { name: "已辨認目標", category: "連身裙" } }));
+const source = await j(await call("POST", "/api/garments", { body: { name: "待辨認原相" } }));
+await env.DB.prepare("UPDATE garments SET ai_status='done' WHERE id=?").bind(target.id).run();
+await env.DB.prepare("UPDATE garments SET ai_status='pending_ai', locked_fields='[\"brand\"]' WHERE id=?").bind(source.id).run();
+m = await j(await call("POST", `/api/garments/${target.id}/merge`, { body: { source_id: source.id } }));
+check("待辨認來源合併到已完成目標，仍待 AI 辨認", m.ai_status === "pending_ai", m.ai_status);
+check("合併不會自動更改入庫狀態", m.status === target.status);
+check("合併保留來源人工鎖定欄位", m.locked_fields.includes("brand"));
+check("合併增加版本，使舊 AI 建議不能覆寫", m.version > target.version);
+
+const completed = await j(await call("POST", "/api/garments", { body: { name: "完成一" } }));
+const completed2 = await j(await call("POST", "/api/garments", { body: { name: "完成二" } }));
+await env.DB.prepare("UPDATE garments SET ai_status='done' WHERE id IN (?,?)").bind(completed.id, completed2.id).run();
+m = await j(await call("POST", `/api/garments/${completed.id}/merge`, { body: { source_id: completed2.id } }));
+check("兩件已完成合併仍保持已完成", m.ai_status === "done");
+
+// Outfit selection must ignore newer opaque thumbnails and an opaque primary.
+const transparentId = (await j(await call("GET", `/api/garments/${g1.garment_id}`))).images.find((i) => i.image_type === "processed").id;
+await env.DB.prepare("UPDATE garment_images SET is_primary=CASE WHEN image_type='original' THEN 1 ELSE 0 END WHERE garment_id=?").bind(g1.garment_id).run();
+const outfit = await j(await call("POST", "/api/outfits", { body: { name: "透明圖測試", items: [{ garment_id: g1.garment_id }, { garment_id: x1.id }] } }));
+check("穿搭詳情使用透明圖，即使主圖為原相", outfit.items.find((i) => i.garment_id === g1.garment_id).image_id === transparentId);
+check("只有不透明原相的單品不會顯示原相", outfit.items.find((i) => i.garment_id === x1.id).image_id === null);
+const outfits = (await j(await call("GET", "/api/outfits"))).outfits;
+const summary = outfits.find((o) => o.id === outfit.id);
+check("穿搭列表也只使用透明圖", summary.items.find((i) => i.garment_id === g1.garment_id).image_id === transparentId && summary.items.find((i) => i.garment_id === x1.id).image_id === null);
+const eligible = (await j(await call("GET", "/api/garments?status=all&transparent=1&limit=200"))).garments;
+check("穿搭選衣清單排除只有原相的衣物", !eligible.some((g) => g.id === x1.id) && eligible.some((g) => g.id === g1.garment_id && g.transparent_image_id === transparentId));
+
+const rollbackSource = await j(await call("POST", "/api/garments", { body: { name: "合併失敗保留來源" } }));
+env.DB.failNextBatch = true;
+r = await call("POST", `/api/garments/${target.id}/merge`, { body: { source_id: rollbackSource.id } });
+check("合併失敗保留兩件衣物", r.status === 500 && (await call("GET", `/api/garments/${rollbackSource.id}`)).status === 200 && (await call("GET", `/api/garments/${target.id}`)).status === 200);
 
 console.log(`\n結果：${passed} 通過，${failures.length} 失敗`);
 if (failures.length) {
