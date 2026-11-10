@@ -12,13 +12,14 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const fields=[
-    {id:'name',name:'衣物名稱'}, {id:'original_name',name:'名稱原文'}, {id:'source_url',name:'連結'}, {id:'brand',name:'品牌'},
+    {id:'name',name:'衣物名稱'}, {id:'original_name',name:'名稱原文'}, {id:'brand',name:'品牌'},
     {id:'category',name:'主分類',options:tax.categories.map(c=>c.name)},
     {id:'subcategory',name:'子分類',options:tax.categories.filter(c=>!values.category||c.name===values.category).flatMap(c=>c.subs.map(s=>s.name))},
     ...tax.attributes.map(a=>({id:a.id,name:a.name,options:a.options.map(o=>o.name),multi:a.multi,max:a.max_select})),
     {id:'price',name:'價錢（HK$）'}, {id:'pattern',name:'圖案描述'}, {id:'notes',name:'備註'},
     {id:'status',name:'入庫狀態',options:Object.values(STATUS_LABEL)},
     {id:'is_favorite',name:'收藏標記',options:['收藏','不收藏']},
+    {id:'source_url',name:'連結'},
   ];
   const changed=fields.filter(f=>modes[f.id]);
   async function save(){

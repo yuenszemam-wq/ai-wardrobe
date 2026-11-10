@@ -1,3 +1,4 @@
+import { GarmentDetailCard } from "../components/GarmentDetailCard";
 import { AttributeChoices } from "../components/GarmentChoices";
 import { usePullRefresh } from "../hooks/usePullRefresh";
 import { BulkEditSheet } from "../components/BulkEditSheet";
@@ -11,6 +12,8 @@ import { optionNames, useTaxonomy } from "../taxonomy";
 export default function Wardrobe() {
   const path = usePath();
   const params = useMemo(() => new URLSearchParams(path.split("?")[1] || ""), [path]);
+  const [view,setView]=useState<'grid'|'detail'>(()=>{try{return localStorage.getItem('aw:wardrobe-view')==='detail'?'detail':'grid'}catch{return 'grid'}});
+  function changeView(v:'grid'|'detail'){setView(v);try{localStorage.setItem('aw:wardrobe-view',v)}catch{}}
   const [q, setQ] = useState(params.get("q") || "");
   const [items, setItems] = useState<Garment[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
@@ -223,6 +226,13 @@ export default function Wardrobe() {
           <Button variant="ghost" onClick={() => setSelected(new Set())}>取消全選</Button>
           <Button disabled={!selected.size} onClick={() => setBulkOpen(true)}>修改 {selected.size} 件</Button>
       </div>}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="chip inline-flex rounded-full p-0.5" role="group" aria-label="顯示模式">
+          <button type="button" className={`rounded-full px-3 py-1 text-[12px] ${view==='grid'?'chip-on':''}`} aria-pressed={view==='grid'} onClick={()=>changeView('grid')}>圖片</button>
+          <button type="button" className={`rounded-full px-3 py-1 text-[12px] ${view==='detail'?'chip-on':''}`} aria-pressed={view==='detail'} onClick={()=>changeView('detail')}>詳細</button>
+        </div>
+        {view==='grid'&&<div className="flex items-center gap-2 text-[13px] text-mauve"><span>每排</span><ColumnSwitch value={cols} onChange={setCols}/></div>}
+      </div>
       <div className="mt-3 flex items-center justify-between">
         <span className="flex items-center gap-2 text-[13px] text-mauve">
           {items ? `${items.length}${next !== null ? "+" : ""} 件` : ""}
@@ -234,10 +244,7 @@ export default function Wardrobe() {
             <option value="price_asc">價錢低至高</option>
           </select>
         </span>
-        <div className="flex items-center gap-2 text-[13px] text-mauve">
-          <span aria-hidden>每排</span>
-          <ColumnSwitch value={cols} onChange={setCols} />
-        </div>
+
       </div>
 
       <div className="mt-3">
@@ -247,9 +254,9 @@ export default function Wardrobe() {
           <Empty title="沒有符合的衣物">試試清除篩選，或到「匯入」新增衣物。</Empty>
         ) : (
           <>
-            <div className={`grid ${GRID_COLS[cols]}`}>
+            <div className={view==='detail'?"space-y-2":`grid ${GRID_COLS[cols]}`}>
               {items.map((g) => (
-                <GarmentTile key={g.id} g={g} selected={selecting ? selected.has(g.id) : undefined} onSelect={selecting ? () => setSelected(cur => {
+                view==='detail'?<GarmentDetailCard key={g.id} g={g} tax={tax} selected={selecting?selected.has(g.id):undefined} onSelect={selecting?()=>setSelected(cur=>{const next=new Set(cur);if(next.has(g.id))next.delete(g.id);else if(next.size<100)next.add(g.id);else toast('每次最多選取100件','err');return next}):undefined}/>:<GarmentTile key={g.id} g={g} selected={selecting ? selected.has(g.id) : undefined} onSelect={selecting ? () => setSelected(cur => {
                   const next = new Set(cur); if (next.has(g.id)) next.delete(g.id); else if (next.size < 100) next.add(g.id); else toast('每次最多選取100件', 'err'); return next;
                 }) : undefined} size={cols >= 4 ? "sm" : "md"} showPrice={sort.startsWith("price")} />
               ))}

@@ -38,6 +38,21 @@ for(const set of [{confirm:true},{ai_status:'done'},{name:''},{price:-10},{statu
 }
 check('批量最多100件',(await call('/api/garments/bulk-edit',{garment_ids:Array(101).fill(a.id),set:{brand:'x'}})).status===400);
 check('批量修改需要登入',(await call('/api/garments/bulk-edit',{garment_ids:[a.id],set:{brand:'x'}},false)).status===401);
+// Custom swatches persist across clients and preserve named shades on save.
+check('新增顏色需要登入',(await call('/api/settings/colors',{name:'酒紅',hex:'#631328'},false)).status===401);
+check('拒絕無效色碼',(await call('/api/settings/colors',{name:'酒紅',hex:'red'})).status===400);
+r=await call('/api/settings/colors',{name:'酒紅',hex:'#631328'});
+check('新增顏色回傳色碼',r.status===201&&r.data['酒紅']==='#631328');
+check('顏色可以重新讀取',(await call('/api/settings/colors')).data['酒紅']==='#631328');
+const tax=(await call('/api/taxonomy')).data;
+check('主要及次要顏色共用新選項',['primary_color','secondary_colors'].every(id=>tax.attributes.find(x=>x.id===id).options.some(o=>o.name==='酒紅')));
+check('拒絕重複顏色',(await call('/api/settings/colors',{name:'酒紅',hex:'#111111'})).status===409);
+await call('/api/garments/bulk-edit',{garment_ids:[a.id],set:{primary_color:['酒紅'],secondary_colors:['酒紅']}});
+aa=(await call(`/api/garments/${a.id}`)).data;
+check('自訂色不被舊顏色映射覆蓋',aa.primary_color==='酒紅'&&aa.secondary_colors[0]==='酒紅');
+env.DB.failNextBatch=true;
+check('色票寫入失敗回報',(await call('/api/settings/colors',{name:'測試藍',hex:'#224488'})).status===500);
+check('失敗不留下色碼或部分分類',!(await call('/api/settings/colors')).data['測試藍']&&!(await call('/api/taxonomy')).data.attributes.some(a=>a.options.some(o=>o.name==='測試藍')));
 // Free-text metadata persists without a schema migration and survives unrelated edits.
 const originalName = '星月の庭 '.repeat(20).trim();
 const sourceUrl = 'https://example.com/product?name=' + 'a'.repeat(150);

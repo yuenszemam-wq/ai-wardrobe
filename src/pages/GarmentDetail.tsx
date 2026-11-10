@@ -287,7 +287,6 @@ export default function GarmentDetail({ id }: { id: string }) {
                 <Row k="主分類" v={g.category} uncertain={g.uncertain_fields.includes("category")} />
                 <Row k="子分類" v={g.subcategory} />
                 <Row k="名稱原文" v={String(g.attributes?.original_name || "")} />
-                {typeof g.attributes?.source_url === "string" && /^https?:\/\//i.test(g.attributes.source_url) && <><dt className="text-mauve">連結</dt><dd className="min-w-0 break-all"><a href={g.attributes.source_url} target="_blank" rel="noopener noreferrer" className="text-gold-soft underline">{g.attributes.source_url}</a></dd></>}
                 <Row k="品牌" v={g.brand} uncertain={g.uncertain_fields.includes("brand")} />
                 <Row k="價錢" v={g.price != null ? `HK${money(g.price)}` : null} />
                 {shownAttributes(tax, g).map((a) => (
@@ -295,6 +294,7 @@ export default function GarmentDetail({ id }: { id: string }) {
                 ))}
                 <Row k="圖案描述" v={g.pattern} />
                 <Row k="備註" v={g.notes} />
+                {typeof g.attributes?.source_url === "string" && /^https?:\/\//i.test(g.attributes.source_url) && <><dt className="text-mauve">連結</dt><dd className="min-w-0 break-all"><a href={g.attributes.source_url} target="_blank" rel="noopener noreferrer" className="text-gold-soft underline">{g.attributes.source_url}</a></dd></>}
               </dl>
               {!hasAnyDetail(tax, g) && <p className="mt-5 text-[14px] text-mauve">仍未填寫資料。按上方「編輯資料」開始填寫。</p>}
               {g.locked_fields && g.locked_fields.length > 0 && (
@@ -556,7 +556,6 @@ function EditForm({
         <input className={inputCls} value={f.name} onChange={set("name")} required={!g.name_is_placeholder} placeholder={g.name_is_placeholder ? `${displayName(g)}（可稍後再改）` : undefined} />
       </Field>
       <Field label="名稱原文"><input className={inputCls} maxLength={300} value={f.original_name} onChange={set("original_name")} placeholder="日文／英文原名" /></Field>
-      <Field label="連結"><input type="url" className={inputCls} maxLength={2048} value={f.source_url} onChange={set("source_url")} placeholder="https://…" /></Field>
       <div>
         <p className="mb-1.5 text-[13px] text-mauve">主分類</p>
         <PickChips
@@ -602,6 +601,7 @@ function EditForm({
       <Field label="備註">
         <textarea className={`${inputCls} min-h-24`} value={f.notes} onChange={set("notes")} />
       </Field>
+      <Field label="連結"><input type="url" className={inputCls} maxLength={2048} value={f.source_url} onChange={set("source_url")} placeholder="https://…" /></Field>
       <div className="detail-actions z-30 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-ink/95 px-4 py-2 backdrop-blur">
         <Button type="submit" disabled={busy}>
           {busy ? "儲存中…" : saveLabel}

@@ -100,12 +100,12 @@ export function normalizeGarment(input: GarmentInput, partial: boolean): Normali
         break;
       }
       case "primary_color": {
-        const list = splitMulti(raw).map((c) => LEGACY_COLOR[c] ?? c);
+        const list = splitMulti(raw).map((c) => optionsOf("primary_color").includes(c) ? c : LEGACY_COLOR[c] ?? c);
         values.primary_color = joinMulti(list.slice(0, maxOf("primary_color") ?? 2).map((c) => c.slice(0, 20)));
         break;
       }
       case "secondary_colors": {
-        const arr = strArray(raw, 8)?.map((c) => LEGACY_COLOR[c] ?? c);
+        const arr = strArray(raw, 8)?.map((c) => optionsOf("secondary_colors").includes(c) ? c : LEGACY_COLOR[c] ?? c);
         values.secondary_colors = arr ? JSON.stringify([...new Set(arr)]) : null;
         break;
       }

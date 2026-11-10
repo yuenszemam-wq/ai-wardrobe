@@ -1,0 +1,16 @@
+import {build} from 'esbuild';
+import {mkdirSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import React from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+mkdirSync('test/.tmp',{recursive:true});
+await build({entryPoints:['src/components/GarmentDetailCard.tsx'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'test/.tmp/detail-card.mjs'});
+const {GarmentDetailCard}=await import('./.tmp/detail-card.mjs');
+const g={id:'gar_test',name:'示範裙',brand:'Brand',category:'連身裙',subcategory:'JSK',style:'Gothic',season:'秋',primary_color:'酒紅',secondary_colors:['黑'],price:1200,attributes:{original_name:'Original name',source_url:'https://example.com/item',condition:'良好'},pattern:'玫瑰',notes:'備註內容',status:'active',is_favorite:true,created_at:'2026-11-11T00:00:00Z'};
+const tax={categories:[],attributes:[{id:'condition',name:'衣物狀態'}]};
+const html=renderToStaticMarkup(React.createElement(GarmentDetailCard,{g,tax,selected:true,onSelect:()=>{}}));
+for(const text of ['Original name','Brand','JSK','Gothic','酒紅','衣物狀態','良好','玫瑰','備註內容','href="/g/gar_test"','href="https://example.com/item"','type="checkbox"'])assert.ok(html.includes(text),text);
+const empty=renderToStaticMarkup(React.createElement(GarmentDetailCard,{g:{...g,brand:null,price:null,attributes:{source_url:'javascript:alert(1)'},pattern:null,notes:null},tax}));
+assert.ok(!empty.includes('href="javascript:'));
+assert.ok(!empty.includes('衣物狀態'));
+console.log('詳細卡片：14項內容、連結及空欄檢查通過');

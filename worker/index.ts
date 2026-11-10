@@ -1,7 +1,7 @@
 import { bulkEdit, splitGarment } from "./organize";
 import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./auth";
 import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, updateGarment } from "./garments";
-import { deleteHomeBg, getSettings, serveHomeBg, updateSettings, uploadHomeBg } from "./settings";
+import { getCustomColors, addCustomColor, deleteHomeBg, getSettings, serveHomeBg, updateSettings, uploadHomeBg } from "./settings";
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
 import { handleMcp } from "./mcp";
@@ -102,6 +102,10 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   }
 
   // ───── 使用者設定：AI 指令、主頁背景 ─────
+  if (path === "/api/settings/colors") {
+    if (method === "GET") { requireScope(actor,"read"); return json(await getCustomColors(env)); }
+    if (method === "POST") { requireSession(actor); return json(await addCustomColor(env,actor,await readJson(req)),201); }
+  }
   if (path === "/api/settings") {
     if (method === "GET") {
       requireScope(actor, "read");

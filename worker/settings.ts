@@ -1,5 +1,6 @@
+import { ensureTaxonomy, invalidateTaxonomy } from "./taxonomy";
 import { parseImage } from "./images";
-import { Actor, Env, HttpError, audit, json, nowIso, sha256Hex, str } from "./util";
+import { Actor, Env, HttpError, audit, json, newId, nowIso, sha256Hex, str } from "./util";
 
 /**
  * 使用者設定（存放在原有的 app_settings）：
@@ -130,4 +131,24 @@ export async function deleteHomeBg(env: Env, actor: Actor) {
     await audit(env, actor, "settings.home_bg_removed");
   }
   return json({ home_bg: null });
+}
+
+
+export async function getCustomColors(env: Env): Promise<Record<string, string>> {
+  const { results } = await env.DB.prepare("SELECT key, value FROM app_settings WHERE key LIKE 'custom_color:%'").all<{key:string;value:string}>();
+  return Object.fromEntries(results.map(r=>[r.key.slice(13),r.value]));
+}
+export async function addCustomColor(env: Env, actor: Actor, body: Record<string, unknown>) {
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const hex = typeof body.hex === 'string' ? body.hex : '';
+  if (!name || name.length > 20 || /[、,，|]/.test(name) || !/^#[0-9a-f]{6}$/i.test(hex)) throw new HttpError(400, 'bad_color', '請填寫20字內的顏色名稱及有效色碼');
+  const tax = await ensureTaxonomy(env);
+  if (tax.attributes.some(a=>['primary_color','secondary_colors'].includes(a.id)&&a.options.some(o=>o.name===name))) throw new HttpError(409,'duplicate_color','這個顏色名稱已存在');
+  const now = nowIso();
+  const stmts = ['primary_color','secondary_colors'].map(parent=>env.DB.prepare("INSERT INTO taxonomy (id,kind,parent_id,name,sort_order,multi,max_select,show_for,created_at,updated_at) VALUES (?,'option',?,?,?,0,NULL,NULL,?,?)").bind(newId('opt'),parent,name,1000,now,now));
+  stmts.push(env.DB.prepare("INSERT INTO app_settings (key,value,updated_at) VALUES (?,?,?)").bind('custom_color:'+name,hex.toLowerCase(),now));
+  await env.DB.batch(stmts);
+  invalidateTaxonomy();
+  await audit(env,actor,'settings.add_color',undefined,{name,hex});
+  return getCustomColors(env);
 }
