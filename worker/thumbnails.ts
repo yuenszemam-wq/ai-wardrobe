@@ -150,7 +150,7 @@ export async function claimBrowserThumbnail(env:Env) {
   const now=nowIso(),lease=crypto.randomUUID();
   await env.DB.prepare("UPDATE thumbnail_jobs SET state='failed',last_error=COALESCE(last_error,'browser_decode_failed') WHERE attempts>=3 AND state IN ('pending','working') AND next_attempt_at<=?").bind(now).run();
   const job=await env.DB.prepare(`UPDATE thumbnail_jobs SET state='working',lease=?,attempts=attempts+1,next_attempt_at=?,updated_at=?
-    WHERE image_id=(SELECT image_id FROM thumbnail_jobs WHERE state IN ('pending','working') AND next_attempt_at<=? AND attempts<3 ORDER BY updated_at LIMIT 1)
+    WHERE image_id=(SELECT j.image_id FROM thumbnail_jobs j LEFT JOIN garment_images i ON i.id=j.image_id WHERE j.state IN ('pending','working') AND j.next_attempt_at<=? AND j.attempts<3 ORDER BY COALESCE(i.is_primary,0) DESC,j.updated_at,j.image_id LIMIT 1)
     RETURNING image_id,owner`).bind(lease,new Date(Date.now()+300000).toISOString(),now,now).first<{image_id:string;owner:string}>();
   if(!job)return json({job:null});
   return json({job:{...job,lease}});
