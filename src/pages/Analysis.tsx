@@ -1,3 +1,4 @@
+import { WardrobeImage } from "../components/WardrobeImage";
 import { ReactNode, useEffect, useState } from "react";
 import { api, displayName, imageUrl } from "../api";
 import { Bars, Donut, pct, SERIES, swatch, topWithOther } from "../components/charts";
@@ -295,7 +296,7 @@ function Ranked({ items, right }: { items: Brief[]; right: (g: Brief) => string 
           <Link to={`/g/${g.id}`} className="flex items-center gap-3">
             <span className="w-4 shrink-0 text-center font-serif text-[15px] text-gold">{i + 1}</span>
             <span className="arch relative h-12 w-9 shrink-0 overflow-hidden" style={{ boxShadow: "none" }}>
-              {(g.thumb_image_id || g.primary_image_id) && <img src={imageUrl(g.thumb_image_id || g.primary_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1 pt-2" />}
+              {(g.primary_image_id || g.thumb_image_id) && <WardrobeImage src={imageUrl(g.primary_image_id || g.thumb_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1 pt-2" />}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[14px]">{displayName(g)}</span>

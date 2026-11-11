@@ -1,3 +1,4 @@
+import { refreshImageCache } from "../imageCache";
 import { GarmentDetailCard } from "../components/GarmentDetailCard";
 import { AttributeChoices } from "../components/GarmentChoices";
 import { usePullRefresh } from "../hooks/usePullRefresh";
@@ -27,10 +28,11 @@ export default function Wardrobe() {
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
   const generation = useRef(0);
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
+    await refreshImageCache();
     setRevision(v => v + 1);
   }, []);
   const pull = usePullRefresh(refresh, refreshing || bulkOpen || items === null);

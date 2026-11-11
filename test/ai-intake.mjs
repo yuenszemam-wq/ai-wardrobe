@@ -10,7 +10,7 @@ const sharp = require(process.env.SHARP_PATH || "sharp");
 
 mkdirSync(new URL("./.tmp/", import.meta.url), { recursive: true });
 const outfile = new URL("./.tmp/worker-ai.mjs", import.meta.url).pathname;
-await build({ entryPoints: [new URL("../worker/index.ts", import.meta.url).pathname], bundle: true, format: "esm", platform: "neutral", outfile, logLevel: "error" });
+await build({ target: "es2022", loader: { ".wasm": "binary" }, entryPoints: [new URL("../worker/index.ts", import.meta.url).pathname], bundle: true, format: "esm", platform: "neutral", outfile, logLevel: "error" });
 const worker = (await import(outfile + "?t=" + Date.now())).default;
 
 const env = makeEnv();

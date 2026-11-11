@@ -1,3 +1,4 @@
+import { WardrobeImage } from "../components/WardrobeImage";
 import { useEffect, useState } from "react";
 import { api, Batch, formatDate, imageUrl, Job, STATUS_LABEL, uploadImage } from "../api";
 import { Button, Link, PageTitle, ProgressBar, Spinner, toast } from "../components/ui";
@@ -51,10 +52,10 @@ export default function BatchDetail({ id }: { id: string }) {
     try {
       const prepared = await prepareForUpload(file);
       const res = await uploadImage("/api/images/upload", { job_id: job.id, image_type: job.kind === "outfit" ? "original" : "processed" }, prepared.blob, prepared.filename);
-      if (job.garment_id) {
+      try { if (job.garment_id) {
         const thumb = await makeThumbnail(prepared.blob);
         await uploadImage("/api/images/upload", { garment_id: job.garment_id, image_type: "thumbnail", derived_from: res.id }, thumb, "thumb.webp");
-      }
+      } } catch { /* Original is saved; thumbnail failure is independent. */ }
       toast(res.warnings?.[0] || "已上傳", res.warnings?.length ? "err" : "ok");
       await load();
     } catch (e) {
@@ -135,7 +136,7 @@ export default function BatchDetail({ id }: { id: string }) {
         {jobs.map((j) => (
           <li key={j.id} className="flex gap-3 rounded-2xl bg-white p-3 ring-1 ring-ink/5">
             <div className="arch relative h-24 w-[4.5rem] shrink-0 overflow-hidden">
-              {j.preview_image_id && <img src={imageUrl(j.preview_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1.5 pt-3" />}
+              {j.preview_image_id && <WardrobeImage src={imageUrl(j.preview_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1.5 pt-3" />}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2">

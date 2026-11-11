@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database;
+  THUMBNAIL_SERVER_ENCODING?: string;
   IMAGES: R2Bucket;
   ASSETS: Fetcher;
   MAX_UPLOAD_MB?: string;
@@ -99,7 +100,7 @@ export function toHex(buf: ArrayBuffer | Uint8Array): string {
 
 export async function sha256Hex(data: ArrayBuffer | Uint8Array | string): Promise<string> {
   const input = typeof data === "string" ? new TextEncoder().encode(data) : data;
-  return toHex(await crypto.subtle.digest("SHA-256", input));
+  return toHex(await crypto.subtle.digest("SHA-256", input instanceof Uint8Array ? new Uint8Array(input).buffer : input));
 }
 
 export function timingSafeEqualStr(a: string, b: string): boolean {

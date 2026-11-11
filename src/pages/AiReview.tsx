@@ -1,3 +1,4 @@
+import { WardrobeImage } from "../components/WardrobeImage";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Taxonomy } from "../../shared/taxonomy";
 import { AI_STATUS_LABEL, AiNormalized, AiStatus, api, BRAND_CONFIDENCE_LABEL, displayName, formatDate, imageUrl, ReviewItem } from "../api";
@@ -306,8 +307,8 @@ function ReviewCard({ g, selected, onToggle, open, onOpen, onChanged }: { g: Rev
       <div className="flex gap-3">
         <button type="button" onClick={onToggle} aria-pressed={selected} aria-label="選取" className="relative shrink-0">
           <div className="arch relative h-28 w-21 overflow-hidden" style={{ width: "5.25rem" }}>
-            {g.thumb_image_id || g.primary_image_id ? (
-              <img src={imageUrl(g.thumb_image_id || g.primary_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1.5 pt-3" />
+            {g.primary_image_id || g.thumb_image_id ? (
+              <WardrobeImage src={imageUrl(g.primary_image_id || g.thumb_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1.5 pt-3" />
             ) : (
               <div className="absolute inset-0 grid place-items-center text-[11px] text-mauve">未有圖片</div>
             )}
@@ -355,7 +356,7 @@ function MergeSuggestion({ g, onDone }: { g: ReviewItem; onDone: () => Promise<v
   return (
     <div className="mt-3 flex items-center gap-3 rounded-2xl bg-rose-soft p-2.5">
       <div className="arch relative h-16 w-12 shrink-0 overflow-hidden" style={{ boxShadow: "none" }}>
-        {(t.thumb_image_id || t.primary_image_id) && <img src={imageUrl(t.thumb_image_id || t.primary_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1 pt-2.5" />}
+        {(t.primary_image_id || t.thumb_image_id) && <WardrobeImage src={imageUrl(t.primary_image_id || t.thumb_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1 pt-2.5" />}
       </div>
       <div className="min-w-0 flex-1 text-[13px]">
         <p>

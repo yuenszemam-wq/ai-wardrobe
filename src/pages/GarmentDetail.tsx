@@ -1,3 +1,4 @@
+import { WardrobeImage } from "../components/WardrobeImage";
 import { AttributeChoices, BrandInput } from "../components/GarmentChoices";
 import { SplitSheet } from "../components/SplitSheet";
 import { useEffect, useState } from "react";
@@ -26,6 +27,7 @@ const FIELD_LABEL: Record<string, string> = {
 };
 
 export default function GarmentDetail({ id }: { id: string }) {
+  const [highDetail,setHighDetail]=useState(false);
   const [g, setG] = useState<Garment | null>(null);
   const [err, setErr] = useState("");
   const [viewId, setViewId] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export default function GarmentDetail({ id }: { id: string }) {
     setG(null);
     setViewId(null);
     setEditing(new URLSearchParams(location.search).get("edit") === "1");
-    load().then((data) => data && backfillThumbnail(data).then((did) => did && load()));
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -79,8 +81,10 @@ export default function GarmentDetail({ id }: { id: string }) {
     try {
       const prepared = await prepareForUpload(file);
       const res = await uploadImage("/api/images/upload", { garment_id: id, image_type: type }, prepared.blob, prepared.filename, setUploadPct);
-      const thumb = await makeThumbnail(prepared.blob);
-      await uploadImage("/api/images/upload", { garment_id: id, image_type: "thumbnail", derived_from: res.id }, thumb, "thumb.webp");
+      try {
+        const thumb = await makeThumbnail(prepared.blob);
+        await uploadImage("/api/images/upload", { garment_id: id, image_type: "thumbnail", derived_from: res.id }, thumb, "thumb.webp");
+      } catch { /* Original is saved; durable thumbnail job will retry later. */ }
       if (res.warnings?.length) toast(res.warnings[0], "err");
       else toast(res.deduplicated ? "這張圖片已經存在" : "已加入圖片");
       await load();
@@ -128,8 +132,9 @@ export default function GarmentDetail({ id }: { id: string }) {
           <div className={`relative mx-auto ${editing ? "max-w-[13rem]" : "max-w-sm"} lg:max-w-none`}>
             <div className={`relative aspect-[3/4] overflow-hidden ${checker ? "checker rounded-2xl" : "arch"}`}>
               {shown ? (
-                <img
+                <WardrobeImage
                   src={shown.url}
+                  quality={editing || highDetail ? "high" : "thumbnail"}
                   alt={displayName(g)}
                   className={`absolute inset-0 h-full w-full object-contain ${checker ? "p-2" : "px-[7%] pb-[6%] pt-[17%]"}`}
                   decoding="async"
@@ -138,6 +143,7 @@ export default function GarmentDetail({ id }: { id: string }) {
                 <div className="absolute inset-0 grid place-items-center text-mauve">未有圖片</div>
               )}
             </div>
+            {shown && !editing && <button type="button" className="btn-dark mt-2 rounded-full px-3 py-1 text-xs" onClick={()=>setHighDetail(v=>!v)}>{highDetail?"使用縮圖":"載入高清細節"}</button>}
             {/* 刪除目前顯示的這張圖：右上角的小交叉 */}
             {shown && (
               <button
@@ -178,7 +184,7 @@ export default function GarmentDetail({ id }: { id: string }) {
                   onClick={() => setViewId(im.id)}
                   className={`relative h-20 w-16 shrink-0 overflow-hidden rounded-xl bg-rose-soft ${shown?.id === im.id ? "ring-2 ring-[#f2a7c3]" : "ring-1 ring-gold/50"}`}
                 >
-                  <img src={thumbFor(g, im)} alt="" loading="lazy" className="h-full w-full object-contain" />
+                  <WardrobeImage src={thumbFor(g, im)} alt="" loading="lazy" className="h-full w-full object-contain" />
                   <span className="absolute inset-x-0 bottom-0 bg-ink/80 text-center text-[10px] text-rose">{im.is_primary ? "主圖" : im.image_type === "processed" ? "去背圖" : "原相"}</span>
                 </button>
               ))}
@@ -394,7 +400,7 @@ function MergeSheet({ g, onClose, onMerged }: { g: Garment; onClose: () => void;
             <li key={x.id}>
               <button type="button" disabled={busy} onClick={() => merge(x)} className="block w-full text-center disabled:opacity-50">
                 <span className="arch relative block aspect-[3/4] overflow-hidden">
-                  {(x.thumb_image_id || x.primary_image_id) && <img src={imageUrl(x.thumb_image_id || x.primary_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain px-[9%] pb-[8%] pt-[20%]" />}
+                  {(x.primary_image_id || x.thumb_image_id) && <WardrobeImage src={imageUrl(x.primary_image_id || x.thumb_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain px-[9%] pb-[8%] pt-[20%]" />}
                 </span>
                 <span className="mt-1 block truncate text-[11px]">{displayName(x)}</span>
                 <span className="block text-[10px] text-mauve">{x.has_processed ? "有透明圖" : "只有原相"}</span>
@@ -413,22 +419,7 @@ function hasAnyDetail(tax: Taxonomy, g: Garment) {
 
 function thumbFor(g: Garment, im: GarmentImage) {
   const t = g.images?.find((x) => x.image_type === "thumbnail" && x.derived_from === im.id);
-  return t ? t.url : im.url;
-}
-
-/** 主圖若未有縮圖，在瀏覽器產生並上傳（不需要付費的圖片處理服務） */
-async function backfillThumbnail(g: Garment): Promise<boolean> {
-  const primary = g.images?.find((i) => i.is_primary);
-  if (!primary) return false;
-  if (g.images?.some((i) => i.image_type === "thumbnail" && i.derived_from === primary.id)) return false;
-  try {
-    const blob = await (await fetch(primary.url, { credentials: "same-origin" })).blob();
-    const thumb = await makeThumbnail(blob);
-    await uploadImage("/api/images/upload", { garment_id: g.id, image_type: "thumbnail", derived_from: primary.id }, thumb, "thumb.webp");
-    return true;
-  } catch {
-    return false;
-  }
+  return im.url;
 }
 
 /** 顯示：只列出已有值的屬性（未填的欄位在預覽時隱藏） */

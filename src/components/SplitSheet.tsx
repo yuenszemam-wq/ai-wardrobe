@@ -1,3 +1,4 @@
+import { WardrobeImage } from "./WardrobeImage";
 import { useEffect, useState } from 'react';
 import { api, Garment, GarmentImage, imageUrl } from '../api';
 import { Button, Sheet, Spinner, toast } from './ui';
@@ -32,7 +33,7 @@ export function SplitSheet({ id, onClose, onSplit }: { id:string; onClose:()=>vo
       return <label key={root} className={`rounded-xl border p-2 ${selected.includes(root)?'border-amethyst':'border-gold'}`}>
         <input type="checkbox" disabled={busy} checked={selected.includes(root)} onChange={e=>setSelected(v=>e.target.checked?[...v,root]:v.filter(x=>x!==root))}/>
         <span className="ml-2 text-sm">圖片組 {index+1}</span>
-        {image&&<img src={imageUrl(image.id)} alt={`圖片組 ${index+1}`} className="mt-2 h-36 w-full object-contain"/>}
+        {image&&<WardrobeImage src={imageUrl(image.id)} alt={`圖片組 ${index+1}`} className="mt-2 h-36 w-full object-contain"/>}
       </label>;
     })}</div>}
     {garment&&groups.size<2&&<p className="my-3 text-sm">只有一組原圖及衍生圖，無需拆開。</p>}

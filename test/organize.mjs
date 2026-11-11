@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { makeEnv } from './harness.mjs';
 mkdirSync('test/.tmp',{recursive:true});
-await build({entryPoints:['worker/index.ts'],bundle:true,format:'esm',platform:'neutral',outfile:'test/.tmp/organize-worker.mjs'});
+await build({ target: "es2022", loader: { ".wasm": "binary" },entryPoints:['worker/index.ts'],bundle:true,format:'esm',platform:'neutral',outfile:'test/.tmp/organize-worker.mjs'});
 const worker=(await import('./.tmp/organize-worker.mjs')).default;
 const env=makeEnv();let cookie='',passed=0;
 const log=console.log;console.log=(...args)=>{if(!String(args[0]).startsWith('{"m"'))log(...args)};

@@ -38,6 +38,7 @@ export default function Settings({ username, onLogout }: { username: string | nu
   return (
     <div>
       <PageTitle>設定</PageTitle>
+      <ThumbnailStatus/>
 
       <Link to="/taxonomy" className="paper mb-5 flex items-center justify-between px-4 py-4">
         <span>
@@ -173,4 +174,19 @@ function AiCommandEditor() {
       </div>
     </section>
   );
+}
+
+function ThumbnailStatus() {
+  const [status,setStatus]=useState<any>(null);
+  const load=()=>api<any>("/api/thumbnails/status").then(setStatus).catch(()=>{});
+  useEffect(()=>{void load();},[]);
+  if(!status)return null;
+  return <section className="mb-5 rounded-2xl bg-ink p-4 text-sm">
+    <h2 className="font-serif text-lg text-gold-soft">圖片與離線縮圖</h2>
+    <p className="mt-2">已建立 {status.storage.count} 張縮圖 · {(status.storage.bytes/1048576).toFixed(1)} MB</p>
+    <p>待處理 {status.jobs.filter((j:any)=>j.state!=="failed").reduce((s:number,j:any)=>s+j.count,0)} 張 · 失敗 {status.jobs.find((j:any)=>j.state==="failed")?.count??0} 張</p>
+    <p className="mt-1 text-xs text-mauve">今日補建讀取 {status.today.r2_reads??0}／{status.limits.r2_reads} 次；縮圖回應 {((status.today.response_bytes??0)/1048576).toFixed(1)} MB。保持 App 開啟時會分批繼續處理。</p>
+    <button type="button" className="mt-2 underline" onClick={load}>更新進度</button>
+    {status.failed.length>0&&<button type="button" className="ml-4 underline" onClick={async()=>{await api("/api/thumbnails/jobs/retry",{method:"POST"});load();}}>重試失敗縮圖</button>}
+  </section>;
 }

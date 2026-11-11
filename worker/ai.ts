@@ -101,7 +101,7 @@ export async function serveSignedImage(env: Env, imageId: string, url: URL): Pro
   if (exp * 1000 > Date.now() + 25 * 3600_000) throw new HttpError(403, "bad_signature", "簽名無效");
   const expected = await sign(env, imageId, exp);
   if (expected.length !== sig.length || !timingSafe(expected, sig)) throw new HttpError(403, "bad_signature", "簽名無效");
-  const row = await env.DB.prepare("SELECT r2_key, mime_type, sha256 FROM garment_images WHERE id = ?").bind(imageId).first<{ r2_key: string; mime_type: string; sha256: string }>();
+  const row = await env.DB.prepare("SELECT r2_key, mime_type, sha256 FROM garment_images WHERE id = ? UNION ALL SELECT r2_key, mime_type, sha256 FROM outfit_images WHERE id = ? LIMIT 1").bind(imageId,imageId).first<{ r2_key: string; mime_type: string; sha256: string }>();
   if (!row) throw new HttpError(404, "image_not_found", "找不到圖片");
   const obj = await env.IMAGES.get(row.r2_key);
   if (!obj) throw new HttpError(404, "object_missing", "R2 找不到圖片檔案");

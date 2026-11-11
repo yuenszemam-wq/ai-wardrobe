@@ -2,13 +2,13 @@
  * 瀏覽器端圖片處理：
  * - PNG / JPEG / WebP 原檔照傳，不壓縮、不縮小。
  * - HEIC 等其他格式在瀏覽器解碼後，以原尺寸轉成高質素 JPEG（透明圖轉 PNG）。
- * - 另外產生 480px WebP 縮圖（保留透明），與高清圖分開上傳。
+ * - 另外產生 240×300px WebP 縮圖（保留透明），與高清圖分開上傳。
  */
 
 import { autoCutout, BackgroundKind, MAX_CUTOUT_PIXELS } from "./cutout";
 
 const PASS_THROUGH = new Set(["image/png", "image/jpeg", "image/webp"]);
-export const THUMB_MAX = 480;
+export const THUMB_MAX = 300;
 
 export interface PreparedImage {
   blob: Blob;
@@ -79,24 +79,26 @@ export async function prepareForUpload(file: File): Promise<PreparedImage> {
   return { blob, filename: `${base}.jpg`, width: w, height: h, converted: true };
 }
 
-export async function makeThumbnail(file: Blob): Promise<Blob> {
-  const src = await decode(file);
-  const { w, h } = dims(src);
-  const scale = Math.min(1, THUMB_MAX / Math.max(w, h));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(w * scale));
-  canvas.height = Math.max(1, Math.round(h * scale));
-  const ctx = canvas.getContext("2d")!;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
-  if ("close" in src) src.close();
+async function thumbnailFromSource(src:Drawable):Promise<Blob> {
+  const {w,h}=dims(src);
+  const canvas=document.createElement("canvas");
   try {
-    const webp = await canvasToBlob(canvas, "image/webp", 0.85);
-    if (webp.type === "image/webp") return webp;
-  } catch {
-    /* 舊版 Safari 不支援 WebP 編碼 */
-  }
-  return canvasToBlob(canvas, "image/png");
+    for(const factor of [1,.8,.64,.5]) {
+      const scale=Math.min(1,240*factor/w,300*factor/h);
+      canvas.width=Math.max(1,Math.round(w*scale));canvas.height=Math.max(1,Math.round(h*scale));
+      const ctx=canvas.getContext("2d")!;ctx.imageSmoothingQuality="high";ctx.drawImage(src,0,0,canvas.width,canvas.height);
+      for(const quality of [.82,.68,.5]) {
+        const blob=await canvasToBlob(canvas,"image/webp",quality);
+        if(blob.type!=="image/webp")throw new Error("瀏覽器未支援 WebP 編碼，伺服器會稍後補建縮圖");
+        if(blob.size<=30720)return blob;
+      }
+    }
+    throw new Error("縮圖將由伺服器補建");
+  } finally {canvas.width=canvas.height=0;}
+}
+export async function makeThumbnail(file:Blob):Promise<Blob> {
+  const src=await decode(file);
+  try {return await thumbnailFromSource(src);} finally {if("close" in src)src.close();}
 }
 
 /** 檢查圖片是否含透明像素（抽樣） */
@@ -136,7 +138,7 @@ export interface IntakePrepared {
   height: number;
   isHeif: boolean;
   preview: Blob | null; // HEIC 的原尺寸 JPEG 預覽
-  thumbnail: Blob | null; // 480px
+  thumbnail: Blob | null; // 240×300px
   analysis: Blob | null; // 約 1600px，給 AI 辨認
   cutout: Blob | null; // 自動去背後的透明 PNG（原尺寸）；沒有去背時為 null。原檔永遠另外保存
   cutoutKind?: BackgroundKind; // 偵測到的背景類型
@@ -255,7 +257,7 @@ export async function prepareIntake(file: File): Promise<IntakePrepared> {
         cutoutNote = "自動去背失敗，原檔已保存";
       }
     }
-    const thumbnail = await scaled(thumbSource, THUMB_MAX, alpha || cutout !== null);
+    const thumbnail = await thumbnailFromSource(thumbSource).catch(()=>null);
     const analysis = Math.max(w, h) > THUMB_MAX ? await scaled(src, ANALYSIS_MAX, alpha) : null;
     if (cutoutCanvas) cutoutCanvas.width = cutoutCanvas.height = 0; // 釋放記憶體
     return { original: file, filename: file.name, sha256: sha, mime, width: w, height: h, isHeif, preview, thumbnail, analysis, cutout, cutoutKind, cutoutNote };

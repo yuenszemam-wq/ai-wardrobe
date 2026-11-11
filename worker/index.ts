@@ -1,3 +1,4 @@
+import { thumbnailApi, thumbnailStatus, processThumbnailJobs, claimBrowserThumbnail, browserThumbnailSource, finishBrowserThumbnail } from "./thumbnails";
 import { bulkEdit, splitGarment } from "./organize";
 import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./auth";
 import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, updateGarment } from "./garments";
@@ -18,7 +19,7 @@ export default {
     const started = Date.now();
     try {
       let res: Response;
-      if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mcp")) await ensureTaxonomy(env);
+      if ((url.pathname.startsWith("/api/") || url.pathname.startsWith("/mcp")) && !/^\/api\/(images|thumbnails)(\/|$)/.test(url.pathname)) await ensureTaxonomy(env);
       if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) res = await handleMcp(req, env, url);
       else if (url.pathname.startsWith("/api/")) res = await handleApi(req, env, url);
       else return env.ASSETS.fetch(req);
@@ -33,6 +34,7 @@ export default {
   // 每分鐘處理 D1 暫存匯入（import_staging）
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     await ensureTaxonomy(env);
+    if (env.THUMBNAIL_SERVER_ENCODING === "enabled") ctx.waitUntil(processThumbnailJobs(env, 4).then(r => console.log(JSON.stringify({thumbnails:r}))).catch(e => console.error("thumbnail_cron",String(e))));
     ctx.waitUntil(
       processStaging(env).then((r) => {
         if (r.length) console.log(JSON.stringify({ staging: r }));
@@ -55,7 +57,7 @@ function logRequest(req: Request, url: URL, status: number, started: number, err
   // 簽名圖片網址的 sig 不寫入日誌（url.pathname 本身不含 query）
   const line = { m: req.method, p: path, s: status, ms: Date.now() - started };
   if (status >= 500) console.error(JSON.stringify({ ...line, err: String(err) }));
-  else console.log(JSON.stringify(line));
+  else console.log(JSON.stringify({ ...line, ...(err instanceof HttpError ? {code:err.code} : {}) }));
 }
 
 function withSecurityHeaders(res: Response): Response {
@@ -88,6 +90,18 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   checkCsrf(req, actor);
   await meterCall(env, actor);
   if (actor.kind === "session") await recordOrigin(env, url.origin);
+
+  if(path === "/api/thumbnails/jobs/retry" && method === "POST") { requireSession(actor); await env.DB.prepare("UPDATE thumbnail_jobs SET state='pending',attempts=0,next_attempt_at='',lease=NULL WHERE state='failed'").run(); return json({ok:true}); }
+  if(path === "/api/thumbnails/jobs/claim" && method === "POST") { requireSession(actor); return claimBrowserThumbnail(env); }
+  const tj=path.match(/^\/api\/thumbnails\/jobs\/(img_[a-z2-7]+)$/);
+  if(tj) { requireSession(actor); const lease=url.searchParams.get("lease")??"";
+    if(method==="GET")return browserThumbnailSource(env,tj[1],lease);
+    if(method==="PUT")return finishBrowserThumbnail(req,env,tj[1],lease);
+  }
+  if (path === "/api/thumbnails/status" && method === "GET") { requireSession(actor); return json(await thumbnailStatus(env)); }
+  if (path === "/api/thumbnails" && method === "GET") { requireScope(actor,"read"); return thumbnailApi(req,env); }
+  const thumb=path.match(/^\/api\/thumbnails\/(img_[a-z2-7]+)$/);
+  if(thumb && method === "GET") { requireScope(actor,"read"); return thumbnailApi(req,env,thumb[1]); }
 
   if (path.startsWith("/api/tokens")) return handleTokens(req, env, actor, path);
 

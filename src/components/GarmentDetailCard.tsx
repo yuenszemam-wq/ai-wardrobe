@@ -1,3 +1,4 @@
+import { WardrobeImage } from "./WardrobeImage";
 import { Taxonomy } from '../../shared/taxonomy';
 import { AI_STATUS_LABEL, displayName, Garment, imageUrl, STATUS_LABEL } from '../api';
 import { Link, money } from './ui';
@@ -10,7 +11,7 @@ export function GarmentDetailCard({g,tax,selected,onSelect}:{g:Garment;tax:Taxon
   const summary=[g.category,g.subcategory,g.style,g.season].filter(Boolean).join(' · ');
   return <article className={`flow-root rounded-2xl border bg-plum p-3 text-[12px] leading-relaxed ${selected?'border-gold ring-1 ring-gold':'border-gold/35'}`}>
     <Link to={`/g/${g.id}`} className="float-left mr-3 mb-2 block w-24" aria-label={`查看${displayName(g)}`}>
-      <div className="arch arch-base aspect-[3/4] overflow-hidden">{src?<img src={src} alt={displayName(g)} loading="lazy" className="h-full w-full object-contain p-2"/>:<span className="block pt-12 text-center text-mauve">未有圖片</span>}</div>
+      <div className="arch arch-base aspect-[3/4] overflow-hidden">{src?<WardrobeImage src={src} alt={displayName(g)} loading="lazy" className="h-full w-full object-contain p-2"/>:<span className="block pt-12 text-center text-mauve">未有圖片</span>}</div>
     </Link>
     <div className="flex items-start justify-between gap-2">
       <Link to={`/g/${g.id}`} className="min-w-0 break-words font-serif text-[15px] font-bold text-gold-soft">{displayName(g)}</Link>

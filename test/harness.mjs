@@ -6,7 +6,7 @@ class Stmt {
   constructor(db, sql, params = []) {
     this.db = db;
     this.sql = sql;
-    this.params = params;
+    this.params = params.map(p => Array.isArray(p) ? new Uint8Array(p) : p);
   }
   bind(...p) {
     for (const v of p) if (v === undefined) throw new Error("D1_TYPE_ERROR: undefined bind in: " + this.sql);
@@ -112,6 +112,7 @@ export function makeEnv() {
   DB.migrate(new URL("../migrations/0004_ai_workflow.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0005_taxonomy_layout.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0006_price_settings.sql", import.meta.url));
+  DB.migrate(new URL("../migrations/0007_d1_thumbnails.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),

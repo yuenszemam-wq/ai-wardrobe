@@ -1,3 +1,5 @@
+import { startThumbnailMaintenance } from "./thumbnailMaintenance";
+import { clearImageMemory } from "./imageCache";
 import { ReactElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { IconCrown, IconDress, IconGear, IconHome, IconPlus, IconSparkle } from "./components/icons";
@@ -24,17 +26,21 @@ interface AuthState {
 
 export default function App() {
   const path = usePath();
+  const [offline,setOffline]=useState(!navigator.onLine);
+  useEffect(()=>{const update=()=>setOffline(!navigator.onLine);window.addEventListener("online",update);window.addEventListener("offline",update);return()=>{window.removeEventListener("online",update);window.removeEventListener("offline",update);};},[]);
   const [auth, setAuth] = useState<AuthState | null>(null);
+
+  useEffect(()=>{if(auth?.logged_in)return startThumbnailMaintenance();},[auth?.logged_in]);
 
   const refresh = useCallback(() => {
     api<AuthState>("/api/auth/status")
-      .then(setAuth)
+      .then(a=>{setAuth(a);if(!a.logged_in){clearImageMemory();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});}})
       .catch(() => setAuth({ setup_required: false, logged_in: false, username: null }));
   }, []);
 
   useEffect(() => {
     refresh();
-    const on = () => setAuth((a) => (a ? { ...a, logged_in: false } : a));
+    const on = () => {clearImageMemory();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});setAuth((a) => (a ? { ...a, logged_in: false } : a));};
     window.addEventListener("aw:unauthorized", on);
     return () => window.removeEventListener("aw:unauthorized", on);
   }, [refresh]);
@@ -81,7 +87,7 @@ export default function App() {
           </Link>
         </div>
       </header>
-      <main className="px-4 pb-32 pt-2">{page}</main>
+      <main className="px-4 pb-32 pt-2">{offline&&<p role="status" className="mb-2 rounded bg-ink p-2 text-xs text-gold-soft">離線瀏覽：顯示已快取的資料和縮圖，連線後才能儲存或載入高清圖。</p>}{page}</main>
       <TabBar path={path} />
       <Toast />
     </div>

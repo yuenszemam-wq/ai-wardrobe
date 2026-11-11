@@ -196,7 +196,7 @@ export function parseAttributes(v: unknown): Record<string, unknown> {
   }
 }
 
-export function garmentToJson(r: Record<string, unknown>) {
+export function garmentToJson(r: Record<string, unknown>): Record<string, unknown> & { secondary_colors:string[]; uncertain_fields:string[]; locked_fields:string[]; attributes:Record<string, unknown>; is_favorite:boolean; price:number|null; name_is_placeholder:boolean } {
   return {
     ...r,
     secondary_colors: parseJsonArray(r.secondary_colors),

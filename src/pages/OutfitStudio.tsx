@@ -1,3 +1,4 @@
+import { loadHighResolution } from "../imageCache";
 import { TransparentImage, hasTransparentPixels } from "../components/TransparentImage";
 import { PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, displayName, Garment, imageUrl } from "../api";
@@ -320,11 +321,9 @@ export default function OutfitStudio({ id }: { id?: string }) {
       ctx.fillStyle = "#fffaf6";
       ctx.fillRect(0, 0, W, H);
       for (const p of picked) {
-        if (!p.image_id) continue;
-        const img = new Image();
-        img.src = imageUrl(p.image_id)!;
-        await img.decode();
-        if (!hasTransparentPixels(img)) continue;
+        if (!p.image_id) throw new Error("有單品缺少高清透明圖，未能匯出");
+        const img = await loadHighResolution(imageUrl(p.image_id)!);
+        if (!hasTransparentPixels(img)) throw new Error("有單品未有真正透明的高清圖，未能匯出");
         // 與畫面一致：在方框內按比例完整顯示（object-contain）
         const bw = (p.w / 100) * W, bh = (p.h / 100) * H;
         const s = Math.min(bw / img.naturalWidth, bh / img.naturalHeight);
@@ -467,7 +466,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
               onPointerCancel={onUp}
             >
               {picked.length === 0 && outfitImage ? (
-                <TransparentImage src={imageUrl(outfitImage)} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                <TransparentImage quality="high" src={imageUrl(outfitImage)} alt="" className="absolute inset-0 h-full w-full object-cover" />
               ) : picked.length === 0 ? (
                 <div className="absolute inset-0 grid place-items-center px-4 pt-8 text-center text-[13px] leading-relaxed text-mauve">在右邊點選衣物，這裡會即時組合預覽</div>
               ) : (
@@ -485,7 +484,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
                       onWheel={(e) => onWheel(e, p.garment_id)}
                     >
                       {p.image_id ? (
-                        <TransparentImage src={imageUrl(p.image_id)} alt={p.name} draggable={false} className="pointer-events-none h-full w-full object-contain" />
+                        <TransparentImage quality="high" src={imageUrl(p.image_id)} alt={p.name} draggable={false} className="pointer-events-none h-full w-full object-contain" />
                       ) : (
                         <div className="grid h-full w-full place-items-center rounded-xl bg-white/70 text-[11px] text-mauve">{p.name}｜待補透明圖</div>
                       )}

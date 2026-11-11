@@ -1,3 +1,4 @@
+import { acceptSmallThumbnail } from "./thumbnails";
 import { Actor, Env, HttpError, audit, intVar, json, newId, nowIso, sha256Hex } from "./util";
 
 export type ImageType = "original" | "processed" | "thumbnail";
@@ -312,6 +313,8 @@ export async function storeImage(env: Env, opt: StoreOptions): Promise<StoredIma
     throw new HttpError(500, "readback_failed", "圖片寫入後讀回驗證失敗，已回滾，請重試");
   }
 
+  await acceptSmallThumbnail(env,imageId,owner,sha,bytes,opt.derivedFrom);
+
   await audit(env, opt.actor, "image.upload", imageId, { owner, ownerId, imageType, variant, size: bytes.byteLength, w: info.width, h: info.height });
 
   return {
@@ -402,7 +405,9 @@ export async function serveImage(req: Request, env: Env, imageId: string): Promi
     "x-content-type-options": "nosniff",
   };
   if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
-  const obj = await env.IMAGES.get(row.r2_key);
+  let obj;
+  try { obj = await env.IMAGES.get(row.r2_key); }
+  catch { throw new HttpError(503, "r2_read_failed", "高清圖片暫時未能讀取，請稍後重試"); }
   if (!obj) throw new HttpError(404, "object_missing", "R2 找不到圖片檔案");
   return new Response(obj.body, { headers: { ...headers, "content-length": String(obj.size) } });
 }

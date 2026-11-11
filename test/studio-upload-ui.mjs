@@ -11,7 +11,7 @@ const deps = process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES;
 const { chromium } = require(deps ? `${deps}/playwright` : 'playwright');
 const sharp = require(deps ? `${deps}/sharp` : 'sharp');
 mkdirSync('test/.tmp', { recursive: true });
-await build({ entryPoints: ['worker/index.ts'], bundle: true, format: 'esm', platform: 'neutral', outfile: 'test/.tmp/ui-worker.mjs' });
+await build({ target: "es2022", loader: { ".wasm": "binary" }, entryPoints: ['worker/index.ts'], bundle: true, format: 'esm', platform: 'neutral', outfile: 'test/.tmp/ui-worker.mjs' });
 const worker = (await import('./.tmp/ui-worker.mjs')).default;
 const env = makeEnv();
 const originalLog = console.log;

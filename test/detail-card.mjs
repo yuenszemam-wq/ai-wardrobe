@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 mkdirSync('test/.tmp',{recursive:true});
-await build({entryPoints:['src/components/GarmentDetailCard.tsx'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'test/.tmp/detail-card.mjs'});
+await build({ target: "es2022", loader: { ".wasm": "binary" },entryPoints:['src/components/GarmentDetailCard.tsx'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'test/.tmp/detail-card.mjs'});
 const {GarmentDetailCard}=await import('./.tmp/detail-card.mjs');
 const g={id:'gar_test',name:'示範裙',brand:'Brand',category:'連身裙',subcategory:'JSK',style:'Gothic',season:'秋',primary_color:'酒紅',secondary_colors:['黑'],price:1200,attributes:{original_name:'Original name',source_url:'https://example.com/item',condition:'良好'},pattern:'玫瑰',notes:'備註內容',status:'active',is_favorite:true,created_at:'2026-11-11T00:00:00Z'};
 const tax={categories:[],attributes:[{id:'condition',name:'衣物狀態'}]};
