@@ -139,9 +139,10 @@ export async function thumbnailStatus(env:Env) {
     env.DB.prepare('SELECT state,COUNT(*) AS count FROM thumbnail_jobs GROUP BY state'),
     env.DB.prepare('SELECT COUNT(*) AS count,COALESCE(SUM(byte_size),0) AS bytes FROM garment_thumbnails'),
     env.DB.prepare('SELECT * FROM thumbnail_usage WHERE day=?').bind(todayHk()),
-    env.DB.prepare("SELECT image_id,last_error FROM thumbnail_jobs WHERE state='failed' LIMIT 20")
+    env.DB.prepare("SELECT image_id,last_error FROM thumbnail_jobs WHERE state='failed' LIMIT 20"),
+    env.DB.prepare("SELECT image_id,last_error,attempts FROM thumbnail_jobs WHERE last_error IS NOT NULL ORDER BY updated_at DESC LIMIT 5")
   ]);
-  return {jobs:results[0].results,storage:results[1].results[0],today:results[2].results[0]??{},failed:results[3].results,
+  return {jobs:results[0].results,storage:results[1].results[0],today:results[2].results[0]??{},failed:results[3].results,recent_errors:results[4].results,
     limits:{r2_reads:DAILY_R2_READS,read_requests:DAILY_REQUESTS,response_bytes:DAILY_BYTES},scope:'thumbnail subsystem only; other app/account usage is additional'};
 }
 
@@ -176,4 +177,19 @@ export async function finishBrowserThumbnail(req:Request,env:Env,imageId:string,
   if(bytes.length>THUMB_LIMIT)throw new HttpError(413,'thumbnail_size','縮圖超出上限');
   const version=await saveThumbnail(env,imageId,job.owner,req.headers.get('x-source-sha')??'',bytes);
   return json({ok:true,version});
+}
+
+/** A browser that cannot encode an image must release its lease, not hide the failure. */
+export async function failBrowserThumbnail(req:Request,env:Env,imageId:string,lease:string) {
+  const input=await req.json().catch(()=>({})) as {reason?:unknown};
+  const reason=String(input.reason??'browser_thumbnail_failed').replace(/[^a-zA-Z0-9_:. -]/g,'_').slice(0,120);
+  const now=nowIso();
+  const result=await env.DB.prepare(`UPDATE thumbnail_jobs
+    SET state=CASE WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,
+        next_attempt_at=?,last_error=?,lease=NULL,updated_at=?
+    WHERE image_id=? AND lease=? AND state='working'`)
+    .bind(new Date(Date.now()+60000).toISOString(),reason,now,imageId,lease).run();
+  if(!result.meta.changes)throw new HttpError(409,'thumbnail_lease','縮圖工作已過期');
+  console.warn(JSON.stringify({thumbnail:'browser_failed',image_id:imageId,reason}));
+  return json({ok:true});
 }

@@ -79,6 +79,27 @@ export async function prepareForUpload(file: File): Promise<PreparedImage> {
   return { blob, filename: `${base}.jpg`, width: w, height: h, converted: true };
 }
 
+// Safari can *display* WebP but cannot export it via canvas.toBlob().
+ // Load the existing WebAssembly encoder only for browsers without native WebP export.
+let nativeWebpExport: boolean | null = null;
+let fallbackWebpEncoder: Promise<typeof import('@jsquash/webp')['encode']> | undefined;
+async function encodeCanvasWebp(canvas:HTMLCanvasElement,quality:number):Promise<Blob> {
+  if(nativeWebpExport!==false) {
+    const native=await canvasToBlob(canvas,'image/webp',quality);
+    if(native.type==='image/webp') {nativeWebpExport=true;return native;}
+    nativeWebpExport=false;
+  }
+  try {
+    fallbackWebpEncoder??=import('@jsquash/webp').then(m=>m.encode);
+    const encode=await fallbackWebpEncoder;
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    if(!ctx)throw new Error('canvas_context_unavailable');
+    const bytes=await encode(ctx.getImageData(0,0,canvas.width,canvas.height),{
+      quality:Math.round(quality*100),method:3,alpha_quality:100
+    });
+    return new Blob([bytes],{type:'image/webp'});
+  } catch(e) {fallbackWebpEncoder=undefined;throw e;}
+}
 async function thumbnailFromSource(src:Drawable):Promise<Blob> {
   const {w,h}=dims(src);
   const canvas=document.createElement("canvas");
@@ -88,12 +109,11 @@ async function thumbnailFromSource(src:Drawable):Promise<Blob> {
       canvas.width=Math.max(1,Math.round(w*scale));canvas.height=Math.max(1,Math.round(h*scale));
       const ctx=canvas.getContext("2d")!;ctx.imageSmoothingQuality="high";ctx.drawImage(src,0,0,canvas.width,canvas.height);
       for(const quality of [.82,.68,.5]) {
-        const blob=await canvasToBlob(canvas,"image/webp",quality);
-        if(blob.type!=="image/webp")throw new Error("瀏覽器未支援 WebP 編碼，伺服器會稍後補建縮圖");
+        const blob=await encodeCanvasWebp(canvas,quality);
         if(blob.size<=30720)return blob;
       }
     }
-    throw new Error("縮圖將由伺服器補建");
+    throw new Error("thumbnail_size_limit");
   } finally {canvas.width=canvas.height=0;}
 }
 export async function makeThumbnail(file:Blob):Promise<Blob> {

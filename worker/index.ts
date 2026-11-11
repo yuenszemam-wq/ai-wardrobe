@@ -1,4 +1,4 @@
-import { thumbnailApi, thumbnailStatus, processThumbnailJobs, claimBrowserThumbnail, browserThumbnailSource, finishBrowserThumbnail } from "./thumbnails";
+import { thumbnailApi, thumbnailStatus, processThumbnailJobs, claimBrowserThumbnail, browserThumbnailSource, finishBrowserThumbnail, failBrowserThumbnail } from "./thumbnails";
 import { bulkEdit, splitGarment } from "./organize";
 import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./auth";
 import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, updateGarment } from "./garments";
@@ -98,6 +98,8 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if(method==="GET")return browserThumbnailSource(env,tj[1],lease);
     if(method==="PUT")return finishBrowserThumbnail(req,env,tj[1],lease);
   }
+  const failedThumb=path.match(/^\/api\/thumbnails\/jobs\/(img_[a-z2-7]+)\/fail$/);
+  if(failedThumb && method==="POST"){ requireSession(actor); return failBrowserThumbnail(req,env,failedThumb[1],url.searchParams.get("lease")??""); }
   if (path === "/api/thumbnails/status" && method === "GET") { requireSession(actor); return json(await thumbnailStatus(env)); }
   if (path === "/api/thumbnails" && method === "GET") { requireScope(actor,"read"); return thumbnailApi(req,env); }
   const thumb=path.match(/^\/api\/thumbnails\/(img_[a-z2-7]+)$/);
