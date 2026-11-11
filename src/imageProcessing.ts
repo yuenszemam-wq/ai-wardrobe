@@ -82,7 +82,31 @@ export async function prepareForUpload(file: File): Promise<PreparedImage> {
 // Safari can *display* WebP but cannot export it via canvas.toBlob().
  // Load the existing WebAssembly encoder only for browsers without native WebP export.
 let nativeWebpExport: boolean | null = null;
-let fallbackWebpEncoder: Promise<typeof import('@jsquash/webp')['encode']> | undefined;
+let fallbackWebpEncoder: Promise<(data:ImageData,quality:number)=>Uint8Array> | undefined;
+async function getFallbackWebpEncoder() {
+  // Direct codec imports bypass wasm-feature-detect's dynamic data: WASM imports,
+  // which Rollup cannot bundle. This is the same precompiled WebP codec used by the Worker.
+  const [{default:factory},{default:wasmUrl},{defaultOptions}]=await Promise.all([
+    import('@jsquash/webp/codec/enc/webp_enc.js'),
+    import('@jsquash/webp/codec/enc/webp_enc.wasm?url'),
+    import('@jsquash/webp/meta.js')
+  ]);
+  const response=await fetch(wasmUrl);
+  if(!response.ok)throw new Error('webp_wasm_download_failed');
+  const compiled=await WebAssembly.compile(await response.arrayBuffer());
+  const module=await factory({noInitialRun:true,instantiateWasm(imports:WebAssembly.Imports,cb:(i:WebAssembly.Instance)=>void){
+    const instance=new WebAssembly.Instance(compiled,imports);
+    cb(instance);
+    return instance.exports;
+  }});
+  return (data:ImageData,quality:number)=>{
+    const encoded=module.encode(data.data,data.width,data.height,{
+      ...defaultOptions,quality:Math.round(quality*100),method:3,alpha_quality:100
+    });
+    if(!encoded)throw new Error('webp_wasm_encode_failed');
+    return new Uint8Array(encoded);
+  };
+}
 async function encodeCanvasWebp(canvas:HTMLCanvasElement,quality:number):Promise<Blob> {
   if(nativeWebpExport!==false) {
     const native=await canvasToBlob(canvas,'image/webp',quality);
@@ -90,13 +114,11 @@ async function encodeCanvasWebp(canvas:HTMLCanvasElement,quality:number):Promise
     nativeWebpExport=false;
   }
   try {
-    fallbackWebpEncoder??=import('@jsquash/webp').then(m=>m.encode);
+    fallbackWebpEncoder??=getFallbackWebpEncoder();
     const encode=await fallbackWebpEncoder;
     const ctx=canvas.getContext('2d',{willReadFrequently:true});
     if(!ctx)throw new Error('canvas_context_unavailable');
-    const bytes=await encode(ctx.getImageData(0,0,canvas.width,canvas.height),{
-      quality:Math.round(quality*100),method:3,alpha_quality:100
-    });
+    const bytes=encode(ctx.getImageData(0,0,canvas.width,canvas.height),quality);
     return new Blob([bytes],{type:'image/webp'});
   } catch(e) {fallbackWebpEncoder=undefined;throw e;}
 }
