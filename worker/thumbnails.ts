@@ -4,7 +4,7 @@ import { encodeThumbnail } from './thumbnailCodec';
 
 export const THUMB_LIMIT=30720;
 // Application budgets, not an account-wide billing cap. Every attempted GET is reserved first.
-export const DAILY_R2_READS=600;
+export const DAILY_R2_READS=2000;
 const DAILY_REQUESTS=12000, DAILY_BYTES=192*1024*1024;
 const ownerTable=(owner:string)=>owner==='outfit'?'outfit_images':'garment_images';
 const thumbTable=(owner:string)=>owner==='outfit'?'outfit_thumbnails':'garment_thumbnails';
