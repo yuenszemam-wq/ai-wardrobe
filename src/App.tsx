@@ -13,6 +13,7 @@ import BatchDetail from "./pages/BatchDetail";
 import Login from "./pages/Login";
 import Outfits from "./pages/Outfits";
 import OutfitStudio from "./pages/OutfitStudio";
+import DressingRoom from "./pages/DressingRoom";
 import PublicUpload from "./pages/PublicUpload";
 import Settings from "./pages/Settings";
 import TaxonomyManager from "./pages/TaxonomyManager";
@@ -69,6 +70,8 @@ export default function App() {
   else if (match("/outfits", path)) page = <Outfits />;
   else if (match("/outfits/new", path)) page = <OutfitStudio />;
   else if ((p = match("/outfits/:id", path))) page = <OutfitStudio id={p.id} />;
+  else if (match("/dressing", path)) page = <DressingRoom />;
+  else if ((p = match("/dressing/:id", path))) page = <DressingRoom id={p.id} />;
   else if (match("/settings", path)) page = <Settings username={auth.username} onLogout={refresh} />;
   else page = <div className="py-20 text-center text-mauve">找不到這一頁</div>;
 
@@ -98,7 +101,7 @@ const TABS = [
   { to: "/", label: "首頁", Icon: IconHome, test: (p: string) => p === "/" || p.startsWith("/analysis") },
   { to: "/wardrobe", label: "衣櫃", Icon: IconCrown, test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
   { to: "/import", label: "上傳", Icon: IconPlus, test: (p: string) => p.startsWith("/import") },
-  { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") },
+  { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") || p.startsWith("/dressing") },
   { to: "/settings", label: "設定", Icon: IconGear, test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
 ];
 

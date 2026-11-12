@@ -270,3 +270,17 @@ node test/staging.mjs      # D1 暫存匯入（22 項：分段、SHA-256、截�
 node test/cutout.mjs [假透明圖片]   # 自動去背（11 項；需要 Node 22.18+ 及 sharp；附圖片路徑時輸出去背結果到 test/.tmp/）
 node test/ai-intake.mjs    # V2 批量上傳及 AI 待整理（75 項，含 12 項自動去背圖：10 張上傳、逐位元／SHA-256、HEIC、去重、並發、簽名網址、MCP 讀圖、建議驗證、版本、鎖定欄位、品牌分級、D1 提交、確認、批量）
 ```
+
+## 角色換裝（Moonlit Dressing Room）
+
+固定站姿 2D 紙娃娃：把衣櫃內現有的透明圖穿在角色身上。入口在「穿搭」頁，路徑 `/dressing`、`/dressing/:id`。與穿搭工作室互相獨立，不讀寫 `outfits`／`outfit_items`。
+
+- **畫布**：邏輯尺寸 1200×1800（`shared/doll.ts` 的 `DOLL_W`／`DOLL_H`），螢幕上按比例縮放；位置一律以邏輯像素儲存（圖片中心 `cx`／`cy`、顯示寬度 `w`、旋轉角度）。
+- **素體**：`public/doll/base_v1/`（`hair_back.png`、`body.png`、`head.png`，已對位到同一畫布）。原圖在 `scripts/doll-src/base_v1/`，用 `node scripts/build-doll-base.cjs <head> <hair_back> <body>` 重新產生（清除去背雜點、按 `LAYOUT` 對位）。錨點（頭頂、頸、肩、胸、腰、臀、膝、踝、地面）在 `shared/doll.ts` 的 `BASE_V1.anchors`。
+- **圖層**（底→面）：後髮、身體 → 襪 → 鞋 → 裙撐 → 上衣 → 褲 → 半身裙 → 連身裙 → 整套 → 外套 → 手袋 → 配件 → 頭（臉＋前髮）→ 頭飾。
+- **互斥**：`shared/doll.ts` 的 `conflicts()`。OP 不配襯衫及 SK；JSK 可配襯衫；SK／褲與連身裙互斥；套裝／完整穿搭取代連身裙、上衣、半身裙。
+- **位置優先次序**：造型個別修改（`doll_look_items.ov_*`）→ 衣物穿著模板（`doll_fit_templates`）→ 分類預設（用 D1 縮圖量度透明邊界框後對齊錨點）。
+- **資料表**（migration 0008，只新增）：`doll_fit_templates`、`doll_looks`、`doll_look_items`。復原：`DROP TABLE doll_look_items; DROP TABLE doll_looks; DROP TABLE doll_fit_templates;`
+- **API**：`GET /api/doll/templates`、`PUT｜DELETE /api/doll/templates/:garment_id`、`GET｜POST /api/doll/looks`、`GET｜PATCH｜DELETE /api/doll/looks/:id`。寫入只限 App 登入使用者。
+- **不會做的事**：不呼叫 AI、不生成或複製圖片、不修改 R2 及現有衣物／穿搭記錄。畫布只讀 `/api/images/:id` 的現有透明圖。
+- **測試**：`node test/doll-logic.mjs`（純邏輯）、`node test/doll-api.mjs`（migration＋API）、`node test/doll-ui.mjs`（Chromium 模擬 iPhone 尺寸；不等於 iPhone Safari 實機驗收）。

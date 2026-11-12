@@ -10,6 +10,7 @@ import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
+import { createLook, deleteLook, deleteTemplate, getLook, listLooks, listTemplates, putTemplate, updateLook } from "./doll";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
 
@@ -419,6 +420,49 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (method === "DELETE") {
       requireSession(actor);
       await deleteOutfit(env, actor, m[1]);
+      return json({ ok: true });
+    }
+  }
+
+  // ───── 角色換裝（只限 App 登入使用者寫入） ─────
+  if (path === "/api/doll/templates" && method === "GET") {
+    requireScope(actor, "read");
+    return json({ templates: await listTemplates(env, url.searchParams) });
+  }
+  m = path.match(/^\/api\/doll\/templates\/([\w-]+)$/);
+  if (m) {
+    if (method === "PUT") {
+      requireSession(actor);
+      return json(await putTemplate(env, actor, m[1], await readJson(req)));
+    }
+    if (method === "DELETE") {
+      requireSession(actor);
+      return json(await deleteTemplate(env, actor, m[1], url.searchParams));
+    }
+  }
+  if (path === "/api/doll/looks") {
+    if (method === "GET") {
+      requireScope(actor, "read");
+      return json({ looks: await listLooks(env) });
+    }
+    if (method === "POST") {
+      requireSession(actor);
+      return json(await createLook(env, actor, await readJson(req)), 201);
+    }
+  }
+  m = path.match(/^\/api\/doll\/looks\/([\w-]+)$/);
+  if (m) {
+    if (method === "GET") {
+      requireScope(actor, "read");
+      return json(await getLook(env, m[1]));
+    }
+    if (method === "PATCH") {
+      requireSession(actor);
+      return json(await updateLook(env, actor, m[1], await readJson(req)));
+    }
+    if (method === "DELETE") {
+      requireSession(actor);
+      await deleteLook(env, actor, m[1]);
       return json({ ok: true });
     }
   }
