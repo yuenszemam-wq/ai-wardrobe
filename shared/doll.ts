@@ -1,6 +1,9 @@
 // 角色換裝（Moonlit Dressing Room）的共用定義：素體、錨點、圖層、互斥規則及預設穿著位置。
 // 全部是純函數／常數，前端及 Worker 共用，可直接單元測試。座標＝1200×1800 邏輯畫布像素。
 
+import { AVATAR_V2_ID, RIG_V2 } from "./avatarV2";
+import { posedAnchors } from "./avatarRig";
+
 export const DOLL_W = 1200;
 export const DOLL_H = 1800;
 
@@ -42,7 +45,8 @@ export const BASE_V1: Avatar = {
     floor: { x: 600, y: 1782 },
   },
 };
-export const AVATARS: Record<string, Avatar> = { [BASE_V1.id]: BASE_V1 };
+export const BASE_V2: Avatar = { id: AVATAR_V2_ID, layers: [], anchors: posedAnchors(RIG_V2, {}) };
+export const AVATARS: Record<string, Avatar> = { [BASE_V1.id]: BASE_V1, [BASE_V2.id]: BASE_V2 };
 export const DEFAULT_AVATAR = BASE_V1.id;
 
 // ───── 圖層 ─────
@@ -119,7 +123,7 @@ export function drawOrder<T extends Worn>(items: T[]): T[] {
 
 // ───── 預設穿著位置 ─────
 /** 衣物在圖片內實際佔的範圍（0–1）；ar＝圖片高÷寬 */
-export interface Content { x0: number; y0: number; x1: number; y1: number; ar: number }
+export interface Content { x0: number; y0: number; x1: number; y1: number; ar: number; waistBand?: { x0: number; x1: number }; approximate?: boolean }
 export const FULL_CONTENT = (ar = 4 / 3): Content => ({ x0: 0, y0: 0, x1: 1, y1: 1, ar });
 
 interface Rule { cx: number; top?: number; bottom?: number; cy?: number; h?: number; w?: number }
@@ -143,16 +147,55 @@ const RULES: Record<Slot, Rule> = {
 const FULL_OUTFIT: Rule = { cx: 600, top: A.head_top.y - 30, h: A.floor.y - A.head_top.y + 30 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
-export function defaultFit(slot: Slot, content: Content, category?: string | null): Fit {
-  const r = slot === "set" && category === "完整穿搭" ? FULL_OUTFIT : RULES[slot];
+export function defaultFit(slot: Slot, content: Content, category?: string | null, avatar: Avatar = BASE_V1, subcategory?: string | null, name?: string | null): Fit {
+  let r = slot === "set" && category === "完整穿搭" ? FULL_OUTFIT : RULES[slot];
+  if (avatar.id === BASE_V2.id) {
+    const a = avatar.anchors;
+    const center = a.waist.x;
+    const shoulder = Math.min(a.shoulder_l.y, a.shoulder_r.y);
+    const rules: Record<Slot, Rule> = {
+      dress: { cx: center, top: shoulder - 28, h: a.knee_l.y - shoulder + 28 },
+      set: { cx: center, top: shoulder - 40, h: a.knee_l.y - shoulder + 40 },
+      top: { cx: center, top: shoulder - 25, h: a.waist.y - shoulder + 65 },
+      outer: { cx: center, top: shoulder - 35, h: a.hip.y - shoulder + 35 },
+      skirt: { cx: center, top: a.waist.y - 10, h: a.knee_l.y - a.waist.y + 10 },
+      petticoat: { cx: center, top: a.waist.y + 10, h: a.knee_l.y - a.waist.y - 50 },
+      pants: { cx: center, top: a.waist.y - 10, h: a.ankle_l.y - a.waist.y + 10 },
+      socks: { cx: center, bottom: a.floor.y - 70, h: 430 },
+      shoes: { cx: center, bottom: a.floor.y + 4, h: 150 },
+      headwear: { cx: a.head_top.x, cy: a.head_top.y + 55, w: 240 },
+      bag: { cx: a.hand_l.x, cy: a.hand_l.y, h: 260 },
+      accessory: { cx: a.neck.x, cy: a.neck.y + 10, h: 120 },
+    };
+    r = slot === "set" && category === "完整穿搭" ? { cx: center, top: a.head_top.y, h: a.floor.y - a.head_top.y } : rules[slot];
+    const description = (subcategory ?? "") + " " + (name ?? "");
+    const short = /迷你|超短|短裙|mini/i.test(description);
+    const long = /長裙|及踝|拖地|maxi|ankle.length/i.test(description);
+    const midi = /中長|過膝|midi/i.test(description);
+    if (slot === "skirt" || slot === "dress") {
+      const bottom = short ? a.waist.y + (a.knee_l.y - a.waist.y) * 0.63 : long ? a.ankle_l.y - 35 : midi ? (a.knee_l.y + a.ankle_l.y) / 2 : a.knee_l.y;
+      r = { ...r, h: bottom - (r.top ?? a.waist.y) };
+    }
+    if (slot === "top" || slot === "outer") {
+      if (/短款|短身|crop/i.test(description)) r = { ...r, h: a.waist.y - (r.top ?? shoulder) + 10 };
+      else if (/長款|長版|長身|longline/i.test(description)) r = { ...r, h: a.hip.y - (r.top ?? shoulder) + 100 };
+    }
+  }
   const cw = Math.max(0.02, content.x1 - content.x0), ch = Math.max(0.02, content.y1 - content.y0);
   const ar = content.ar > 0 ? content.ar : 4 / 3;
-  const w = clampW(r.h !== undefined ? r.h / ch / ar : (r.w ?? 400) / cw);
+  let w = clampW(r.h !== undefined ? r.h / ch / ar : (r.w ?? 400) / cw);
+  // Waistband width is a stronger clue than skirt silhouette height, within conservative limits.
+  const band = avatar.id === BASE_V2.id && slot === "skirt" && !content.approximate ? content.waistBand : undefined;
+  if (band && band.x1 > band.x0) {
+    const target = (avatar.anchors.waist_side_l.x - avatar.anchors.waist_side_r.x) * 1.08;
+    const candidate = target / (band.x1 - band.x0);
+    if (candidate >= w * 0.75 && candidate <= w * 1.3) w = clampW(candidate);
+  }
   const h = w * ar;
   const contentH = ch * h;
   const contentTop = r.top !== undefined ? r.top : r.bottom !== undefined ? r.bottom - contentH : (r.cy ?? DOLL_H / 2) - contentH / 2;
   const top = contentTop - content.y0 * h;
-  const left = r.cx - ((content.x0 + content.x1) / 2) * w;
+  const left = r.cx - (band ? (band.x0 + band.x1) / 2 : (content.x0 + content.x1) / 2) * w;
   return { cx: round(left + w / 2), cy: round(top + h / 2), w: round(w), rotation: 0 };
 }
 

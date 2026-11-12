@@ -1,0 +1,8 @@
+[
+  { "id": "a_pose", "label": "預設 A 字站姿", "pose": {} },
+  { "id": "arms_in", "label": "自然收手", "pose": { "shoulder_r": -11, "shoulder_l": 11, "elbow_r": -4, "elbow_l": 4 } },
+  { "id": "arms_out", "label": "手臂稍微外張", "pose": { "shoulder_r": 12, "shoulder_l": -12 } },
+  { "id": "long_sleeve", "label": "適合長袖衣物", "pose": { "shoulder_r": 6, "shoulder_l": -6, "elbow_r": -10, "elbow_l": 10 } },
+  { "id": "outerwear", "label": "適合外套", "pose": { "shoulder_r": 18, "shoulder_l": -18, "elbow_r": -12, "elbow_l": 12 } },
+  { "id": "asymmetric", "label": "輕微不對稱站姿", "pose": { "torso": 2, "head": -4, "shoulder_r": -8, "shoulder_l": -5, "elbow_l": 8, "hip_l": -7, "knee_l": 5, "ankle_l": 3, "hair_tail_r": 3, "hair_tail_l": 3 } }
+]

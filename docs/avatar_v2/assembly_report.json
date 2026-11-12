@@ -1,0 +1,8 @@
+{
+ "mean_abs_diff": 0.1433,
+ "pixels_over_16": 3673,
+ "pixels_over_48": 362,
+ "max_diff": 141,
+ "alpha_mean_abs_diff": 0.00088,
+ "figure_pixels": 496409
+}

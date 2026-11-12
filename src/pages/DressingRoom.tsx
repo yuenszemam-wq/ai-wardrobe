@@ -1,11 +1,16 @@
 import { PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BASE_V1, Content, DOLL_H, DOLL_W, Fit, FIT_LIMIT, HEAD_Z, SLOT_LABEL, SLOT_Z, Slot, defaultFit, drawOrder, hitTest, isSlot, normalizeFit, sameFit, slotFor, wear } from "../../shared/doll";
+import { AVATARS, BASE_V1, Content, DOLL_H, DOLL_W, Fit, FIT_LIMIT, HEAD_Z, SLOT_LABEL, SLOT_Z, Slot, defaultFit, drawOrder, hitTest, isSlot, normalizeFit, sameFit, slotFor, wear } from "../../shared/doll";
 import { api, displayName, Garment } from "../api";
 import { IconChevronLeft, IconPlus, IconSave, IconTrash } from "../components/icons";
 import { Chips, GarmentTile, inputCls, Link, Spinner, toast } from "../components/ui";
 import { DollImage } from "../doll/DollImage";
 import { measureContent } from "../doll/content";
 import { navigate } from "../router";
+import { Sheet } from "../components/ui";
+import { AvatarLook, AvatarPoseEditor } from "../doll/AvatarPoseEditor";
+import { AvatarRigRenderer } from "../doll/AvatarRigRenderer";
+import { AVATAR_V2_ID, ATTACH_BONE, DEFAULT_HAIR_STYLE, DEFAULT_HAIR_COLOR, HAIR_STYLES, RIG_V2, normalizeColorValue, singleImagePoseIssues } from "../../shared/avatarV2";
+import { applyMat, matAngle, normalizePose, solve } from "../../shared/avatarRig";
 
 type From = "default" | "template" | "override";
 interface WornItem {
@@ -22,10 +27,10 @@ interface WornItem {
   base: Fit;
   from: From;
 }
-interface Template { garment_id: string; fit: Fit; slot: string | null }
+interface Template { garment_id: string; image_id: string | null; fit: Fit; slot: string | null; version: number }
 interface LookSummary { id: string; name: string; item_count: number }
 interface LookDetail {
-  id: string; name: string;
+  id: string; name: string; avatar_id?: string; hair_style?: string | null; hair_color?: string | null; accent_color?: string | null; pose?: unknown;
   items: { garment_id: string; slot: string; name: string; category: string | null; subcategory: string | null; image_id: string | null; override: Fit | null }[];
 }
 
@@ -35,11 +40,32 @@ type Gesture =
   | { kind: "resize"; id: string; d0: number; fit: Fit }
   | { kind: "rotate"; id: string; a0: number; fit: Fit };
 
-const avatar = BASE_V1;
+const DEFAULT_APPEARANCE: AvatarLook = { hair_style: DEFAULT_HAIR_STYLE, hair_color: DEFAULT_HAIR_COLOR, accent_color: null, pose: {} };
+function appearanceOf(look: LookDetail): AvatarLook {
+  return { hair_style: look.hair_style && Object.prototype.hasOwnProperty.call(HAIR_STYLES, look.hair_style) ? look.hair_style : DEFAULT_HAIR_STYLE,
+    hair_color: normalizeColorValue(look.hair_color) ?? DEFAULT_HAIR_COLOR,
+    accent_color: look.accent_color === "original" ? "original" : normalizeColorValue(look.accent_color),
+    pose: normalizePose(RIG_V2, look.pose) ?? {} };
+}
+function matchingTemplate(map: Map<string, Template> | null, id: string, imageId: string | null) {
+  const t = map?.get(id);
+  return t && t.image_id === imageId ? t : undefined;
+}
+async function templatesFor(avatarId: string) {
+  const r = await api<{ templates: Template[] }>(`/api/doll/templates?avatar=${avatarId}`);
+  return new Map(r.templates.map((t) => [t.garment_id, t]));
+}
 const FROM_LABEL: Record<From, string> = { default: "分類預設位置", template: "已儲存的穿著位置", override: "只用於這個造型" };
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 export default function DressingRoom({ id }: { id?: string }) {
+  const [avatarId, setAvatarId] = useState(BASE_V1.id);
+  const avatar = AVATARS[avatarId] ?? BASE_V1;
+  const [appearance, setAppearance] = useState<AvatarLook>(DEFAULT_APPEARANCE);
+  const [avatarPanel, setAvatarPanel] = useState(false);
+  const [fitPanel, setFitPanel] = useState(false);
+  const [skeleton, setSkeleton] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [garments, setGarments] = useState<Garment[] | null>(null);
   const [templates, setTemplates] = useState<Map<string, Template> | null>(null);
   const [looks, setLooks] = useState<LookSummary[]>([]);
@@ -52,6 +78,10 @@ export default function DressingRoom({ id }: { id?: string }) {
   const [busy, setBusy] = useState(false);
   const [k, setK] = useState(0); // 螢幕像素 ÷ 邏輯像素
 
+  const generation = useRef(0);
+  const pending = useRef(new Map<string, number>());
+  const serial = useRef(0);
+  const wearQueue = useRef<Promise<void>>(Promise.resolve());
   const canvas = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
@@ -70,56 +100,75 @@ export default function DressingRoom({ id }: { id?: string }) {
 
   useEffect(() => {
     api<{ garments: Garment[] }>("/api/garments?limit=200&status=active&transparent=1").then((r) => setGarments(r.garments)).catch((e) => toast((e as Error).message, "err"));
-    api<{ templates: Template[] }>(`/api/doll/templates?avatar=${avatar.id}`)
-      .then((r) => setTemplates(new Map(r.templates.map((t) => [t.garment_id, t]))))
-      .catch(() => setTemplates(new Map()));
+
   }, []);
   useEffect(() => {
     api<{ looks: LookSummary[] }>("/api/doll/looks").then((r) => setLooks(r.looks)).catch(() => undefined);
   }, [id]);
 
-  // 讀取造型：個別修改 → 模板 → 分類預設
+  // 先讀造型的角色，再讀該角色的模板；避免 V1／V2 混用。
   useEffect(() => {
-    setSelected(null);
-    setDirty(false);
-    if (!id) {
-      setWorn([]);
-      setName("");
-      setLoaded(true);
-      return;
-    }
-    if (!templates) return;
-    let cancelled = false;
-    setLoaded(false);
-    api<LookDetail>(`/api/doll/looks/${id}`)
-      .then(async (look) => {
-        const items: WornItem[] = [];
-        for (const it of look.items) {
-          const t = templates.get(it.garment_id);
-          const slot = isSlot(it.slot) ? it.slot : slotFor(it.category, it.subcategory);
-          const content = await measureContent(it.image_id);
-          const base = t?.fit ?? defaultFit(slot, content, it.category);
-          items.push({ garment_id: it.garment_id, name: it.name, category: it.category, subcategory: it.subcategory, slot, image_id: it.image_id, content, base, fit: it.override ?? base, from: it.override ? "override" : t ? "template" : "default" });
-        }
-        if (cancelled) return;
-        setName(look.name);
-        setWorn(items);
-        setLoaded(true);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        toast((e as Error).message, "err");
-        navigate("/dressing", true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, templates === null]);
+    const ticket = ++generation.current;
+    pending.current.clear();
+    setSelected(null); setDirty(false); setLoaded(false); setTemplates(null); setSwitching(false);
+    setAvatarPanel(false); setFitPanel(false); setSkeleton(false);
+    void (async () => {
+      const look = id ? await api<LookDetail>(`/api/doll/looks/${id}`) : null;
+      const next = AVATARS[look?.avatar_id || BASE_V1.id] ?? BASE_V1;
+      const map = await templatesFor(next.id);
+      const items: WornItem[] = [];
+      for (const it of look?.items ?? []) {
+        const t = matchingTemplate(map, it.garment_id, it.image_id);
+        const slot = isSlot(it.slot) ? it.slot : slotFor(it.category, it.subcategory);
+        const content = await measureContent(it.image_id);
+        const base = t?.fit ?? defaultFit(slot, content, it.category, next, it.subcategory, it.name);
+        items.push({ garment_id: it.garment_id, name: it.name, category: it.category, subcategory: it.subcategory, slot, image_id: it.image_id, content, base, fit: it.override ?? base, from: it.override ? "override" : t ? "template" : "default" });
+      }
+      if (generation.current !== ticket) return;
+      setAvatarId(next.id); setTemplates(map); setAppearance(look ? appearanceOf(look) : DEFAULT_APPEARANCE);
+      setName(look?.name ?? ""); setWorn(items); setLoaded(true);
+    })().catch((e) => { if (generation.current === ticket) { toast((e as Error).message, "err"); if (id) navigate("/dressing", true); else { setTemplates(new Map()); setWorn([]); setLoaded(true); } } });
+    return () => { generation.current++; pending.current.clear(); };
+  }, [id]);
+
+  async function switchAvatar(nextId: string) {
+    if (nextId === avatarId || switching || busy) return;
+    setFitPanel(false);
+    if (wornRef.current.some((w) => w.from === "override") && !confirm("切換角色會重新計算這個造型的衣物位置，原有角色的穿著模板不會被修改。繼續？")) return;
+    const ticket = ++generation.current;
+    pending.current.clear(); setSwitching(true); setSelected(null); gesture.current = null; pointers.current.clear();
+    try {
+      const next = AVATARS[nextId];
+      const map = await templatesFor(nextId);
+      if (generation.current !== ticket) return;
+      setWorn((cur) => cur.map((w) => {
+        const t = matchingTemplate(map, w.garment_id, w.image_id);
+        const slot = isSlot(t?.slot) ? t.slot : slotFor(w.category, w.subcategory);
+        const base = t?.fit ?? defaultFit(slot, w.content, w.category, next, w.subcategory, w.name);
+        return { ...w, slot, base, fit: base, from: t ? "template" : "default" };
+      }));
+      setTemplates(map); setAvatarId(nextId); setDirty(true);
+    } catch (e) { if (generation.current === ticket) toast((e as Error).message, "err"); }
+    finally { if (generation.current === ticket) setSwitching(false); }
+  }
 
   const cats = useMemo(() => [...new Set((garments || []).map((g) => g.category || "").filter(Boolean))], [garments]);
   const visible = useMemo(() => (garments || []).filter((g) => !cat || g.category === cat), [garments, cat]);
   const ordered = useMemo(() => drawOrder(worn), [worn]);
   const sel = worn.find((w) => w.garment_id === selected) ?? null;
+  const isV2 = avatarId === AVATAR_V2_ID;
+  const mats = useMemo(() => solve(RIG_V2, appearance.pose), [appearance.pose]);
+  function poseFit(w: WornItem, fit = w.fit, inverse = false): Fit {
+    if (!isV2) return fit;
+    const m = mats[ATTACH_BONE[w.slot] ?? "root"];
+    if (!m) return fit;
+    const [x, y] = inverse
+      ? [m[0] * (fit.cx - m[4]) + m[1] * (fit.cy - m[5]), m[2] * (fit.cx - m[4]) + m[3] * (fit.cy - m[5])]
+      : applyMat(m, fit.cx, fit.cy);
+    return { ...fit, cx: x, cy: y, rotation: fit.rotation + (inverse ? -1 : 1) * matAngle(m) };
+  }
+  const poseWarnings = isV2 ? worn.filter((w) => singleImagePoseIssues(w.slot, appearance.pose).length > 0) : [];
+
 
   function change(fn: (cur: WornItem[]) => WornItem[]) {
     setWorn(fn);
@@ -128,28 +177,41 @@ export default function DressingRoom({ id }: { id?: string }) {
   function setFit(gid: string, fit: Fit) {
     const ok = normalizeFit(fit);
     if (!ok) return;
-    change((cur) => cur.map((w) => (w.garment_id === gid ? { ...w, fit: ok, from: sameFit(ok, w.base) ? (templates?.has(gid) ? "template" : "default") : "override" } : w)));
+    change((cur) => cur.map((w) => (w.garment_id === gid ? { ...w, fit: ok, from: sameFit(ok, w.base) ? (matchingTemplate(templates, gid, w.image_id) ? "template" : "default") : "override" } : w)));
   }
-  const fitOf = (gid: string) => wornRef.current.find((w) => w.garment_id === gid)!.fit;
+  const fitOf = (gid: string) => poseFit(wornRef.current.find((w) => w.garment_id === gid)!);
+  function setPosedFit(gid: string, fit: Fit) {
+    const w = wornRef.current.find((x) => x.garment_id === gid);
+    if (w) setFit(gid, poseFit(w, fit, true));
+  }
 
   /** 一鍵穿著／脫下 */
   async function toggle(g: Garment) {
+    if (switching || busy || !templates) return;
+    if (pending.current.has(g.id)) { pending.current.delete(g.id); return; }
     if (wornRef.current.some((w) => w.garment_id === g.id)) {
       change((cur) => cur.filter((w) => w.garment_id !== g.id));
       if (selected === g.id) setSelected(null);
       return;
     }
-    const t = templates?.get(g.id);
-    const slot = isSlot(t?.slot) ? t.slot : slotFor(g.category, g.subcategory);
+    const ticket = generation.current, token = ++serial.current;
+    pending.current.set(g.id, token);
     const imageId = g.transparent_image_id || null;
-    const content = await measureContent(imageId);
-    const base = t?.fit ?? defaultFit(slot, content, g.category);
-    const item: WornItem = { garment_id: g.id, name: displayName(g), category: g.category, subcategory: g.subcategory, slot, image_id: imageId, content, base, fit: base, from: t ? "template" : "default" };
-    const before = wornRef.current;
-    const after = wear(before, item);
-    const off = before.filter((w) => !after.some((a) => a.garment_id === w.garment_id));
-    if (off.length) toast(`已脫下：${off.map((w) => w.name).join("、")}`);
-    change(() => after);
+    const t = matchingTemplate(templates, g.id, imageId);
+    const slot = isSlot(t?.slot) ? t.slot : slotFor(g.category, g.subcategory);
+    const measurement = measureContent(imageId);
+    // Decode in parallel, apply in tap order. Cancelling a tap must not re-equip it later.
+    wearQueue.current = wearQueue.current.catch(() => undefined).then(async () => {
+      const content = await measurement;
+      if (generation.current !== ticket || pending.current.get(g.id) !== token) return;
+      pending.current.delete(g.id);
+      if (templates.get(g.id) && !t) toast("衣物圖片已更新，請重新校正穿著位置");
+      if (content.approximate) toast("高清圖未能讀取；暫用縮圖位置，請稍後重試");
+      const base = t?.fit ?? defaultFit(slot, content, g.category, avatar, g.subcategory, g.name);
+      const item: WornItem = { garment_id: g.id, name: displayName(g), category: g.category, subcategory: g.subcategory, slot, image_id: imageId, content, base, fit: base, from: t ? "template" : "default" };
+      change((cur) => wear(cur, item));
+    });
+    await wearQueue.current;
   }
 
   // ───── 手勢（只對已選取的衣物生效）：單指拖動、雙指縮放＋旋轉、把手縮放／旋轉 ─────
@@ -165,7 +227,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   function pickAt(clientX: number, clientY: number): string | null {
     const r = canvas.current!.getBoundingClientRect();
     const x = (clientX - r.left) / k, y = (clientY - r.top) / k;
-    const top = [...drawOrder(wornRef.current)].reverse().find((w) => hitTest(w.fit, w.content, x, y));
+    const top = [...drawOrder(wornRef.current)].reverse().find((w) => hitTest(poseFit(w), w.content, x, y));
     return top ? top.garment_id : null;
   }
   function onItemDown(e: ReactPointerEvent<HTMLDivElement>, gid: string) {
@@ -206,17 +268,17 @@ export default function DressingRoom({ id }: { id?: string }) {
     if (!g || !k) return;
     const f = g.fit;
     if (g.kind === "move") {
-      setFit(g.id, { ...f, cx: clamp(f.cx + (e.clientX - g.sx) / k, -200, DOLL_W + 200), cy: clamp(f.cy + (e.clientY - g.sy) / k, -200, DOLL_H + 200) });
+      setPosedFit(g.id, { ...f, cx: clamp(f.cx + (e.clientX - g.sx) / k, -200, DOLL_W + 200), cy: clamp(f.cy + (e.clientY - g.sy) / k, -200, DOLL_H + 200) });
     } else if (g.kind === "pinch") {
       const pts = [...pointers.current.values()];
       if (pts.length < 2) return;
       const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       const a = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
-      setFit(g.id, { ...f, w: clamp((f.w * d) / g.d0, FIT_LIMIT.minW, FIT_LIMIT.maxW), rotation: f.rotation + ((a - g.a0) * 180) / Math.PI });
+      setPosedFit(g.id, { ...f, w: clamp((f.w * d) / g.d0, FIT_LIMIT.minW, FIT_LIMIT.maxW), rotation: f.rotation + ((a - g.a0) * 180) / Math.PI });
     } else {
       const c = centerOf(f);
-      if (g.kind === "resize") setFit(g.id, { ...f, w: clamp((f.w * Math.hypot(e.clientX - c.x, e.clientY - c.y)) / g.d0, FIT_LIMIT.minW, FIT_LIMIT.maxW) });
-      else setFit(g.id, { ...f, rotation: f.rotation + ((Math.atan2(e.clientY - c.y, e.clientX - c.x) - g.a0) * 180) / Math.PI });
+      if (g.kind === "resize") setPosedFit(g.id, { ...f, w: clamp((f.w * Math.hypot(e.clientX - c.x, e.clientY - c.y)) / g.d0, FIT_LIMIT.minW, FIT_LIMIT.maxW) });
+      else setPosedFit(g.id, { ...f, rotation: f.rotation + ((Math.atan2(e.clientY - c.y, e.clientX - c.x) - g.a0) * 180) / Math.PI });
     }
   }
   function onUp(e: ReactPointerEvent<HTMLDivElement>) {
@@ -234,9 +296,10 @@ export default function DressingRoom({ id }: { id?: string }) {
 
   // ───── 穿著模板 ─────
   async function saveTemplate(w: WornItem) {
+    if (w.content.approximate) return toast("請先重新穿上衣物，等高清圖讀取成功後再校正", "err");
     setBusy(true);
     try {
-      const t = await api<Template>(`/api/doll/templates/${w.garment_id}`, { method: "PUT", json: { avatar_id: avatar.id, fit: w.fit } });
+      const t = await api<Template>(`/api/doll/templates/${w.garment_id}`, { method: "PUT", json: { avatar_id: avatar.id, fit: w.fit, slot: w.slot, image_id: w.image_id } });
       setTemplates((cur) => new Map(cur).set(w.garment_id, t));
       setWorn((cur) => cur.map((x) => (x.garment_id === w.garment_id ? { ...x, base: t.fit, fit: t.fit, from: "template" } : x)));
       toast("已儲存這件衣物的穿著位置，下次會自動套用");
@@ -248,11 +311,13 @@ export default function DressingRoom({ id }: { id?: string }) {
   }
 
   async function save() {
+    if (switching || pending.current.size) return toast("衣物仍在載入，請稍後再保存", "err");
     if (!worn.length && !id) return toast("請先替角色穿上衣物", "err");
     setBusy(true);
     const body = {
       name: name.trim() || "新造型",
       avatar_id: avatar.id,
+      ...(isV2 ? appearance : {}),
       items: worn.map((w) => ({ garment_id: w.garment_id, slot: w.slot, override: w.from === "override" ? w.fit : null })),
     };
     try {
@@ -291,6 +356,14 @@ export default function DressingRoom({ id }: { id?: string }) {
         </Link>
       </div>
 
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px]">
+        <button type="button" disabled={switching || busy} onClick={() => void switchAvatar(BASE_V1.id)} className={`rounded-full px-3 py-1.5 ${!isV2 ? "chip-on" : "chip"}`}>Avatar V1</button>
+        <button type="button" disabled={switching || busy} onClick={() => void switchAvatar(AVATAR_V2_ID)} className={`rounded-full px-3 py-1.5 ${isV2 ? "chip-on" : "chip"}`}>Avatar V2</button>
+        {isV2 && <button type="button" onClick={() => setAvatarPanel(true)} className="btn-jewel rounded-full px-3 py-1.5">角色設定</button>}
+        <Link to="/dressing/avatar-lab" className="chip rounded-full px-3 py-1.5">骨架測試</Link>
+      </div>
+      {switching && <p className="text-center text-[11px] text-mauve">正在切換角色及衣物位置…</p>}
+      {poseWarnings.length > 0 && <p role="status" className="mt-1 text-[11px] text-gold-soft">目前姿勢未完全支援：{poseWarnings.map((w) => w.name).join("、")}。單圖衣物不會彎曲，可重設姿勢。</p>}
       <div className="mt-1.5">
         <Chips options={cats} value={cat} onChange={(v) => { setCat(v); setSelected(null); }} />
       </div>
@@ -298,7 +371,7 @@ export default function DressingRoom({ id }: { id?: string }) {
       {/* ───── 左：角色畫布｜右：揀選衣物（校正時換成工具），兩者同時在畫面內 ───── */}
       <div className="mt-1 flex justify-center gap-2">
         {/* ───── 畫布：邏輯尺寸 1200×1800 ───── */}
-        <div className="frame min-w-0 shrink-0 self-start p-1.5" style={{ width: "min(calc(100% - 86px), calc((100dvh - 300px) * 2 / 3 + 12px))", minWidth: 190 }}>
+        <div className="frame min-w-0 shrink-0 self-start p-1.5" style={{ width: "min(calc(100% - 86px), calc((100dvh - 344px) * 2 / 3 + 12px))", minWidth: 190 }}>
           <div
             ref={canvas}
             data-testid="doll-canvas"
@@ -309,25 +382,26 @@ export default function DressingRoom({ id }: { id?: string }) {
             onPointerUp={onUp}
             onPointerCancel={onUp}
           >
-            {avatar.layers.map((l, i) => (
+            {isV2 ? <AvatarRigRenderer rig={RIG_V2} pose={appearance.pose} scale={k} hairStyle={appearance.hair_style} hairColor={appearance.hair_color} accentColor={appearance.accent_color} showSkeleton={skeleton} zFront={HEAD_Z} /> : avatar.layers.map((l, i) => (
               <img key={l.src} src={l.src} alt="" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full select-none" style={{ zIndex: l.place === "over" ? HEAD_Z : i + 1 }} />
             ))}
             {k > 0 &&
               ordered.map((w, i) => {
                 const isSel = w.garment_id === selected;
+                const shown = poseFit(w);
                 return (
                   <div
                     key={w.garment_id}
                     data-testid={`worn-${w.garment_id}`}
                     data-slot={w.slot}
                     className="absolute"
-                    style={{ left: w.fit.cx * k, top: w.fit.cy * k, width: w.fit.w * k, transform: `translate(-50%, -50%) rotate(${w.fit.rotation}deg)`, zIndex: SLOT_Z[w.slot] + i, pointerEvents: isSel ? "auto" : "none", touchAction: "none", cursor: "move" }}
+                    style={{ left: shown.cx * k, top: shown.cy * k, width: shown.w * k, transform: `translate(-50%, -50%) rotate(${shown.rotation}deg)`, zIndex: SLOT_Z[w.slot] + i, pointerEvents: isSel ? "auto" : "none", touchAction: "none", cursor: "move" }}
                     onPointerDown={(e) => onItemDown(e, w.garment_id)}
                     onPointerMove={stop(onMove)}
                     onPointerUp={stop(onUp)}
                     onPointerCancel={stop(onUp)}
                   >
-                    <DollImage imageId={w.image_id} alt={w.name} />
+                    <DollImage imageId={w.image_id} alt={w.name} canonical={!w.content.approximate} />
                     {isSel && (
                       <div data-testid="fit-frame" className="pointer-events-none absolute outline-2 outline-dashed outline-amethyst" style={{ left: `${w.content.x0 * 100}%`, top: `${w.content.y0 * 100}%`, width: `${(w.content.x1 - w.content.x0) * 100}%`, height: `${(w.content.y1 - w.content.y0) * 100}%` }}>
                         <Handle label="拖拉旋轉" className="-top-4 left-1/2 -translate-x-1/2" cursor="grab" onDown={(e) => onHandleDown(e, w.garment_id, "rotate")} onMove={stop(onMove)} onUp={stop(onUp)}>⟳</Handle>
@@ -350,7 +424,7 @@ export default function DressingRoom({ id }: { id?: string }) {
                 <Tool label="向右轉" onClick={() => setFit(sel.garment_id, { ...sel.fit, rotation: sel.fit.rotation + 1 })}>↻</Tool>
                 <Tool label="還原位置" disabled={sel.from !== "override"} onClick={() => setFit(sel.garment_id, sel.base)}>還原</Tool>
                 <Tool label="脫下" onClick={() => { change((cur) => cur.filter((w) => w.garment_id !== sel.garment_id)); setSelected(null); }}>脫下</Tool>
-                <button type="button" aria-label="存為這件衣物的穿著位置" disabled={busy || sel.from !== "override"} onClick={() => saveTemplate(sel)} className="btn-jewel min-h-12 rounded-2xl px-1 text-[12px] leading-tight disabled:opacity-40">
+                <button type="button" aria-label="存為這件衣物的穿著位置" disabled={busy || sel.content.approximate || sel.from !== "override"} onClick={() => saveTemplate(sel)} className="btn-jewel min-h-12 rounded-2xl px-1 text-[12px] leading-tight disabled:opacity-40">
                   存為<br />穿著位置
                 </button>
                 <button type="button" onClick={() => setSelected(null)} className="btn-dark min-h-9 rounded-full text-[13px]">完成</button>
@@ -382,11 +456,26 @@ export default function DressingRoom({ id }: { id?: string }) {
       )}
       {sel ? (
         <p className="mt-1.5 text-center text-[11px] leading-relaxed text-mauve">
-          <span className="text-gold-soft" data-testid="fit-from">{FROM_LABEL[sel.from]}</span>｜拖動衣物，雙指縮放及旋轉。不按「存為穿著位置」，調整只保存在這個造型內。
+          <span className="text-gold-soft" data-testid="fit-from">{FROM_LABEL[sel.from]}</span>｜拖動衣物，雙指縮放及旋轉。不按「存為穿著位置」，調整只保存在這個造型內。 <button type="button" className="underline text-gold-soft" onClick={() => setFitPanel(true)}>精細校正</button>
         </p>
       ) : (
         <p className="mt-1.5 text-center text-[11px] text-mauve">{worn.length ? "點選角色身上的衣物或上面的標籤，可校正位置。" : "在右邊點選衣物，角色會即時換上。"}</p>
       )}
+
+      {fitPanel && sel && <Sheet title="衣物精細校正" onClose={() => setFitPanel(false)}>
+        <p className="mb-2 text-[12px] text-mauve">{sel.name}｜每次移動 5 個邏輯像素</p>
+        <div className="grid grid-cols-3 gap-2">
+          <div /><Tool label="向上微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy - 5 })}>↑</Tool><div />
+          <Tool label="向左微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx - 5 })}>←</Tool>
+          <Tool label="重新自動對位" onClick={() => setFit(sel.garment_id, defaultFit(sel.slot, sel.content, sel.category, avatar, sel.subcategory, sel.name))}>自動</Tool>
+          <Tool label="向右微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx + 5 })}>→</Tool>
+          <div /><Tool label="向下微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy + 5 })}>↓</Tool><div />
+        </div>
+        <button type="button" className="btn-jewel mt-3 min-h-10 w-full rounded-full" onClick={() => setFitPanel(false)}>完成微調</button>
+      </Sheet>}
+      {avatarPanel && isV2 && <Sheet title="角色設定" onClose={() => setAvatarPanel(false)}>
+        <AvatarPoseEditor rig={RIG_V2} value={appearance} onChange={(v) => { setAppearance(v); setDirty(true); }} showSkeleton={skeleton} onShowSkeleton={setSkeleton} />
+      </Sheet>}
 
       {/* ───── 造型 ───── */}
       <section className="frame mt-6 px-3 pb-3 pt-4" aria-label="已保存的造型">
@@ -404,7 +493,7 @@ export default function DressingRoom({ id }: { id?: string }) {
         )}
         <input className={`${inputCls} mt-3`} value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} placeholder="造型名稱，例如：月夜茶會" aria-label="造型名稱" />
         <div className={`mt-3 grid gap-2 ${id ? "grid-cols-2" : "grid-cols-1"}`}>
-          <button type="button" onClick={save} disabled={busy} className="btn-jewel flex min-h-12 items-center justify-center gap-2 rounded-2xl text-[14px] disabled:opacity-40">
+          <button type="button" onClick={save} disabled={busy || switching} className="btn-jewel flex min-h-12 items-center justify-center gap-2 rounded-2xl text-[14px] disabled:opacity-40">
             <IconSave /> {busy ? "處理中…" : "保存造型"}
           </button>
           {id && (

@@ -13,6 +13,12 @@ function check(name, cond, info) {
 const ids = (a) => a.map((w) => w.garment_id).join(",");
 const W = (garment_id, slot, subcategory = null) => ({ garment_id, slot, subcategory });
 
+console.log("Avatar V2 positioning");
+check("V2腰線與V1獨立", d.BASE_V2.anchors.waist.y === 690 && d.BASE_V1.anchors.waist.y === 745);
+const full = d.FULL_CONTENT(1.4);
+const sk2 = d.defaultFit("skirt", full, "半身裙", d.BASE_V2);
+check("V2半裙對齊腰線", Math.abs(sk2.cy - sk2.w * full.ar / 2 - 680) < 0.2);
+check("V2長裙比短裙長", d.defaultFit("skirt", full, "半身裙", d.BASE_V2, "長裙").w > d.defaultFit("skirt", full, "半身裙", d.BASE_V2, "短裙").w);
 console.log("分類 → 圖層位置");
 check("連身裙→dress", d.slotFor("連身裙", "JSK") === "dress");
 check("上衣→top", d.slotFor("上衣", "Blouse") === "top");

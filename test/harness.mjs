@@ -114,6 +114,7 @@ export function makeEnv() {
   DB.migrate(new URL("../migrations/0006_price_settings.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0007_d1_thumbnails.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0008_doll_dressing.sql", import.meta.url));
+  DB.migrate(new URL("../migrations/0009_avatar_v2.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),
