@@ -157,3 +157,84 @@ export const IconCamera = (p: P) => (
     <circle cx="12" cy="13" r="3.500" />
   </Svg>
 );
+export const IconEye = (p: P) => (
+  <Svg {...p}>
+    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+    <circle cx="12" cy="12" r="2.8" />
+  </Svg>
+);
+export const IconEyeOff = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 4l16 16M9.6 6A9.4 9.4 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.7 3.5M6.3 7.8A16 16 0 0 0 2.5 12S6 18.5 12 18.5a9 9 0 0 0 3.4-.7" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+  </Svg>
+);
+export const IconChevronUp = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 15l6-6 6 6" />
+  </Svg>
+);
+export const IconChevronDown = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 9l6 6 6-6" />
+  </Svg>
+);
+export const IconExpand = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+  </Svg>
+);
+export const IconPerson = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="7.5" r="3.5" />
+    <path d="M5 20.5c.6-4 3.3-6 7-6s6.400 2 7 6" />
+  </Svg>
+);
+export const IconShirt = (p: P) => (
+  <Svg {...p}>
+    <path d="M8.5 3.5L3 7l2.2 4L7.500 9.800V20.500h9V9.800L18.800 11 21 7l-5.500-3.500a3.500 3.500 0 0 1-7 0z" />
+  </Svg>
+);
+export const IconScissors = (p: P) => (
+  <Svg {...p}>
+    <circle cx="6" cy="7" r="2.6" />
+    <circle cx="6" cy="17" r="2.6" />
+    <path d="M8.200 8.500L20 17M8.200 15.500L20 7" />
+  </Svg>
+);
+export const IconPalette = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3.500a8.500 8.500 0 1 0 0 17c1.400 0 2-1 2-2 0-1.500-1-1.800-1-3 0-1 .8-1.800 2-1.800h1.800a3.700 3.700 0 0 0 3.700-3.700C20.500 6.500 16.700 3.500 12 3.500z" />
+    <circle cx="7.800" cy="11" r="1" />
+    <circle cx="10.500" cy="7.500" r="1" />
+    <circle cx="15" cy="7.800" r="1" />
+  </Svg>
+);
+export const IconPose = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="4.500" r="2" />
+    <path d="M5 8.500c3 1.500 11 1.500 14 0M12 9.500v5.500M12 15l-3.500 5.500M12 15l3.500 5.500" />
+  </Svg>
+);
+export const IconGrip = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 8h14M5 12h14M5 16h14" />
+  </Svg>
+);
+export const IconSort = (p: P) => (
+  <Svg {...p}>
+    <path d="M7 4v16m0 0l-3-3m3 3l3-3M13 6h8M13 11h6M13 16h4" />
+  </Svg>
+);
+export const IconMore = (p: P) => (
+  <Svg {...p}>
+    <circle cx="5" cy="12" r="1.3" />
+    <circle cx="12" cy="12" r="1.3" />
+    <circle cx="19" cy="12" r="1.3" />
+  </Svg>
+);
+export const IconCheck = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 12.500l4.500 4.500L19 7.500" />
+  </Svg>
+);

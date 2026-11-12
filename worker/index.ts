@@ -10,7 +10,7 @@ import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
-import { createLook, deleteLook, deleteTemplate, getLook, listLooks, listTemplates, putTemplate, updateLook } from "./doll";
+import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, serveAssetFile, updateAsset, updateLook } from "./doll";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
 
@@ -427,17 +427,17 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   // ───── 角色換裝（只限 App 登入使用者寫入） ─────
   if (path === "/api/doll/templates" && method === "GET") {
     requireScope(actor, "read");
-    return json({ templates: await listTemplates(env, url.searchParams) });
+    return json({ templates: await listTemplates(env) });
   }
   m = path.match(/^\/api\/doll\/templates\/([\w-]+)$/);
   if (m) {
     if (method === "PUT") {
       requireSession(actor);
-      return json(await putTemplate(env, actor, m[1], await readJson(req)));
+      return json(await putTemplate(env, actor, m[1], await readJson(req, 2_000_000)));
     }
     if (method === "DELETE") {
       requireSession(actor);
-      return json(await deleteTemplate(env, actor, m[1], url.searchParams));
+      return json(await deleteTemplate(env, actor, m[1]));
     }
   }
   if (path === "/api/doll/looks") {
@@ -447,7 +447,18 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     }
     if (method === "POST") {
       requireSession(actor);
-      return json(await createLook(env, actor, await readJson(req)), 201);
+      return json(await createLook(env, actor, await readJson(req, 2_000_000)), 201);
+    }
+  }
+  m = path.match(/^\/api\/doll\/looks\/([\w-]+)\/thumb$/);
+  if (m) {
+    if (method === "GET") {
+      requireScope(actor, "read");
+      return getLookThumb(env, m[1]);
+    }
+    if (method === "PUT") {
+      requireSession(actor);
+      return putLookThumb(req, env, m[1]);
     }
   }
   m = path.match(/^\/api\/doll\/looks\/([\w-]+)$/);
@@ -458,12 +469,57 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     }
     if (method === "PATCH") {
       requireSession(actor);
-      return json(await updateLook(env, actor, m[1], await readJson(req)));
+      return json(await updateLook(env, actor, m[1], await readJson(req, 2_000_000)));
     }
     if (method === "DELETE") {
       requireSession(actor);
       await deleteLook(env, actor, m[1]);
       return json({ ok: true });
+    }
+  }
+  // 角色素材（頭部、髮型、衣物額外部件）
+  if (path === "/api/doll/assets") {
+    if (method === "GET") {
+      requireScope(actor, "read");
+      return json({ assets: await listAssets(env, url.searchParams) });
+    }
+    if (method === "POST") {
+      requireSession(actor);
+      return json(await createAsset(env, actor, await readJson(req)), 201);
+    }
+  }
+  m = path.match(/^\/api\/doll\/assets\/(das_[a-z2-7]+)(?:\/(files|thumb))?$/);
+  if (m) {
+    if (m[2] === "files" && method === "POST") {
+      requireSession(actor);
+      return addAssetFile(req, env, actor, m[1]);
+    }
+    if (m[2] === "thumb" && method === "GET") {
+      requireScope(actor, "read");
+      return getAssetThumb(env, m[1]);
+    }
+    if (m[2] === "thumb" && method === "PUT") {
+      requireSession(actor);
+      return putAssetThumb(req, env, m[1]);
+    }
+    if (!m[2] && method === "PATCH") {
+      requireSession(actor);
+      return json(await updateAsset(env, actor, m[1], await readJson(req)));
+    }
+    if (!m[2] && method === "DELETE") {
+      requireSession(actor);
+      return json(await deleteAsset(env, actor, m[1]));
+    }
+  }
+  m = path.match(/^\/api\/doll\/files\/(daf_[a-z2-7]+)$/);
+  if (m) {
+    if (method === "GET") {
+      requireScope(actor, "read");
+      return serveAssetFile(req, env, m[1]);
+    }
+    if (method === "DELETE") {
+      requireSession(actor);
+      return json(await deleteAssetFile(env, actor, m[1]));
     }
   }
 

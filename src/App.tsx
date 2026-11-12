@@ -13,7 +13,6 @@ import BatchDetail from "./pages/BatchDetail";
 import Login from "./pages/Login";
 import Outfits from "./pages/Outfits";
 import OutfitStudio from "./pages/OutfitStudio";
-import AvatarLab from "./pages/AvatarLab";
 import DressingRoom from "./pages/DressingRoom";
 import PublicUpload from "./pages/PublicUpload";
 import Settings from "./pages/Settings";
@@ -71,7 +70,6 @@ export default function App() {
   else if (match("/outfits", path)) page = <Outfits />;
   else if (match("/outfits/new", path)) page = <OutfitStudio />;
   else if ((p = match("/outfits/:id", path))) page = <OutfitStudio id={p.id} />;
-  else if (match("/dressing/avatar-lab", path)) page = <AvatarLab />;
   else if (match("/dressing", path)) page = <DressingRoom />;
   else if ((p = match("/dressing/:id", path))) page = <DressingRoom id={p.id} />;
   else if (match("/settings", path)) page = <Settings username={auth.username} onLogout={refresh} />;

@@ -1,6 +1,6 @@
 // 2D 骨架引擎（純 TypeScript，前端及 Worker 共用，可直接單元測試）。
-// 部件是在靜止姿勢下切出來的，所以每個骨骼只需要「繞自己的關節旋轉」；
-// 子骨骼先繞自己的關節轉，再跟隨父骨骼（Forward Kinematics）。
+// 部件是在靜止姿勢下切出來的，所以每個骨骼只需要「繞自己的關節旋轉」（另可小幅平移）；
+// 子骨骼先做自己的變換，再跟隨父骨骼（Forward Kinematics）。
 // 座標＝邏輯畫布像素；角度＝度，正數在畫面上是順時針（y 軸向下）。
 
 export interface Bone {
@@ -13,6 +13,8 @@ export interface Bone {
   pivot: [number, number];
   min_angle: number;
   max_angle: number;
+  /** 可平移的範圍（±x, ±y）；沒有＝不可平移 */
+  max_offset?: [number, number];
   attached_assets: string[];
 }
 export interface RigPart {
@@ -39,7 +41,9 @@ export interface Rig {
   anchors: Record<string, [number, number]>;
   anchor_bone: Record<string, string>;
 }
-/** 姿勢：骨骼 id → 相對靜止姿勢的角度（度）。沒有列出的骨骼＝0 */
+/**
+ * 姿勢：骨骼 id → 相對靜止姿勢的角度（度）；「骨骼 id.x／.y」→ 平移（邏輯像素）。沒有列出＝0。
+ */
 export type Pose = Record<string, number>;
 /** 仿射矩陣，與 CSS matrix(a,b,c,d,e,f) 相同：x' = a·x + c·y + e，y' = b·x + d·y + f */
 export type Mat = [number, number, number, number, number, number];
@@ -60,11 +64,13 @@ export function rotateAbout(deg: number, px: number, py: number): Mat {
   return [c, s, -s, c, px - c * px + s * py, py - s * px - c * py];
 }
 export const applyMat = (m: Mat, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+export function invert(m: Mat): Mat {
+  const det = m[0] * m[3] - m[1] * m[2] || 1e-9;
+  return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det];
+}
 /** 矩陣的旋轉角度（度） */
 export const matAngle = (m: Mat) => (Math.atan2(m[1], m[0]) * 180) / Math.PI;
 export const isIdentity = (m: Mat) => m.every((v, i) => Math.abs(v - IDENTITY[i]) < 1e-9);
-/** CSS transform；scale＝螢幕像素 ÷ 邏輯像素（只影響位移） */
-export const matToCss = (m: Mat, scale = 1) => `matrix(${m[0].toFixed(6)},${m[1].toFixed(6)},${m[2].toFixed(6)},${m[3].toFixed(6)},${(m[4] * scale).toFixed(3)},${(m[5] * scale).toFixed(3)})`;
 
 const index = new WeakMap<Rig, Map<string, Bone>>();
 export function boneMap(rig: Rig): Map<string, Bone> {
@@ -76,7 +82,14 @@ export function boneMap(rig: Rig): Map<string, Bone> {
   return m;
 }
 
+const fin = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const r1 = (v: number) => Math.round(v * 10) / 10;
 export const clampAngle = (bone: Bone, deg: number) => Math.min(bone.max_angle, Math.max(bone.min_angle, Number.isFinite(deg) ? deg : 0));
+export function clampOffset(bone: Bone, axis: 0 | 1, v: number) {
+  const m = bone.max_offset?.[axis] ?? 0;
+  return Math.min(m, Math.max(-m, Number.isFinite(v) ? v : 0));
+}
+const offsetOf = (b: Bone, pose: Pose | null | undefined): [number, number] => (b.max_offset && pose ? [clampOffset(b, 0, pose[b.id + ".x"] ?? 0), clampOffset(b, 1, pose[b.id + ".y"] ?? 0)] : [0, 0]);
 
 /** 只保留有效骨骼、限制在可動範圍內、去掉 0；輸出可直接儲存 */
 export function clampPose(rig: Rig, pose: Pose | null | undefined): Pose {
@@ -84,21 +97,32 @@ export function clampPose(rig: Rig, pose: Pose | null | undefined): Pose {
   if (!pose) return out;
   for (const b of rig.bones) {
     const v = pose[b.id];
-    if (typeof v !== "number" || !Number.isFinite(v)) continue;
-    const c = Math.round(clampAngle(b, v) * 10) / 10;
-    if (c !== 0) out[b.id] = c;
+    if (fin(v)) {
+      const c = r1(clampAngle(b, v));
+      if (c !== 0) out[b.id] = c;
+    }
+    if (b.max_offset) {
+      for (const [axis, key] of [[0, b.id + ".x"], [1, b.id + ".y"]] as const) {
+        const o = pose[key];
+        if (!fin(o)) continue;
+        const c = r1(clampOffset(b, axis, o));
+        if (c !== 0) out[key] = c;
+      }
+    }
   }
   return out;
 }
 
-/** 驗證外來資料（API）：不是物件、含未知骨骼或非數字 → null */
+/**
+ * 驗證外來資料（API）：不是物件或含非數字 → null。
+ * 不認識的骨骼（例如另一款髮型的髮束）會被略過，不會令整個姿勢失效。
+ */
 export function normalizePose(rig: Rig, v: unknown): Pose | null {
   if (v === null || v === undefined) return {};
   if (typeof v !== "object" || Array.isArray(v)) return null;
-  const bones = boneMap(rig);
-  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-    if (!bones.has(k) || typeof val !== "number" || !Number.isFinite(val)) return null;
-  }
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length > 200) return null;
+  for (const [, val] of entries) if (!fin(val)) return null;
   return clampPose(rig, v as Pose);
 }
 
@@ -111,6 +135,9 @@ export function solve(rig: Rig, pose: Pose | null | undefined): Record<string, M
     const b = bones.get(id);
     if (!b || guard > 64) return IDENTITY;
     const local = rotateAbout(clampAngle(b, pose?.[id] ?? 0) + b.rest_angle, b.pivot[0], b.pivot[1]);
+    const [ox, oy] = offsetOf(b, pose);
+    local[4] += ox;
+    local[5] += oy;
     const m = b.parent ? multiply(visit(b.parent, guard + 1), local) : local;
     out[id] = m;
     return m;
@@ -120,15 +147,10 @@ export function solve(rig: Rig, pose: Pose | null | undefined): Record<string, M
 }
 
 /** 關節在目前姿勢下的位置 */
-export function jointPositions(rig: Rig, pose: Pose | null | undefined): Record<string, [number, number]> {
-  const mats = solve(rig, pose);
-  const bones = boneMap(rig);
+export function jointPositions(rig: Rig, pose: Pose | null | undefined, mats = solve(rig, pose)): Record<string, [number, number]> {
   const out: Record<string, [number, number]> = {};
-  for (const b of rig.bones) {
-    // 關節本身只跟隨父骨骼（自己繞自己轉不會移動）
-    const m = b.parent && bones.has(b.parent) ? mats[b.parent] : IDENTITY;
-    out[b.id] = applyMat(m, b.pivot[0], b.pivot[1]);
-  }
+  // 關節本身跟隨自己的矩陣（繞自己轉不會移動；平移則會帶動）
+  for (const b of rig.bones) out[b.id] = applyMat(mats[b.id], b.pivot[0], b.pivot[1]);
   return out;
 }
 
@@ -138,7 +160,7 @@ export function posedAnchors(rig: Rig, pose: Pose | null | undefined): Record<st
   const out: Record<string, { x: number; y: number }> = {};
   for (const [name, [x, y]] of Object.entries(rig.anchors)) {
     const [px, py] = applyMat(mats[rig.anchor_bone[name]] ?? IDENTITY, x, y);
-    out[name] = { x: Math.round(px * 10) / 10, y: Math.round(py * 10) / 10 };
+    out[name] = { x: r1(px), y: r1(py) };
   }
   return out;
 }
@@ -152,32 +174,59 @@ export function descendants(rig: Rig, id: string): string[] {
 
 export const samePose = (rig: Rig, a: Pose | null | undefined, b: Pose | null | undefined) => {
   const x = clampPose(rig, a), y = clampPose(rig, b);
-  return rig.bones.every((bn) => Math.abs((x[bn.id] ?? 0) - (y[bn.id] ?? 0)) < 0.05);
+  const keys = new Set([...Object.keys(x), ...Object.keys(y)]);
+  for (const k of keys) if (Math.abs((x[k] ?? 0) - (y[k] ?? 0)) >= 0.05) return false;
+  return true;
 };
 
 /**
  * 拖動末端（手掌／腳掌）時的兩節 IK：調整 upper（肩／髖）及 mid（肘／膝），令 end 關節盡量貼近目標。
  * 用限制範圍內的座標下降法，不會超出關節可動範圍；回傳新的姿勢。
  */
-export function reachIK(rig: Rig, pose: Pose, upper: string, mid: string, end: string, target: [number, number], iterations = 24): Pose {
+export function reachIK(rig: Rig, pose: Pose, upper: string, mid: string, end: string, target: [number, number], iterations = 28): Pose {
   const bones = boneMap(rig);
-  const next: Pose = { ...pose };
-  const dist = () => {
-    const p = jointPositions(rig, next)[end];
-    return Math.hypot(p[0] - target[0], p[1] - target[1]);
+  const U = bones.get(upper), M = bones.get(mid), N = bones.get(end);
+  const dist = (p: Pose) => {
+    const j = jointPositions(rig, p)[end];
+    return Math.hypot(j[0] - target[0], j[1] - target[1]);
   };
-  let step = 6;
+  let next: Pose = { ...pose };
+  if (U && M && N) {
+    // 先用兩節 IK 的解析解（兩個彎曲方向都試），再在可動範圍內微調
+    const mats = solve(rig, pose);
+    const parent = U.parent ? mats[U.parent] ?? IDENTITY : IDENTITY;
+    const [sx, sy] = applyMat(mats[upper], U.pivot[0], U.pivot[1]);
+    const l1 = Math.hypot(M.pivot[0] - U.pivot[0], M.pivot[1] - U.pivot[1]), l2 = Math.hypot(N.pivot[0] - M.pivot[0], N.pivot[1] - M.pivot[1]);
+    const d = Math.min(l1 + l2 - 0.5, Math.max(Math.abs(l1 - l2) + 0.5, Math.hypot(target[0] - sx, target[1] - sy)));
+    const base = Math.atan2(target[1] - sy, target[0] - sx);
+    const alpha = Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
+    const rest1 = Math.atan2(M.pivot[1] - U.pivot[1], M.pivot[0] - U.pivot[0]), rest2 = Math.atan2(N.pivot[1] - M.pivot[1], N.pivot[0] - M.pivot[0]);
+    const pa = (matAngle(parent) * Math.PI) / 180;
+    const norm = (deg: number) => { while (deg > 180) deg -= 360; while (deg < -180) deg += 360; return deg; };
+    let best = next, bestD = dist(next);
+    for (const sign of [1, -1]) {
+      const a1 = base + sign * alpha;
+      const ex = sx + Math.cos(a1) * l1, ey = sy + Math.sin(a1) * l1;
+      const a2 = Math.atan2(target[1] - ey, target[0] - ex);
+      const up = clampAngle(U, norm(((a1 - pa - rest1) * 180) / Math.PI - U.rest_angle));
+      const cand: Pose = { ...pose, [upper]: up, [mid]: clampAngle(M, norm(((a2 - pa - rest2) * 180) / Math.PI - up - U.rest_angle - M.rest_angle)) };
+      const cd = dist(cand);
+      if (cd < bestD) { best = cand; bestD = cd; }
+    }
+    next = { ...best };
+  }
+  let step = 8;
   for (let i = 0; i < iterations; i++) {
     let improved = false;
     for (const id of [upper, mid]) {
       const b = bones.get(id);
       if (!b) continue;
       const cur = next[id] ?? 0;
-      const base = dist();
+      const base = dist(next);
       let best = cur, bestD = base;
       for (const cand of [cur - step, cur + step]) {
         next[id] = clampAngle(b, cand);
-        const d = dist();
+        const d = dist(next);
         if (d < bestD - 1e-6) { best = next[id]; bestD = d; }
       }
       next[id] = best;
@@ -187,4 +236,33 @@ export function reachIK(rig: Rig, pose: Pose, upper: string, mid: string, end: s
     if (step < 0.05) break;
   }
   return clampPose(rig, next);
+}
+
+/**
+ * 直接拖動一節骨骼的末端：把骨骼轉到「靜止時的 tip 指向 target」的角度（FK 瞄準）。
+ * tip＝靜止姿勢下這節骨骼末端的畫布座標（通常是子關節的位置）。
+ */
+export function aimBone(rig: Rig, pose: Pose, id: string, tip: [number, number], target: [number, number]): Pose {
+  const b = boneMap(rig).get(id);
+  if (!b) return pose;
+  const mats = solve(rig, pose);
+  const parent = b.parent ? mats[b.parent] ?? IDENTITY : IDENTITY;
+  const [ox, oy] = offsetOf(b, pose);
+  const [tx, ty] = applyMat(invert(parent), target[0], target[1]);
+  const want = Math.atan2(ty - (b.pivot[1] + oy), tx - (b.pivot[0] + ox));
+  const rest = Math.atan2(tip[1] - b.pivot[1], tip[0] - b.pivot[0]);
+  let deg = ((want - rest) * 180) / Math.PI - b.rest_angle;
+  while (deg > 180) deg -= 360;
+  while (deg < -180) deg += 360;
+  return clampPose(rig, { ...pose, [id]: deg });
+}
+
+/** 拖動可平移的節點（整體重心、肩膊等）：把關節移到 target */
+export function moveBone(rig: Rig, pose: Pose, id: string, target: [number, number]): Pose {
+  const b = boneMap(rig).get(id);
+  if (!b?.max_offset) return pose;
+  const mats = solve(rig, pose);
+  const parent = b.parent ? mats[b.parent] ?? IDENTITY : IDENTITY;
+  const [tx, ty] = applyMat(invert(parent), target[0], target[1]);
+  return clampPose(rig, { ...pose, [b.id + ".x"]: tx - b.pivot[0], [b.id + ".y"]: ty - b.pivot[1] });
 }

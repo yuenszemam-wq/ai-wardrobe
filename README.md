@@ -271,16 +271,20 @@ node test/cutout.mjs [假透明圖片]   # 自動去背（11 項；需要 Node 2
 node test/ai-intake.mjs    # V2 批量上傳及 AI 待整理（75 項，含 12 項自動去背圖：10 張上傳、逐位元／SHA-256、HEIC、去重、並發、簽名網址、MCP 讀圖、建議驗證、版本、鎖定欄位、品牌分級、D1 提交、確認、批量）
 ```
 
-## 角色換裝（Moonlit Dressing Room）
+## 角色換裝工作室（Phase 3）
 
-固定站姿 2D 紙娃娃：把衣櫃內現有的透明圖穿在角色身上。入口在「穿搭」頁，路徑 `/dressing`、`/dressing/:id`。與穿搭工作室互相獨立，不讀寫 `outfits`／`outfit_items`。
+把衣櫃內現有的透明圖穿在可動角色（Avatar V2，唯一角色）身上。入口在「穿搭」主頁的「角色換裝」卡片，路徑 `/dressing`、`/dressing/:id`。與衣服配搭編輯器互相獨立，不讀寫 `outfits`／`outfit_items`。
 
-- **畫布**：邏輯尺寸 1200×1800（`shared/doll.ts` 的 `DOLL_W`／`DOLL_H`），螢幕上按比例縮放；位置一律以邏輯像素儲存（圖片中心 `cx`／`cy`、顯示寬度 `w`、旋轉角度）。
-- **素體**：`public/doll/base_v1/`（`hair_back.png`、`body.png`、`head.png`，已對位到同一畫布）。原圖在 `scripts/doll-src/base_v1/`，用 `node scripts/build-doll-base.cjs <head> <hair_back> <body>` 重新產生（清除去背雜點、按 `LAYOUT` 對位）。錨點（頭頂、頸、肩、胸、腰、臀、膝、踝、地面）在 `shared/doll.ts` 的 `BASE_V1.anchors`。
-- **圖層**（底→面）：後髮、身體 → 襪 → 鞋 → 裙撐 → 上衣 → 褲 → 半身裙 → 連身裙 → 整套 → 外套 → 手袋 → 配件 → 頭（臉＋前髮）→ 頭飾。
-- **互斥**：`shared/doll.ts` 的 `conflicts()`。OP 不配襯衫及 SK；JSK 可配襯衫；SK／褲與連身裙互斥；套裝／完整穿搭取代連身裙、上衣、半身裙。
-- **位置優先次序**：造型個別修改（`doll_look_items.ov_*`）→ 衣物穿著模板（`doll_fit_templates`）→ 分類預設（用 D1 縮圖量度透明邊界框後對齊錨點）。
-- **資料表**（migration 0008，只新增）：`doll_fit_templates`、`doll_looks`、`doll_look_items`。復原：`DROP TABLE doll_look_items; DROP TABLE doll_looks; DROP TABLE doll_fit_templates;`
-- **API**：`GET /api/doll/templates`、`PUT｜DELETE /api/doll/templates/:garment_id`、`GET｜POST /api/doll/looks`、`GET｜PATCH｜DELETE /api/doll/looks/:id`。寫入只限 App 登入使用者。
-- **不會做的事**：不呼叫 AI、不生成或複製圖片、不修改 R2 及現有衣物／穿搭記錄。畫布只讀 `/api/images/:id` 的現有透明圖。
+- **畫布**：邏輯尺寸 1200×1800。角色、頭髮及衣物全部畫在同一張 Canvas（`src/doll/engine.ts`）；造型縮圖用同一套繪畫程式輸出。
+- **骨架**：`public/doll/avatar_v2/rig.json`（v3，由 `scripts/build-avatar-v2.py` 及 `scripts/extend-avatar-rig.py` 產生）。22 節骨骼：整體重心、骨盆、腰、上胸、頸、頭、左右肩／肘／腕、左右髖／膝／踝、馬尾及側髮；部分節點可平移。姿勢＝`{ 骨骼: 角度, "骨骼.x": 平移 }`。引擎在 `shared/avatarRig.ts`（FK、兩節 IK、拖動末端瞄準）。
+- **自由疊穿**：沒有互斥規則。分類只決定預設位置及預設圖層次序（`shared/doll.ts` 的 `insertIndex`），造型內的次序＝`items` 陣列次序，可在「圖層」拖動、隱藏、脫下。
+- **衣物跟隨骨架**：`shared/skin.ts` 把同一張衣物圖按身體區域分成柔邊區域（骨盆／腰／上胸／上臂／前臂／大腿／小腿／腳掌），關節位置互相重疊。上衣及外套會先由輪廓找出袖子與衣身之間的空隙，按衣物實際形狀劃分袖子。每件衣物可選「自動／整件／袖子跟上臂／袖子跟整隻手」及附接的骨骼。
+- **後領及遮罩**：預設把頸部重畫在衣服後領之上（只限衣服蓋住頸部的位置）；另可在角色身上塗抹遮罩：「隱藏」或「移到身後」。遮罩是低解像度 PNG，原圖不變。
+- **衣物預設 vs 造型內調整**：`doll_fit_templates`（位置欄位＋`data` JSON：跟隨方式、後領、遮罩、建議姿勢、其他穿法）是衣物預設；造型內的個別調整存在 `doll_looks.state` 的 `items[].fit／opts／mask`，`null`＝跟隨預設。位置以靜止姿勢的畫布座標儲存，顯示時跟隨所附接的骨骼。
+- **穿法**：一件衣物可保存多種穿法（`data.variants`），可選擇另一張透明圖（存為 `garment_part` 素材），例如外套打開。
+- **角色素材**：頭部及髮型可在 App 內上傳、對位及管理（`doll_assets`／`doll_asset_files`，圖片在 R2 的 `doll/` 路徑；孤兒清理已排除）。髮型可只有一張圖，或多張部件各自設定前後圖層及獨立髮束骨骼。沒有染色遮罩的髮型會自動分辨主髮色及挑染。內置素材與上傳素材用同一種設定格式（`shared/avatarV2.ts`）。
+- **舊造型**：Avatar V1 已淘汰（素材已移除）。舊造型（`state` 為 NULL）開啟時由 `doll_look_items` 讀出並換算到 V2（`convertLegacyFit`），保存後才寫入新格式；V1 的穿著模板保留在資料表，只在該衣物未有 V2 預設時換算使用。
+- **資料表**：0008（`doll_fit_templates`、`doll_looks`、`doll_look_items`）、0009（髮色及姿勢欄位）、0010（`doll_looks.state`、`doll_fit_templates.data`、`doll_look_thumbs`、`doll_assets`、`doll_asset_files`；全部只新增）。0010 復原：`DROP TABLE doll_asset_files; DROP TABLE doll_assets; DROP TABLE doll_look_thumbs;`（兩個新增欄位可保留，舊程式不會讀取）。
+- **API**：`GET /api/doll/templates`、`PUT｜DELETE /api/doll/templates/:garment_id`、`GET｜POST /api/doll/looks`、`GET｜PATCH｜DELETE /api/doll/looks/:id`、`GET｜PUT /api/doll/looks/:id/thumb`、`GET｜POST /api/doll/assets`、`PATCH｜DELETE /api/doll/assets/:id`、`POST /api/doll/assets/:id/files`、`GET｜PUT /api/doll/assets/:id/thumb`、`GET｜DELETE /api/doll/files/:id`。寫入只限 App 登入使用者。
+- **不會做的事**：不呼叫 AI、不修改或刪除衣物圖片及現有衣物／穿搭記錄。
 - **測試**：`node test/doll-logic.mjs`（純邏輯）、`node test/doll-api.mjs`（migration＋API）、`node test/doll-ui.mjs`（Chromium 模擬 iPhone 尺寸；不等於 iPhone Safari 實機驗收）。

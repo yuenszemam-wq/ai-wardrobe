@@ -1,7 +1,7 @@
 name: Avatar and wardrobe validation
 on:
   push:
-    branches: [feature/avatar-v2]
+    branches: [feature/phase3-dressing-game]
   pull_request:
     branches: [main]
 permissions:
@@ -20,7 +20,6 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - run: npm install --no-save --package-lock=false esbuild sharp playwright
-      - run: node test/avatar-logic.mjs
       - run: node test/doll-logic.mjs
       - run: node test/doll-api.mjs
       - run: node test/e2e.mjs
@@ -28,5 +27,4 @@ jobs:
       - run: node test/v4.mjs
       - run: node test/organize.mjs
       - run: npx playwright install --with-deps chromium
-      - run: node test/avatar-ui.mjs
       - run: node test/doll-ui.mjs

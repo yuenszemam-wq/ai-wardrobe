@@ -1,8 +1,14 @@
 [
-  { "id": "a_pose", "label": "預設 A 字站姿", "pose": {} },
-  { "id": "arms_in", "label": "自然收手", "pose": { "shoulder_r": -11, "shoulder_l": 11, "elbow_r": -4, "elbow_l": 4 } },
-  { "id": "arms_out", "label": "手臂稍微外張", "pose": { "shoulder_r": 12, "shoulder_l": -12 } },
-  { "id": "long_sleeve", "label": "適合長袖衣物", "pose": { "shoulder_r": 6, "shoulder_l": -6, "elbow_r": -10, "elbow_l": 10 } },
-  { "id": "outerwear", "label": "適合外套", "pose": { "shoulder_r": 18, "shoulder_l": -18, "elbow_r": -12, "elbow_l": 12 } },
-  { "id": "asymmetric", "label": "輕微不對稱站姿", "pose": { "torso": 2, "head": -4, "shoulder_r": -8, "shoulder_l": -5, "elbow_l": 8, "hip_l": -7, "knee_l": 5, "ankle_l": 3, "hair_tail_r": 3, "hair_tail_l": 3 } }
+  { "id": "a_pose", "label": "A 字站姿", "pose": {} },
+  { "id": "arms_down", "label": "雙手垂下", "pose": { "shoulder_r": -14, "shoulder_l": 14, "elbow_r": -6, "elbow_l": 6, "wrist_r": 6, "wrist_l": -6 } },
+  { "id": "hand_on_hip", "label": "一手叉腰", "pose": { "shoulder_r": 36, "elbow_r": -98, "wrist_r": -18, "shoulder_l": 12, "elbow_l": 5, "pelvis": 2, "chest": -2, "head": 4 }, "front": ["hand_r"] },
+  { "id": "lift_skirt", "label": "提起裙擺", "pose": { "shoulder_l": -22, "elbow_l": 34, "wrist_l": 28, "shoulder_r": -10, "elbow_r": -6, "head": -5, "chest": 2 }, "front": ["hand_l"] },
+  { "id": "curtsy", "label": "雙手提裙", "pose": { "shoulder_l": -24, "elbow_l": 30, "wrist_l": 26, "shoulder_r": 24, "elbow_r": -30, "wrist_r": -26, "hip_l": -8, "knee_l": 12, "head": 5 }, "front": ["hand_l", "hand_r"] },
+  { "id": "reach_out", "label": "一手伸展", "pose": { "shoulder_l": -62, "elbow_l": 12, "wrist_l": -12, "shoulder_r": -10, "chest": 3, "head": -6 } },
+  { "id": "legs_crossed", "label": "雙腿交叉", "pose": { "hip_r": -10, "knee_r": 6, "ankle_r": 6, "hip_l": 12, "knee_l": -8, "ankle_l": -6, "shoulder_r": -12, "shoulder_l": 12 } },
+  { "id": "weight_shift", "label": "重心偏側", "pose": { "root.x": 14, "pelvis": 5, "torso": -3, "chest": -5, "head": 6, "hip_r": -2, "hip_l": -12, "knee_l": 10, "ankle_l": 4, "shoulder_r": -10, "shoulder_l": 4, "elbow_l": 10, "hair_tail_r": -4, "hair_tail_l": -4 } },
+  { "id": "long_sleeve", "label": "長袖適用", "pose": { "shoulder_r": 8, "shoulder_l": -8, "elbow_r": -10, "elbow_l": 10 } },
+  { "id": "outerwear", "label": "外套適用", "pose": { "shoulder_r": 18, "shoulder_l": -18, "elbow_r": -12, "elbow_l": 12 } },
+  { "id": "lolita", "label": "大裙擺", "pose": { "shoulder_r": 30, "shoulder_l": -30, "elbow_r": -22, "elbow_l": 22, "wrist_r": -14, "wrist_l": 14, "hip_l": -6, "knee_l": 8, "head": -4 } },
+  { "id": "shy", "label": "內斂站姿", "pose": { "shoulder_r": -16, "shoulder_l": 16, "elbow_r": -30, "elbow_l": 30, "wrist_r": -16, "wrist_l": 16, "hip_l": -8, "knee_l": 10, "ankle_l": -8, "head": -7, "neck": -3 }, "front": ["hand_l", "hand_r"] }
 ]
