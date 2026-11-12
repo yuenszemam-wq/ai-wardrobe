@@ -38,5 +38,26 @@
     "TOKEN_DAILY_CALL_LIMIT": "3000",
     "TOKEN_DAILY_UPLOAD_MB": "800",
     "UPLOAD_LINK_MAX_MINUTES": "1440"
+  },
+
+  // Preview 使用獨立測試資源，不接觸正式衣櫃資料或 Cron。
+  "previews": {
+    "vars": {
+      "MAX_UPLOAD_MB": "25",
+      "TOKEN_DAILY_CALL_LIMIT": "3000",
+      "TOKEN_DAILY_UPLOAD_MB": "800",
+      "UPLOAD_LINK_MAX_MINUTES": "1440"
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "ai-wardrobe-preview-db",
+        "database_id": "27d5c623-adb0-412e-a89f-7b577dace7ef",
+        "migrations_dir": "migrations"
+      }
+    ],
+    "r2_buckets": [
+      { "binding": "IMAGES", "bucket_name": "ai-wardrobe-preview-images" }
+    ]
   }
 }
