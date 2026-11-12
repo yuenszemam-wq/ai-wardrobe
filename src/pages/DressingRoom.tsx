@@ -63,6 +63,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   const avatar = AVATARS[avatarId] ?? BASE_V1;
   const [appearance, setAppearance] = useState<AvatarLook>(DEFAULT_APPEARANCE);
   const [avatarPanel, setAvatarPanel] = useState(false);
+  const [fitPanel, setFitPanel] = useState(false);
   const [skeleton, setSkeleton] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [garments, setGarments] = useState<Garment[] | null>(null);
@@ -110,7 +111,7 @@ export default function DressingRoom({ id }: { id?: string }) {
     const ticket = ++generation.current;
     pending.current.clear();
     setSelected(null); setDirty(false); setLoaded(false); setTemplates(null); setSwitching(false);
-    setAvatarPanel(false); setSkeleton(false);
+    setAvatarPanel(false); setFitPanel(false); setSkeleton(false);
     void (async () => {
       const look = id ? await api<LookDetail>(`/api/doll/looks/${id}`) : null;
       const next = AVATARS[look?.avatar_id || BASE_V1.id] ?? BASE_V1;
@@ -132,6 +133,7 @@ export default function DressingRoom({ id }: { id?: string }) {
 
   async function switchAvatar(nextId: string) {
     if (nextId === avatarId || switching || busy) return;
+    setFitPanel(false);
     if (wornRef.current.some((w) => w.from === "override") && !confirm("切換角色會重新計算這個造型的衣物位置，原有角色的穿著模板不會被修改。繼續？")) return;
     const ticket = ++generation.current;
     pending.current.clear(); setSwitching(true); setSelected(null); gesture.current = null; pointers.current.clear();
@@ -369,7 +371,7 @@ export default function DressingRoom({ id }: { id?: string }) {
       {/* ───── 左：角色畫布｜右：揀選衣物（校正時換成工具），兩者同時在畫面內 ───── */}
       <div className="mt-1 flex justify-center gap-2">
         {/* ───── 畫布：邏輯尺寸 1200×1800 ───── */}
-        <div className="frame min-w-0 shrink-0 self-start p-1.5" style={{ width: "min(calc(100% - 86px), calc((100dvh - 300px) * 2 / 3 + 12px))", minWidth: 190 }}>
+        <div className="frame min-w-0 shrink-0 self-start p-1.5" style={{ width: "min(calc(100% - 86px), calc((100dvh - 344px) * 2 / 3 + 12px))", minWidth: 190 }}>
           <div
             ref={canvas}
             data-testid="doll-canvas"
@@ -420,11 +422,6 @@ export default function DressingRoom({ id }: { id?: string }) {
                 <Tool label="縮小" onClick={() => setFit(sel.garment_id, { ...sel.fit, w: sel.fit.w * 0.96 })}>－</Tool>
                 <Tool label="向左轉" onClick={() => setFit(sel.garment_id, { ...sel.fit, rotation: sel.fit.rotation - 1 })}>↺</Tool>
                 <Tool label="向右轉" onClick={() => setFit(sel.garment_id, { ...sel.fit, rotation: sel.fit.rotation + 1 })}>↻</Tool>
-                <Tool label="向上微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy - 5 })}>↑</Tool>
-                <Tool label="向下微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy + 5 })}>↓</Tool>
-                <Tool label="向左微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx - 5 })}>←</Tool>
-                <Tool label="向右微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx + 5 })}>→</Tool>
-                <Tool label="重新自動對位" onClick={() => setFit(sel.garment_id, defaultFit(sel.slot, sel.content, sel.category, avatar, sel.subcategory, sel.name))}>自動</Tool>
                 <Tool label="還原位置" disabled={sel.from !== "override"} onClick={() => setFit(sel.garment_id, sel.base)}>還原</Tool>
                 <Tool label="脫下" onClick={() => { change((cur) => cur.filter((w) => w.garment_id !== sel.garment_id)); setSelected(null); }}>脫下</Tool>
                 <button type="button" aria-label="存為這件衣物的穿著位置" disabled={busy || sel.content.approximate || sel.from !== "override"} onClick={() => saveTemplate(sel)} className="btn-jewel min-h-12 rounded-2xl px-1 text-[12px] leading-tight disabled:opacity-40">
@@ -459,12 +456,23 @@ export default function DressingRoom({ id }: { id?: string }) {
       )}
       {sel ? (
         <p className="mt-1.5 text-center text-[11px] leading-relaxed text-mauve">
-          <span className="text-gold-soft" data-testid="fit-from">{FROM_LABEL[sel.from]}</span>｜拖動衣物，雙指縮放及旋轉。不按「存為穿著位置」，調整只保存在這個造型內。
+          <span className="text-gold-soft" data-testid="fit-from">{FROM_LABEL[sel.from]}</span>｜拖動衣物，雙指縮放及旋轉。不按「存為穿著位置」，調整只保存在這個造型內。 <button type="button" className="underline text-gold-soft" onClick={() => setFitPanel(true)}>精細校正</button>
         </p>
       ) : (
         <p className="mt-1.5 text-center text-[11px] text-mauve">{worn.length ? "點選角色身上的衣物或上面的標籤，可校正位置。" : "在右邊點選衣物，角色會即時換上。"}</p>
       )}
 
+      {fitPanel && sel && <Sheet title="衣物精細校正" onClose={() => setFitPanel(false)}>
+        <p className="mb-2 text-[12px] text-mauve">{sel.name}｜每次移動 5 個邏輯像素</p>
+        <div className="grid grid-cols-3 gap-2">
+          <div /><Tool label="向上微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy - 5 })}>↑</Tool><div />
+          <Tool label="向左微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx - 5 })}>←</Tool>
+          <Tool label="重新自動對位" onClick={() => setFit(sel.garment_id, defaultFit(sel.slot, sel.content, sel.category, avatar, sel.subcategory, sel.name))}>自動</Tool>
+          <Tool label="向右微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx + 5 })}>→</Tool>
+          <div /><Tool label="向下微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy + 5 })}>↓</Tool><div />
+        </div>
+        <button type="button" className="btn-jewel mt-3 min-h-10 w-full rounded-full" onClick={() => setFitPanel(false)}>完成微調</button>
+      </Sheet>}
       {avatarPanel && isV2 && <Sheet title="角色設定" onClose={() => setAvatarPanel(false)}>
         <AvatarPoseEditor rig={RIG_V2} value={appearance} onChange={(v) => { setAppearance(v); setDirty(true); }} showSkeleton={skeleton} onShowSkeleton={setSkeleton} />
       </Sheet>}

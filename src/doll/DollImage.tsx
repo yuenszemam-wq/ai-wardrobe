@@ -13,6 +13,7 @@ export function DollImage({ imageId, alt, canonical = true }: { imageId: string 
     setUrl("");
     setError("");
     const show = async (blob: Blob) => {
+      if (cancelled) return;
       const u = URL.createObjectURL(blob);
       urls.push(u);
       const img = new Image();

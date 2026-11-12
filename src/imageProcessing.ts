@@ -119,7 +119,7 @@ async function encodeCanvasWebp(canvas:HTMLCanvasElement,quality:number):Promise
     const ctx=canvas.getContext('2d',{willReadFrequently:true});
     if(!ctx)throw new Error('canvas_context_unavailable');
     const bytes=encode(ctx.getImageData(0,0,canvas.width,canvas.height),quality);
-    return new Blob([bytes],{type:'image/webp'});
+    return new Blob([new Uint8Array(bytes)],{type:'image/webp'});
   } catch(e) {fallbackWebpEncoder=undefined;throw e;}
 }
 async function thumbnailFromSource(src:Drawable):Promise<Blob> {

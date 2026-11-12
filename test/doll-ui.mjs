@@ -264,6 +264,36 @@ try {
   await page.waitForURL((u) => u.pathname === "/dressing");
   check("刪除造型後，模板及衣物仍在", (await env.DB.prepare("SELECT COUNT(*) n FROM doll_looks").first()).n === 0 && (await env.DB.prepare("SELECT COUNT(*) n FROM doll_fit_templates").first()).n === 1);
 
+  console.log("Avatar V2 integrated dressing");
+  await page.goto(origin + "/dressing");
+  await page.waitForSelector('[data-testid="doll-picker"]');
+  await page.getByRole("button", { name: "Avatar V2", exact: true }).click();
+  await page.waitForSelector('[data-part="head"]');
+  check("V2 已接入換裝畫布", (await page.locator('[data-testid="doll-canvas"] [data-part]').count()) >= 16);
+  await wearTap("測試 SK");
+  await wearTap("測試襯衫");
+  check("V2 半裙及襯衫可以一起穿", (await wornIds()) === "gar_bl,gar_sk");
+  await page.getByRole("button", { name: "角色設定", exact: true }).click();
+  await page.locator('[data-color="black"]').click();
+  await page.locator('[data-pose="arms_out"]').click();
+  await page.getByLabel("關閉", { exact: true }).click();
+  check("單張襯衫在不兼容姿勢時有提示", await page.getByText("目前姿勢未完全支援", { exact: false }).count() === 1);
+  await page.getByLabel("造型名稱").fill("V2 測試");
+  await page.getByText("保存造型").click();
+  await page.waitForURL(/\/dressing\/look_/);
+  const v2Id = new URL(page.url()).pathname.split("/").pop();
+  const v2Row = await env.DB.prepare("SELECT avatar_id,hair_color,pose FROM doll_looks WHERE id=?").bind(v2Id).first();
+  check("V2 造型保存角色及髮色姿勢", v2Row?.avatar_id === "avatar_v2" && v2Row?.hair_color === "black" && JSON.parse(v2Row.pose).shoulder_r === 12, v2Row);
+  await page.reload();
+  await page.waitForSelector('[data-part="head"]');
+  await page.waitForSelector('[data-testid="worn-gar_sk"]');
+  check("重開 V2 造型仍為新版角色及衣物", (await wornIds()) === "gar_bl,gar_sk");
+  await page.getByRole("button", { name: "角色設定", exact: true }).click();
+  check("重開造型後仍保留髮色及姿勢", (await page.locator('[data-color="black"]').getAttribute("class")).includes("chip-on") && (await page.locator('[data-pose="arms_out"]').getAttribute("class")).includes("chip-on"));
+  await page.getByLabel("關閉", { exact: true }).click();
+  await page.getByText("刪除造型").click();
+  await page.waitForURL((u) => u.pathname === "/dressing");
+
   console.log("資料完整性及回歸");
   check("衣物、圖片記錄、穿搭、R2 物件沒有任何改動", (await snapshot()) === before);
   check("沒有呼叫任何外部服務", external.filter((u) => !/fonts\.(googleapis|gstatic)\.com/.test(u)).length === 0, external);
