@@ -8,7 +8,7 @@ import { Actor, Env, HttpError, audit, newId, nowIso, str } from "./util";
 
 const avatarOf = (v: unknown): string => {
   const id = typeof v === "string" && v ? v : DEFAULT_AVATAR;
-  if (!AVATARS[id]) throw new HttpError(400, "bad_avatar", "找不到這個角色");
+  if (!Object.prototype.hasOwnProperty.call(AVATARS, id)) throw new HttpError(400, "bad_avatar", "找不到這個角色");
   return id;
 };
 const fitOrThrow = (v: unknown): Fit => {
@@ -33,6 +33,7 @@ export async function putTemplate(env: Env, actor: Actor, garmentId: string, inp
   if (input.slot && !slot) throw new HttpError(400, "bad_slot", "圖層位置不正確");
   const g = await env.DB.prepare(`SELECT g.id, ${transparentImageSql()} AS image_id FROM garments g WHERE g.id = ?`).bind(garmentId).first<{ id: string; image_id: string | null }>();
   if (!g) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
+  if (Object.prototype.hasOwnProperty.call(input, "image_id") && input.image_id !== g.image_id) throw new HttpError(409, "image_changed", "衣物圖片已更新，請重新載入再校正");
   const now = nowIso();
   await env.DB.prepare(
     `INSERT INTO doll_fit_templates (garment_id, avatar_id, image_id, cx, cy, w, rotation, slot, version, created_at, updated_at)

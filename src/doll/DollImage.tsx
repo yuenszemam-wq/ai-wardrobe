@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { imageUrl } from "../api";
-import { highResolutionBlob, thumbnailBlob } from "../imageCache";
+import { thumbnailBlob } from "../imageCache";
+import { canonicalDollBlob } from "./content";
 
-/** 換裝畫布上的衣物圖：先顯示 D1 縮圖，再換成 R2 現有的高清透明圖（唯讀）。 */
-export function DollImage({ imageId, alt }: { imageId: string | null; alt: string }) {
+/** 換裝畫布上的衣物圖：使用與定位一致的高清圖；降級時保持縮圖座標，不偷偷換圖。 */
+export function DollImage({ imageId, alt, canonical = true }: { imageId: string | null; alt: string; canonical?: boolean }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
@@ -21,24 +21,17 @@ export function DollImage({ imageId, alt }: { imageId: string | null; alt: strin
       if (!cancelled) setUrl(u);
     };
     void (async () => {
-      let shown = false;
       try {
-        await show(await thumbnailBlob(imageId));
-        shown = true;
-      } catch {
-        /* 縮圖未準備好：直接等高清圖 */
-      }
-      try {
-        await show(await highResolutionBlob(imageUrl(imageId)));
+        await show(canonical ? await canonicalDollBlob(imageId) : await thumbnailBlob(imageId));
       } catch (e) {
-        if (!cancelled && !shown) setError((e as Error).message || "圖片讀取失敗");
+        if (!cancelled) setError((e as Error).message || "圖片讀取失敗");
       }
     })();
     return () => {
       cancelled = true;
       urls.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [imageId]);
+  }, [imageId, canonical]);
   if (url) return <img src={url} alt={alt} draggable={false} className="pointer-events-none block h-auto w-full select-none" />;
   return (
     <div role="img" aria-label={alt} className="grid aspect-[3/4] w-full place-items-center rounded-xl bg-white/70 p-1 text-center text-[11px] text-mauve">

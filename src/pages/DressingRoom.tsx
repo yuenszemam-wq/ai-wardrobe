@@ -78,7 +78,9 @@ export default function DressingRoom({ id }: { id?: string }) {
   const [k, setK] = useState(0); // 螢幕像素 ÷ 邏輯像素
 
   const generation = useRef(0);
-  const pending = useRef(new Set<string>());
+  const pending = useRef(new Map<string, number>());
+  const serial = useRef(0);
+  const wearQueue = useRef<Promise<void>>(Promise.resolve());
   const canvas = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
@@ -118,13 +120,13 @@ export default function DressingRoom({ id }: { id?: string }) {
         const t = matchingTemplate(map, it.garment_id, it.image_id);
         const slot = isSlot(it.slot) ? it.slot : slotFor(it.category, it.subcategory);
         const content = await measureContent(it.image_id);
-        const base = t?.fit ?? defaultFit(slot, content, it.category, next);
+        const base = t?.fit ?? defaultFit(slot, content, it.category, next, it.subcategory, it.name);
         items.push({ garment_id: it.garment_id, name: it.name, category: it.category, subcategory: it.subcategory, slot, image_id: it.image_id, content, base, fit: it.override ?? base, from: it.override ? "override" : t ? "template" : "default" });
       }
       if (generation.current !== ticket) return;
       setAvatarId(next.id); setTemplates(map); setAppearance(look ? appearanceOf(look) : DEFAULT_APPEARANCE);
       setName(look?.name ?? ""); setWorn(items); setLoaded(true);
-    })().catch((e) => { if (generation.current === ticket) { toast((e as Error).message, "err"); setTemplates(new Map()); setLoaded(true); } });
+    })().catch((e) => { if (generation.current === ticket) { toast((e as Error).message, "err"); if (id) navigate("/dressing", true); else { setTemplates(new Map()); setWorn([]); setLoaded(true); } } });
     return () => { generation.current++; pending.current.clear(); };
   }, [id]);
 
@@ -140,7 +142,7 @@ export default function DressingRoom({ id }: { id?: string }) {
       setWorn((cur) => cur.map((w) => {
         const t = matchingTemplate(map, w.garment_id, w.image_id);
         const slot = isSlot(t?.slot) ? t.slot : slotFor(w.category, w.subcategory);
-        const base = t?.fit ?? defaultFit(slot, w.content, w.category, next);
+        const base = t?.fit ?? defaultFit(slot, w.content, w.category, next, w.subcategory, w.name);
         return { ...w, slot, base, fit: base, from: t ? "template" : "default" };
       }));
       setTemplates(map); setAvatarId(nextId); setDirty(true);
@@ -190,21 +192,24 @@ export default function DressingRoom({ id }: { id?: string }) {
       if (selected === g.id) setSelected(null);
       return;
     }
-    const ticket = ++generation.current;
-    pending.current.clear(); pending.current.add(g.id);
+    const ticket = generation.current, token = ++serial.current;
+    pending.current.set(g.id, token);
     const imageId = g.transparent_image_id || null;
     const t = matchingTemplate(templates, g.id, imageId);
     const slot = isSlot(t?.slot) ? t.slot : slotFor(g.category, g.subcategory);
-    const content = await measureContent(imageId);
-    if (generation.current !== ticket || !pending.current.delete(g.id)) return;
-    if (templates.get(g.id) && !t) toast("衣物圖片已更新，請重新校正穿著位置");
-    const base = t?.fit ?? defaultFit(slot, content, g.category, avatar);
-    const item: WornItem = { garment_id: g.id, name: displayName(g), category: g.category, subcategory: g.subcategory, slot, image_id: imageId, content, base, fit: base, from: t ? "template" : "default" };
-    const before = wornRef.current;
-    const after = wear(before, item);
-    const off = before.filter((w) => !after.some((a) => a.garment_id === w.garment_id));
-    if (off.length) toast(`已脫下：${off.map((w) => w.name).join("、")}`);
-    change(() => after);
+    const measurement = measureContent(imageId);
+    // Decode in parallel, apply in tap order. Cancelling a tap must not re-equip it later.
+    wearQueue.current = wearQueue.current.catch(() => undefined).then(async () => {
+      const content = await measurement;
+      if (generation.current !== ticket || pending.current.get(g.id) !== token) return;
+      pending.current.delete(g.id);
+      if (templates.get(g.id) && !t) toast("衣物圖片已更新，請重新校正穿著位置");
+      if (content.approximate) toast("高清圖未能讀取；暫用縮圖位置，請稍後重試");
+      const base = t?.fit ?? defaultFit(slot, content, g.category, avatar, g.subcategory, g.name);
+      const item: WornItem = { garment_id: g.id, name: displayName(g), category: g.category, subcategory: g.subcategory, slot, image_id: imageId, content, base, fit: base, from: t ? "template" : "default" };
+      change((cur) => wear(cur, item));
+    });
+    await wearQueue.current;
   }
 
   // ───── 手勢（只對已選取的衣物生效）：單指拖動、雙指縮放＋旋轉、把手縮放／旋轉 ─────
@@ -289,6 +294,7 @@ export default function DressingRoom({ id }: { id?: string }) {
 
   // ───── 穿著模板 ─────
   async function saveTemplate(w: WornItem) {
+    if (w.content.approximate) return toast("請先重新穿上衣物，等高清圖讀取成功後再校正", "err");
     setBusy(true);
     try {
       const t = await api<Template>(`/api/doll/templates/${w.garment_id}`, { method: "PUT", json: { avatar_id: avatar.id, fit: w.fit, slot: w.slot, image_id: w.image_id } });
@@ -303,6 +309,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   }
 
   async function save() {
+    if (switching || pending.current.size) return toast("衣物仍在載入，請稍後再保存", "err");
     if (!worn.length && !id) return toast("請先替角色穿上衣物", "err");
     setBusy(true);
     const body = {
@@ -392,7 +399,7 @@ export default function DressingRoom({ id }: { id?: string }) {
                     onPointerUp={stop(onUp)}
                     onPointerCancel={stop(onUp)}
                   >
-                    <DollImage imageId={w.image_id} alt={w.name} />
+                    <DollImage imageId={w.image_id} alt={w.name} canonical={!w.content.approximate} />
                     {isSel && (
                       <div data-testid="fit-frame" className="pointer-events-none absolute outline-2 outline-dashed outline-amethyst" style={{ left: `${w.content.x0 * 100}%`, top: `${w.content.y0 * 100}%`, width: `${(w.content.x1 - w.content.x0) * 100}%`, height: `${(w.content.y1 - w.content.y0) * 100}%` }}>
                         <Handle label="拖拉旋轉" className="-top-4 left-1/2 -translate-x-1/2" cursor="grab" onDown={(e) => onHandleDown(e, w.garment_id, "rotate")} onMove={stop(onMove)} onUp={stop(onUp)}>⟳</Handle>
@@ -413,9 +420,14 @@ export default function DressingRoom({ id }: { id?: string }) {
                 <Tool label="縮小" onClick={() => setFit(sel.garment_id, { ...sel.fit, w: sel.fit.w * 0.96 })}>－</Tool>
                 <Tool label="向左轉" onClick={() => setFit(sel.garment_id, { ...sel.fit, rotation: sel.fit.rotation - 1 })}>↺</Tool>
                 <Tool label="向右轉" onClick={() => setFit(sel.garment_id, { ...sel.fit, rotation: sel.fit.rotation + 1 })}>↻</Tool>
+                <Tool label="向上微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy - 5 })}>↑</Tool>
+                <Tool label="向下微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cy: sel.fit.cy + 5 })}>↓</Tool>
+                <Tool label="向左微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx - 5 })}>←</Tool>
+                <Tool label="向右微調" onClick={() => setFit(sel.garment_id, { ...sel.fit, cx: sel.fit.cx + 5 })}>→</Tool>
+                <Tool label="重新自動對位" onClick={() => setFit(sel.garment_id, defaultFit(sel.slot, sel.content, sel.category, avatar, sel.subcategory, sel.name))}>自動</Tool>
                 <Tool label="還原位置" disabled={sel.from !== "override"} onClick={() => setFit(sel.garment_id, sel.base)}>還原</Tool>
                 <Tool label="脫下" onClick={() => { change((cur) => cur.filter((w) => w.garment_id !== sel.garment_id)); setSelected(null); }}>脫下</Tool>
-                <button type="button" aria-label="存為這件衣物的穿著位置" disabled={busy || sel.from !== "override"} onClick={() => saveTemplate(sel)} className="btn-jewel min-h-12 rounded-2xl px-1 text-[12px] leading-tight disabled:opacity-40">
+                <button type="button" aria-label="存為這件衣物的穿著位置" disabled={busy || sel.content.approximate || sel.from !== "override"} onClick={() => saveTemplate(sel)} className="btn-jewel min-h-12 rounded-2xl px-1 text-[12px] leading-tight disabled:opacity-40">
                   存為<br />穿著位置
                 </button>
                 <button type="button" onClick={() => setSelected(null)} className="btn-dark min-h-9 rounded-full text-[13px]">完成</button>

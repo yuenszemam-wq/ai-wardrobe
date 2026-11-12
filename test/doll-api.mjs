@@ -99,6 +99,7 @@ check("拒絕不合法的位置", (await call("PUT", "/api/doll/templates/gar_bl
 check("拒絕過大的尺寸", (await call("PUT", "/api/doll/templates/gar_bl", { fit: { cx: 1, cy: 1, w: 999999 } })).status === 400);
 check("拒絕不存在的衣物", (await call("PUT", "/api/doll/templates/gar_none", { fit: { cx: 1, cy: 1, w: 100 } })).status === 404);
 check("拒絕不存在的角色", (await call("PUT", "/api/doll/templates/gar_bl", { avatar_id: "nope", fit: { cx: 1, cy: 1, w: 100 } })).status === 400);
+check("拒絕舊圖片校正", (await call("PUT", "/api/doll/templates/gar_jsk", { image_id: "old", fit: { cx: 600, cy: 800, w: 500 } })).status === 409);
 check("拒絕不合法的圖層位置", (await call("PUT", "/api/doll/templates/gar_bl", { slot: "hat", fit: { cx: 1, cy: 1, w: 100 } })).status === 400);
 
 console.log("Avatar V2");
