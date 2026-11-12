@@ -101,6 +101,19 @@ check("拒絕不存在的衣物", (await call("PUT", "/api/doll/templates/gar_no
 check("拒絕不存在的角色", (await call("PUT", "/api/doll/templates/gar_bl", { avatar_id: "nope", fit: { cx: 1, cy: 1, w: 100 } })).status === 400);
 check("拒絕不合法的圖層位置", (await call("PUT", "/api/doll/templates/gar_bl", { slot: "hat", fit: { cx: 1, cy: 1, w: 100 } })).status === 400);
 
+console.log("Avatar V2");
+{
+  const v2 = await call("POST", "/api/doll/looks", { avatar_id: "avatar_v2", hair_style: "twin_tails_long", hair_color: "#442233", accent_color: "original", pose: { shoulder_r: 12 }, items: [] });
+  check("V2 造型可保存外觀及姿勢", v2.status === 201 && v2.data.avatar_id === "avatar_v2" && v2.data.pose.shoulder_r === 12 && v2.data.hair_color === "#442233", v2);
+  const changed = await call("PATCH", "/api/doll/looks/" + v2.data.id, { pose: { shoulder_r: 99 }, hair_color: "black" });
+  check("V2 姿勢限制及更新", changed.status === 200 && changed.data.pose.shoulder_r === 28 && changed.data.hair_color === "black", changed);
+  check("拒絕未知骨骼", (await call("PATCH", "/api/doll/looks/" + v2.data.id, { pose: { fake: 2 } })).status === 400);
+  check("拒絕不合法髮色", (await call("PATCH", "/api/doll/looks/" + v2.data.id, { hair_color: "invalid" })).status === 400);
+  await call("DELETE", "/api/doll/looks/" + v2.data.id);
+  const v2t = await call("PUT", "/api/doll/templates/gar_jsk", { avatar_id: "avatar_v2", fit: { cx: 600, cy: 700, w: 500 } });
+  check("V2 模板獨立", v2t.status === 200 && v2t.data.avatar_id === "avatar_v2");
+  await call("DELETE", "/api/doll/templates/gar_jsk?avatar=avatar_v2");
+}
 console.log("造型");
 r = await call("POST", "/api/doll/looks", { name: "月夜茶會", items: [{ garment_id: "gar_bl", override: { cx: 590, cy: 700, w: 500, rotation: -3 } }, { garment_id: "gar_jsk", override: null }] });
 check("建立造型", r.status === 201 && r.data.id.startsWith("look_") && r.data.items.length === 2, r);

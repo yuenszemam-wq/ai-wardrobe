@@ -1,6 +1,9 @@
 // 角色換裝（Moonlit Dressing Room）的共用定義：素體、錨點、圖層、互斥規則及預設穿著位置。
 // 全部是純函數／常數，前端及 Worker 共用，可直接單元測試。座標＝1200×1800 邏輯畫布像素。
 
+import { AVATAR_V2_ID, RIG_V2 } from "./avatarV2";
+import { posedAnchors } from "./avatarRig";
+
 export const DOLL_W = 1200;
 export const DOLL_H = 1800;
 
@@ -42,7 +45,8 @@ export const BASE_V1: Avatar = {
     floor: { x: 600, y: 1782 },
   },
 };
-export const AVATARS: Record<string, Avatar> = { [BASE_V1.id]: BASE_V1 };
+export const BASE_V2: Avatar = { id: AVATAR_V2_ID, layers: [], anchors: posedAnchors(RIG_V2, {}) };
+export const AVATARS: Record<string, Avatar> = { [BASE_V1.id]: BASE_V1, [BASE_V2.id]: BASE_V2 };
 export const DEFAULT_AVATAR = BASE_V1.id;
 
 // ───── 圖層 ─────
@@ -143,8 +147,28 @@ const RULES: Record<Slot, Rule> = {
 const FULL_OUTFIT: Rule = { cx: 600, top: A.head_top.y - 30, h: A.floor.y - A.head_top.y + 30 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
-export function defaultFit(slot: Slot, content: Content, category?: string | null): Fit {
-  const r = slot === "set" && category === "完整穿搭" ? FULL_OUTFIT : RULES[slot];
+export function defaultFit(slot: Slot, content: Content, category?: string | null, avatar: Avatar = BASE_V1): Fit {
+  let r = slot === "set" && category === "完整穿搭" ? FULL_OUTFIT : RULES[slot];
+  if (avatar.id === BASE_V2.id) {
+    const a = avatar.anchors;
+    const center = a.waist.x;
+    const shoulder = Math.min(a.shoulder_l.y, a.shoulder_r.y);
+    const rules: Record<Slot, Rule> = {
+      dress: { cx: center, top: shoulder - 28, h: a.knee_l.y - shoulder + 28 },
+      set: { cx: center, top: shoulder - 40, h: a.knee_l.y - shoulder + 40 },
+      top: { cx: center, top: shoulder - 25, h: a.waist.y - shoulder + 65 },
+      outer: { cx: center, top: shoulder - 35, h: a.hip.y - shoulder + 35 },
+      skirt: { cx: center, top: a.waist.y - 10, h: a.knee_l.y - a.waist.y + 10 },
+      petticoat: { cx: center, top: a.waist.y + 10, h: a.knee_l.y - a.waist.y - 50 },
+      pants: { cx: center, top: a.waist.y - 10, h: a.ankle_l.y - a.waist.y + 10 },
+      socks: { cx: center, bottom: a.floor.y - 70, h: 430 },
+      shoes: { cx: center, bottom: a.floor.y + 4, h: 150 },
+      headwear: { cx: a.head_top.x, cy: a.head_top.y + 55, w: 240 },
+      bag: { cx: a.hand_l.x, cy: a.hand_l.y, h: 260 },
+      accessory: { cx: a.neck.x, cy: a.neck.y + 10, h: 120 },
+    };
+    r = slot === "set" && category === "完整穿搭" ? { cx: center, top: a.head_top.y, h: a.floor.y - a.head_top.y } : rules[slot];
+  }
   const cw = Math.max(0.02, content.x1 - content.x0), ch = Math.max(0.02, content.y1 - content.y0);
   const ar = content.ar > 0 ? content.ar : 4 / 3;
   const w = clampW(r.h !== undefined ? r.h / ch / ar : (r.w ?? 400) / cw);

@@ -1,6 +1,8 @@
 // 角色換裝 API：穿著模板（doll_fit_templates）及造型（doll_looks／doll_look_items）。
 // 只讀寫 0008 新增的三個資料表；不修改 garments、garment_images、outfits 或 R2。
 import { AVATARS, DEFAULT_AVATAR, Fit, SLOT_Z, isSlot, normalizeFit, slotFor } from "../shared/doll";
+import { HAIR_STYLES, RIG_V2, normalizeColorValue } from "../shared/avatarV2";
+import { normalizePose } from "../shared/avatarRig";
 import { transparentImageSql } from "./transparent";
 import { Actor, Env, HttpError, audit, newId, nowIso, str } from "./util";
 
@@ -51,7 +53,28 @@ export async function deleteTemplate(env: Env, actor: Actor, garmentId: string, 
 }
 
 // ───── 造型 ─────
-interface LookInput { name?: unknown; notes?: unknown; is_favorite?: unknown; avatar_id?: unknown; status?: unknown; items?: unknown }
+interface LookInput { name?: unknown; notes?: unknown; is_favorite?: unknown; avatar_id?: unknown; status?: unknown; items?: unknown; hair_style?: unknown; hair_color?: unknown; accent_color?: unknown; pose?: unknown }
+const appearanceKeys = ["hair_style", "hair_color", "accent_color", "pose"] as const;
+function appearanceValue(key: typeof appearanceKeys[number], v: unknown): string | null {
+  if (v == null) return null;
+  if (key === "pose") {
+    const p = normalizePose(RIG_V2, v);
+    if (!p) throw new HttpError(400, "bad_pose", "姿勢資料不正確");
+    return JSON.stringify(p);
+  }
+  if (key === "hair_style" && typeof v === "string" && Object.prototype.hasOwnProperty.call(HAIR_STYLES, v)) return v;
+  if (key === "accent_color" && v === "original") return v;
+  if (key !== "hair_style") {
+    const c = normalizeColorValue(v);
+    if (c) return c;
+  }
+  throw new HttpError(400, "bad_appearance", "角色外觀資料不正確");
+}
+function lookOut(l: Record<string, unknown>) {
+  let pose = {};
+  try { pose = normalizePose(RIG_V2, typeof l.pose === "string" ? JSON.parse(l.pose) : l.pose) ?? {}; } catch { /* legacy or malformed data */ }
+  return { ...l, pose, is_favorite: Number(l.is_favorite) === 1 };
+}
 
 async function itemsOf(env: Env, lookId: string) {
   const { results } = await env.DB.prepare(
@@ -70,13 +93,13 @@ export async function listLooks(env: Env) {
     `SELECT l.*, (SELECT COUNT(*) FROM doll_look_items i WHERE i.look_id = l.id) AS item_count
      FROM doll_looks l WHERE l.status != 'archived' ORDER BY l.updated_at DESC LIMIT 200`,
   ).all<Record<string, unknown>>();
-  return results.map((l) => ({ ...l, is_favorite: Number(l.is_favorite) === 1 }));
+  return results.map(lookOut);
 }
 
 export async function getLook(env: Env, id: string) {
   const l = await env.DB.prepare("SELECT * FROM doll_looks WHERE id = ?").bind(id).first<Record<string, unknown>>();
   if (!l) throw new HttpError(404, "look_not_found", "找不到這個造型");
-  return { ...l, is_favorite: Number(l.is_favorite) === 1, items: await itemsOf(env, id) };
+  return { ...lookOut(l), items: await itemsOf(env, id) };
 }
 
 /** 整批重寫造型單品（在同一個 D1 batch 內；個別位置修改由請求一併帶來，不會遺失） */
@@ -112,8 +135,8 @@ export async function createLook(env: Env, actor: Actor, input: LookInput) {
   const now = nowIso();
   const stmts = await itemStatements(env, id, input.items ?? []);
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO doll_looks (id, name, avatar_id, notes, is_favorite, status, created_at, updated_at) VALUES (?,?,?,?,?, 'active', ?, ?)")
-      .bind(id, str(input.name, 120) || "新造型", avatarOf(input.avatar_id), str(input.notes, 2000), input.is_favorite ? 1 : 0, now, now),
+    env.DB.prepare("INSERT INTO doll_looks (id, name, avatar_id, notes, is_favorite, status, created_at, updated_at, hair_style, hair_color, accent_color, pose) VALUES (?,?,?,?,?, 'active', ?, ?,?,?,?,?)")
+      .bind(id, str(input.name, 120) || "新造型", avatarOf(input.avatar_id), str(input.notes, 2000), input.is_favorite ? 1 : 0, now, now, ...appearanceKeys.map((key) => appearanceValue(key, input[key]))),
     ...stmts,
   ]);
   await audit(env, actor, "doll.look.create", id);
@@ -121,11 +144,19 @@ export async function createLook(env: Env, actor: Actor, input: LookInput) {
 }
 
 export async function updateLook(env: Env, actor: Actor, id: string, input: LookInput) {
-  const cur = await env.DB.prepare("SELECT id FROM doll_looks WHERE id = ?").bind(id).first();
+  const cur = await env.DB.prepare("SELECT id, avatar_id FROM doll_looks WHERE id = ?").bind(id).first<{ id: string; avatar_id: string }>();
   if (!cur) throw new HttpError(404, "look_not_found", "找不到這個造型");
   const has = (k: string) => Object.prototype.hasOwnProperty.call(input, k);
   const sets: string[] = [];
   const binds: unknown[] = [];
+  if (has("avatar_id")) {
+    const nextAvatar = avatarOf(input.avatar_id);
+    if (nextAvatar !== cur.avatar_id && !has("items")) throw new HttpError(400, "avatar_items_required", "切換角色時必須提供重新對位的衣物");
+    sets.push("avatar_id = ?"); binds.push(nextAvatar);
+  }
+  for (const key of appearanceKeys) if (has(key)) {
+    sets.push(key + " = ?"); binds.push(appearanceValue(key, input[key]));
+  }
   if (has("name") && str(input.name, 120)) { sets.push("name = ?"); binds.push(str(input.name, 120)); }
   if (has("notes")) { sets.push("notes = ?"); binds.push(str(input.notes, 2000)); }
   if (has("is_favorite")) { sets.push("is_favorite = ?"); binds.push(input.is_favorite ? 1 : 0); }
