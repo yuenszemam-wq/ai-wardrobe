@@ -36,6 +36,15 @@ export default function Outfits() {
       >
         穿搭工作室
       </PageTitle>
+      <Link to="/dressing" className="frame mb-4 flex items-center justify-between gap-3 px-4 py-3">
+        <span>
+          <span className="block font-serif text-[16px] font-bold tracking-[0.1em] text-gold-soft">角色換裝</span>
+          <span className="block text-[12px] text-mauve">把衣櫃裡的衣服穿在角色身上</span>
+        </span>
+        <span className="btn-jewel grid h-9 w-9 shrink-0 place-items-center rounded-full text-[18px]" aria-hidden>
+          <IconDress />
+        </span>
+      </Link>
       <label className="mb-4 flex items-center gap-2 text-sm">
         <input type="checkbox" checked={fav} onChange={(e) => setFav(e.target.checked)} className="h-5 w-5 accent-amethyst" />
         只看收藏
