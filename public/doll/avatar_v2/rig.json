@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 3,
  "avatar_id": "avatar_v2",
  "canvas": {
   "w": 1200,
@@ -32,9 +32,13 @@
     600,
     800
    ],
-   "min_angle": 0,
-   "max_angle": 0,
-   "attached_assets": []
+   "min_angle": -10,
+   "max_angle": 10,
+   "attached_assets": [],
+   "max_offset": [
+    260,
+    160
+   ]
   },
   {
    "id": "pelvis",
@@ -48,11 +52,15 @@
     600,
     800
    ],
-   "min_angle": -4,
-   "max_angle": 4,
+   "min_angle": -10,
+   "max_angle": 10,
    "attached_assets": [
     "pelvis_under",
     "pelvis"
+   ],
+   "max_offset": [
+    30,
+    30
    ]
   },
   {
@@ -67,15 +75,37 @@
     600,
     735
    ],
-   "min_angle": -5,
-   "max_angle": 5,
+   "min_angle": -12,
+   "max_angle": 12,
    "attached_assets": [
     "torso"
    ]
   },
   {
-   "id": "neck",
+   "id": "chest",
    "parent": "torso",
+   "rest_position": [
+    600,
+    560
+   ],
+   "rest_angle": 0,
+   "pivot": [
+    600,
+    560
+   ],
+   "min_angle": -10,
+   "max_angle": 10,
+   "attached_assets": [
+    "chest"
+   ],
+   "max_offset": [
+    16,
+    16
+   ]
+  },
+  {
+   "id": "neck",
+   "parent": "chest",
    "rest_position": [
     600,
     352
@@ -85,8 +115,8 @@
     600,
     352
    ],
-   "min_angle": -6,
-   "max_angle": 6,
+   "min_angle": -14,
+   "max_angle": 14,
    "attached_assets": [
     "neck"
    ]
@@ -103,19 +133,23 @@
     600,
     300
    ],
-   "min_angle": -10,
-   "max_angle": 10,
+   "min_angle": -22,
+   "max_angle": 22,
    "attached_assets": [
     "hair_back_base",
     "head",
     "hair_side_r",
     "hair_side_l",
     "hair_bangs"
+   ],
+   "max_offset": [
+    16,
+    16
    ]
   },
   {
    "id": "shoulder_r",
-   "parent": "torso",
+   "parent": "chest",
    "rest_position": [
     477,
     393
@@ -125,10 +159,14 @@
     477,
     393
    ],
-   "min_angle": -22,
-   "max_angle": 28,
+   "min_angle": -35,
+   "max_angle": 95,
    "attached_assets": [
     "upper_arm_r"
+   ],
+   "max_offset": [
+    26,
+    26
    ]
   },
   {
@@ -143,10 +181,14 @@
     425,
     650
    ],
-   "min_angle": -25,
-   "max_angle": 25,
+   "min_angle": -135,
+   "max_angle": 60,
    "attached_assets": [
     "lower_arm_r"
+   ],
+   "max_offset": [
+    12,
+    12
    ]
   },
   {
@@ -161,15 +203,15 @@
     314,
     885
    ],
-   "min_angle": -20,
-   "max_angle": 20,
+   "min_angle": -50,
+   "max_angle": 50,
    "attached_assets": [
     "hand_r"
    ]
   },
   {
    "id": "shoulder_l",
-   "parent": "torso",
+   "parent": "chest",
    "rest_position": [
     724,
     393
@@ -179,10 +221,14 @@
     724,
     393
    ],
-   "min_angle": -28,
-   "max_angle": 22,
+   "min_angle": -95,
+   "max_angle": 35,
    "attached_assets": [
     "upper_arm_l"
+   ],
+   "max_offset": [
+    26,
+    26
    ]
   },
   {
@@ -197,10 +243,14 @@
     775,
     650
    ],
-   "min_angle": -25,
-   "max_angle": 25,
+   "min_angle": -60,
+   "max_angle": 135,
    "attached_assets": [
     "lower_arm_l"
+   ],
+   "max_offset": [
+    12,
+    12
    ]
   },
   {
@@ -215,8 +265,8 @@
     882,
     885
    ],
-   "min_angle": -20,
-   "max_angle": 20,
+   "min_angle": -50,
+   "max_angle": 50,
    "attached_assets": [
     "hand_l"
    ]
@@ -233,10 +283,14 @@
     518,
     862
    ],
-   "min_angle": -4,
-   "max_angle": 12,
+   "min_angle": -22,
+   "max_angle": 30,
    "attached_assets": [
     "upper_leg_r"
+   ],
+   "max_offset": [
+    14,
+    14
    ]
   },
   {
@@ -251,8 +305,8 @@
     541,
     1238
    ],
-   "min_angle": -10,
-   "max_angle": 10,
+   "min_angle": -40,
+   "max_angle": 40,
    "attached_assets": [
     "lower_leg_r"
    ]
@@ -269,8 +323,8 @@
     521,
     1650
    ],
-   "min_angle": -12,
-   "max_angle": 12,
+   "min_angle": -30,
+   "max_angle": 30,
    "attached_assets": [
     "foot_r"
    ]
@@ -287,10 +341,14 @@
     682,
     862
    ],
-   "min_angle": -12,
-   "max_angle": 4,
+   "min_angle": -30,
+   "max_angle": 22,
    "attached_assets": [
     "upper_leg_l"
+   ],
+   "max_offset": [
+    14,
+    14
    ]
   },
   {
@@ -305,8 +363,8 @@
     651,
     1238
    ],
-   "min_angle": -10,
-   "max_angle": 10,
+   "min_angle": -40,
+   "max_angle": 40,
    "attached_assets": [
     "lower_leg_l"
    ]
@@ -323,8 +381,8 @@
     660,
     1650
    ],
-   "min_angle": -12,
-   "max_angle": 12,
+   "min_angle": -30,
+   "max_angle": 30,
    "attached_assets": [
     "foot_l"
    ]
@@ -341,8 +399,8 @@
     489,
     95
    ],
-   "min_angle": -8,
-   "max_angle": 8,
+   "min_angle": -25,
+   "max_angle": 25,
    "attached_assets": [
     "hair_tail_r"
    ]
@@ -359,10 +417,46 @@
     711,
     95
    ],
-   "min_angle": -8,
-   "max_angle": 8,
+   "min_angle": -25,
+   "max_angle": 25,
    "attached_assets": [
     "hair_tail_l"
+   ]
+  },
+  {
+   "id": "hair_side_r",
+   "parent": "head",
+   "rest_position": [
+    528,
+    127
+   ],
+   "rest_angle": 0,
+   "pivot": [
+    528,
+    127
+   ],
+   "min_angle": -14,
+   "max_angle": 14,
+   "attached_assets": [
+    "hair_side_r"
+   ]
+  },
+  {
+   "id": "hair_side_l",
+   "parent": "head",
+   "rest_position": [
+    676,
+    127
+   ],
+   "rest_angle": 0,
+   "pivot": [
+    676,
+    127
+   ],
+   "min_angle": -14,
+   "max_angle": 14,
+   "attached_assets": [
+    "hair_side_l"
    ]
   }
  ],
@@ -562,7 +656,7 @@
    "y": 121,
    "w": 79,
    "h": 245,
-   "bone": "head",
+   "bone": "hair_side_r",
    "group": "hair",
    "accent_mask": "hair/twin_tails_long/hair_side_r_accent.png"
   },
@@ -572,7 +666,7 @@
    "y": 121,
    "w": 74,
    "h": 244,
-   "bone": "head",
+   "bone": "hair_side_l",
    "group": "hair",
    "accent_mask": "hair/twin_tails_long/hair_side_l_accent.png"
   },
@@ -585,6 +679,15 @@
    "bone": "head",
    "group": "hair",
    "accent_mask": "hair/twin_tails_long/hair_bangs_accent.png"
+  },
+  "chest": {
+   "src": "body/chest.png",
+   "x": 438,
+   "y": 315,
+   "w": 328,
+   "h": 439,
+   "bone": "chest",
+   "group": "body"
   }
  },
  "draw_order": [
@@ -600,6 +703,7 @@
   "upper_leg_l",
   "pelvis",
   "torso",
+  "chest",
   "hand_r",
   "hand_l",
   "lower_arm_r",
@@ -622,6 +726,7 @@
   "upper_leg_l",
   "pelvis",
   "torso",
+  "chest",
   "hand_r",
   "hand_l",
   "lower_arm_r",
@@ -776,11 +881,11 @@
   "neck": "neck",
   "neck_side_r": "neck",
   "neck_side_l": "neck",
-  "shoulder_r": "torso",
-  "shoulder_l": "torso",
-  "bust": "torso",
-  "bust_side_r": "torso",
-  "bust_side_l": "torso",
+  "shoulder_r": "chest",
+  "shoulder_l": "chest",
+  "bust": "chest",
+  "bust_side_r": "chest",
+  "bust_side_l": "chest",
   "waist": "torso",
   "waist_side_r": "torso",
   "waist_side_l": "torso",
