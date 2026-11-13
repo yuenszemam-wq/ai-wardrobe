@@ -86,8 +86,9 @@ try {
   // 切換回 V2，再切換回來，原有設定恢復
   await page.click('[data-tab="look"]'); await page.click('[data-looktab="body"]');
   await page.click('[data-body="avatar_v2"]');
-  await page.waitForFunction(() => document.querySelector('[data-testid="dressing-room"]').dataset.model === "avatar_v2"); await ready();
-  check("切換回 Avatar V2", (await canvas()) === onV2);
+  await page.waitForFunction(() => document.querySelector('[data-testid="dressing-room"]').dataset.model === "avatar_v2");
+  await page.click('[data-tab="clothes"]'); await ready();
+  check("切換回 Avatar V2：畫面與原本相同", (await canvas()) === onV2);
 
   // ───── 姿勢庫 ─────
   await page.click('[data-tab="pose"]');
