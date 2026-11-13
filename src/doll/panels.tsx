@@ -1,14 +1,14 @@
 // 換裝頁底部面板：衣服、圖層（已穿衣物）、外貌、姿勢。面板保持矮小，角色始終可見。
 import { ReactNode, useMemo, useState } from "react";
 import { Pose, Rig, applyMat, boneMap, clampPose, jointPositions, samePose, solve } from "../../shared/avatarRig";
-import { BONE_LABEL, BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, FrontPart, HairConfig, HairPart, HAIR_LAYER_LABEL, HAIR_COLORS, NO_HAIR_ID, POSE_PRESETS, resolveHairColors, rgbToHex } from "../../shared/avatarV2";
+import { BONE_LABEL, BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, FrontPart, HairCat, HairConfig, HairPart, HAIR_CATS, HAIR_CAT_LABEL, HAIR_COLORS, NO_HAIR_ID, POSE_PRESETS, hairCatOf, hairPartName, refUrl, resolveHairColors, rgbToHex } from "../../shared/avatarV2";
 import { ATTACHABLE_BONES, FOLLOWS, Follow, SLEEVE_ROT_LIMIT, SLOT_LABEL, SLOT_SKIN, WearOpts } from "../../shared/doll";
 import { Garment, displayName, imageUrl } from "../api";
 import { IconClose, IconEye, IconEyeOff, IconGrip, IconPencil, IconPlus, IconSearch, IconTrash } from "../components/icons";
 import { SortableList } from "../components/Sortable";
 import { TransparentImage } from "../components/TransparentImage";
 import { RigInfo } from "../../shared/garmentMesh";
-import { Appearance, BUILTIN_THUMB, Resolved, addHairParts, hairOf } from "./model";
+import { Appearance, BUILTIN_THUMB, Resolved, wearHairPart } from "./model";
 import { DRAG_MODES, DragMode, PoseControl, REGIONS, Region, adjustable, jointLabel, jointTitle, regionBones, regionOf } from "../../shared/poseControls";
 
 export const pill = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[12.5px] ${on ? "chip-on" : "chip"}`;
@@ -372,19 +372,27 @@ const AddCard = ({ label, onClick, testid }: { label: string; onClick: () => voi
   </button>
 );
 export type LookTab = "hair" | "color" | "head";
-export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, onEdit, hair, selectedHair, onSelectHair, hairTool, setHairTool, onHairPatch, onSaveHair, busy }: { tab: LookTab; setTab: (t: LookTab) => void; value: Appearance; onChange: (v: Appearance) => void; assets: DollAsset[]; onNew: (kind: "hair" | "head") => void; onEdit: (a: DollAsset) => void; hair: HairConfig|null; selectedHair:string|null; onSelectHair:(id:string|null)=>void; hairTool:"place"|"mesh"; setHairTool:(t:"place"|"mesh")=>void; onHairPatch:(id:string,patch:Partial<HairPart>)=>void; onSaveHair:()=>void; busy:boolean }) {
-  const hairs = [...BUILTIN_HAIRS, ...assets.filter((a) => a.kind === "hair")];
+export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, onEdit, hair, selectedHair, onSelectHair, hairTool, setHairTool, onHairPatch, onSaveHair, busy, onSaveHairDefault, onAutoPlace }: { tab: LookTab; setTab: (t: LookTab) => void; value: Appearance; onChange: (v: Appearance) => void; assets: DollAsset[]; onNew: (kind: "hair" | "head", cat?: HairCat) => void; onEdit: (a: DollAsset) => void; hair: HairConfig|null; selectedHair:string|null; onSelectHair:(id:string|null)=>void; hairTool:"place"|"mesh"; setHairTool:(t:"place"|"mesh")=>void; onHairPatch:(id:string,patch:Partial<HairPart>)=>void; onSaveHair:()=>void; busy:boolean; onSaveHairDefault: (id: string) => void; onAutoPlace: (id: string) => void }) {
+  const hairs = useMemo(() => [...BUILTIN_HAIRS, ...assets.filter((a) => a.kind === "hair")], [assets]);
   const heads = [...BUILTIN_HEADS, ...assets.filter((a) => a.kind === "head")];
   const resolved = resolveHairColors(value.hair_color, value.accent_color);
   const preset = HAIR_COLORS.find((c) => c.id === value.hair_color && !value.accent_color);
-  const cats = [...new Set(hairs.map((h) => h.category).filter(Boolean))] as string[];
-  const [cat, setCat] = useState("");
-  const [source,setSource]=useState("");
-  const sourceHair=hairs.find(h=>h.id===source);
-  const current=hair?.parts??[];
-  const selected=current.find(p=>p.id===selectedHair);
-  const changeParts=(parts:HairPart[])=>onChange({...value,hair_config:{...hair,parts}});
-  const add=(parts:HairPart[])=>{const next=addHairParts(hair,parts);onChange({...value,hair_config:next});if(next.parts.length>current.length)onSelectHair(next.parts[next.parts.length-1].id);};
+  const [hcat, setHcat] = useState<string>("set");
+  const [extra, setExtra] = useState(false);
+  const current = hair?.parts ?? [];
+  const selected = current.find((p) => p.id === selectedHair);
+  const changeParts = (parts: HairPart[]) => onChange({ ...value, hair_config: { parts, ref_luma: hair?.ref_luma ?? null } });
+  // 所有素材內的髮件（按分類揀選）；同一張圖只列一次
+  const pieces = useMemo(() => {
+    const seen = new Set<string>(), out: { key: string; src: string; part: HairPart; cat: HairCat; name: string }[] = [];
+    for (const h of hairs) for (const p of (h.config as HairConfig).parts) {
+      if (seen.has(p.file)) continue;
+      seen.add(p.file);
+      const single = (h.config as HairConfig).parts.length === 1;
+      out.push({ key: h.id + "/" + p.id, src: h.id, part: p, cat: hairCatOf(p), name: single && h.name && !/^(新髮型|我的髮型)$/.test(h.name) ? h.name : hairPartName(p) });
+    }
+    return out;
+  }, [hairs]);
   const Swatch = ({ label, value: v, fallback, onPick, onClear, testid }: { label: string; value: string | null; fallback: string; onPick: (hex: string) => void; onClear?: () => void; testid: string }) => (
     <label className="chip relative flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2.5 py-2">
       <span className="h-7 w-7 shrink-0 rounded-lg border border-white/40" style={{ background: v ?? fallback }} />
@@ -397,23 +405,82 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
     <div className="flex h-full flex-col" data-testid="appearance-panel">
       <Row className="pb-2">
         {([["hair", "髮型"], ["color", "髮色"], ["head", "頭部"]] as [LookTab, string][]).map(([t, label]) => <button key={t} type="button" data-looktab={t} onClick={() => setTab(t)} className={pill(tab === t)}>{label}</button>)}
-        {tab === "hair" && cats.length > 1 && <span className="mx-1 w-px shrink-0 self-stretch bg-gold/30" />}
-        {tab === "hair" && cats.length > 1 && ["", ...cats].map((c) => <button key={c || "all"} type="button" onClick={() => setCat(c)} className={pill(cat === c)}>{c || "全部"}</button>)}
       </Row>
       <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2">
         {tab === "hair" && (<>
-          <p className="py-1 text-[11px] text-mauve">單件髮型直接加入；整套髮型可快速套用。也可從素材庫逐件混搭。</p>
-          <Row className="pb-1 pt-1" >
-            <AddCard label="新增髮型" testid="add-hair" onClick={() => onNew("hair")} />
-            {hairs.filter((h) => !cat || h.category === cat).map((h) => <AssetCard key={h.id} a={h} on={!value.hair_config && value.hair === h.id} onPick={() => {const parts=(h.config as HairConfig).parts; if(parts.length===1)add(parts);else {onChange({...value,hair:h.id,hair_config:null});onSelectHair(null);}}} onEdit={h.builtin ? undefined : () => onEdit(h)} />)}
-            <AssetCard a={{ id: NO_HAIR_ID, name: "不戴頭髮" }} on={!current.length} onPick={() => {onChange({ ...value, hair: NO_HAIR_ID,hair_config:null });onSelectHair(null);}} />
+          <Row className="pb-1.5" >
+            {([["set", "整套"], ...HAIR_CATS.map((c) => [c.id, c.label])] as [string, string][]).map(([c, label]) => <button key={c} type="button" data-hair-cat={c} aria-pressed={hcat === c} onClick={() => setHcat(c)} className={pill(hcat === c)}>{label}{c !== "set" && current.some((p) => hairCatOf(p) === c) ? " ●" : ""}</button>)}
           </Row>
-          <H>逐件加入髮件</H><select aria-label="選擇髮型來源" data-testid="hair-source" value={source} onChange={e=>setSource(e.target.value)} className="w-full rounded-lg bg-velvet p-2"><option value="">選擇素材</option>{hairs.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select>
-          {sourceHair&&<div className="mt-1 flex flex-wrap gap-1">{(sourceHair.config as HairConfig).parts.map(p=><button type="button" key={p.id} data-add-hair-part={p.id} disabled={current.length>=16} className="chip rounded-full px-3 py-1.5" onClick={()=>add([p])}>＋{p.label}</button>)}</div>}
-          <H>已使用髮件（{current.length}/16）</H>
-          <div className="space-y-1" data-testid="worn-hair-parts">{current.map((p,i)=><div key={p.id} className="flex items-center gap-1 rounded-xl bg-white/5 p-1.5"><button type="button" data-worn-hair={p.id} className={pill(selectedHair===p.id)} onClick={()=>onSelectHair(p.id)}>{p.label}</button><span className="flex-1 text-[10px] text-mauve">{HAIR_LAYER_LABEL[p.layer]}</span><button type="button" aria-label={p.hidden?"顯示髮件":"隱藏髮件"} className="chip rounded-full p-1.5" onClick={()=>onHairPatch(p.id,{hidden:!p.hidden})}>{p.hidden?<IconEyeOff/>:<IconEye/>}</button><button type="button" aria-label="髮件上移" disabled={i===0} className="chip rounded-full px-2 py-1" onClick={()=>{const a=[...current];[a[i-1],a[i]]=[a[i],a[i-1]];changeParts(a);}}>↑</button><button type="button" aria-label="髮件下移" disabled={i===current.length-1} className="chip rounded-full px-2 py-1" onClick={()=>{const a=[...current];[a[i+1],a[i]]=[a[i],a[i+1]];changeParts(a);}}>↓</button><button type="button" aria-label="移除髮件" className="chip rounded-full p-1.5" onClick={()=>{changeParts(current.filter(q=>q.id!==p.id));if(selectedHair===p.id)onSelectHair(null);}}><IconClose/></button></div>)}</div>
-          {selected&&<div className="mt-2 rounded-xl bg-white/5 p-2"><div className="flex flex-wrap gap-1"><button type="button" className={pill(hairTool==="place")} onClick={()=>setHairTool("place")}>位置</button><button type="button" data-testid="hair-mesh" className={pill(hairTool==="mesh")} onClick={()=>setHairTool("mesh")}>變形</button><button type="button" className="chip rounded-full px-3" onClick={()=>onHairPatch(selected.id,{mesh:undefined})}>重設變形</button></div><p className="py-1 text-[11px] text-mauve">在角色上拖動髮件或網格；雙指縮放人物。</p><div className="flex flex-wrap gap-1">{(["back","mid","front"] as const).map(l=><button type="button" key={l} className={pill(selected.layer===l)} onClick={()=>onHairPatch(selected.id,{layer:l})}>{HAIR_LAYER_LABEL[l]}</button>)}<button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{w:selected.w*1.03})}>加闊</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{w:selected.w/1.03})}>收窄</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{h:selected.h*1.03})}>拉長</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{h:selected.h/1.03})}>縮短</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onSelectHair(null)}>完成</button></div></div>}
-          {current.length>0&&<button type="button" data-testid="save-hair-combo" disabled={busy} onClick={onSaveHair} className="btn-jewel mt-2 w-full rounded-full py-2">保存目前髮件為新髮型</button>}
+          {hcat === "set" ? (
+            <>
+              <Row className="pb-1 pt-1">
+                <AddCard label="新增髮型" testid="add-hair" onClick={() => onNew("hair")} />
+                {hairs.map((h) => <AssetCard key={h.id} a={h} on={!value.hair_config && value.hair === h.id} onPick={() => { onChange({ ...value, hair: h.id, hair_config: null }); onSelectHair(null); }} onEdit={h.builtin ? undefined : () => onEdit(h)} />)}
+                <AssetCard a={{ id: NO_HAIR_ID, name: "不戴頭髮" }} on={!current.length} onPick={() => { onChange({ ...value, hair: NO_HAIR_ID, hair_config: null }); onSelectHair(null); }} />
+              </Row>
+              <p className="pt-1 text-[11px] leading-snug text-mauve">整套髮型一次加入所有髮件。想逐件混搭，按上面的分類（瀏海、後髮…）揀選；同一分類會互相替換。</p>
+            </>
+          ) : (
+            <>
+              <Row className="pb-1 pt-1">
+                <AddCard label={`新增${HAIR_CAT_LABEL[hcat as HairCat]}`} testid="add-hair-part" onClick={() => onNew("hair", hcat as HairCat)} />
+                {pieces.filter((x) => x.cat === hcat).map((x) => {
+                  const worn = current.find((p) => p.file === x.part.file);
+                  return (
+                    <div key={x.key} className="relative w-[74px] shrink-0">
+                      <button type="button" data-hair-piece={x.key} aria-pressed={!!worn} onClick={() => { if (worn) onSelectHair(worn.id); else { const r = wearHairPart(hair, { ...x.part, src: x.src }, extra); onChange({ ...value, hair_config: r.config }); onSelectHair(r.id); } }} className="block w-full">
+                        <div className={`arch arch-base relative aspect-[3/4] ${worn ? "outline-2 outline-offset-1 outline-gold-soft" : ""}`}>
+                          <img src={refUrl(x.part.file)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain px-[10%] pb-[8%] pt-[16%]" />
+                        </div>
+                        <div className="truncate pt-1 text-center text-[10.5px]">{x.name}</div>
+                      </button>
+                      {worn && <span className="btn-jewel absolute -left-0.5 -top-0.5 grid h-5 w-5 place-items-center rounded-full text-[10px]">✓</span>}
+                      {worn && <button type="button" aria-label={`取下 ${x.name}`} data-hair-off={x.key} onClick={() => { changeParts(current.filter((p) => p.id !== worn.id)); if (selectedHair === worn.id) onSelectHair(null); }} className="btn-dark absolute -right-0.5 -top-0.5 grid h-6 w-6 place-items-center rounded-full text-[10px]"><IconClose /></button>}
+                    </div>
+                  );
+                })}
+              </Row>
+              <label className="mt-1 flex items-center gap-2 text-[11.5px]"><input type="checkbox" data-testid="hair-extra" checked={extra} onChange={(e) => setExtra(e.target.checked)} />加入額外髮件（不替換同一分類）</label>
+            </>
+          )}
+          {current.length > 0 && (
+            <>
+              <H>正在使用的髮件（{current.length}）</H>
+              <div className="space-y-1" data-testid="worn-hair-parts">{current.map((p, i) => (
+                <div key={p.id} className={`flex items-center gap-1 rounded-xl p-1 ${selectedHair === p.id ? "bg-gold/20" : "bg-white/5"}`}>
+                  <button type="button" data-worn-hair={p.id} onClick={() => onSelectHair(selectedHair === p.id ? null : p.id)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+                    <img src={refUrl(p.file)} alt="" className="h-7 w-7 shrink-0 rounded-md bg-cream/80 object-contain" />
+                    <span className="min-w-0"><span className="block truncate text-[12px]">{hairPartName(p)}</span><span className="block text-[10px] text-mauve">{HAIR_CAT_LABEL[hairCatOf(p)]}｜{p.layer === "front" ? "臉前面" : p.layer === "mid" ? "衣服前面" : "身體後面"}</span></span>
+                  </button>
+                  <button type="button" aria-label={p.hidden ? "顯示髮件" : "隱藏髮件"} className="chip grid h-7 w-7 place-items-center rounded-full text-[12px]" onClick={() => onHairPatch(p.id, { hidden: !p.hidden })}>{p.hidden ? <IconEyeOff /> : <IconEye />}</button>
+                  <button type="button" aria-label="髮件上移" disabled={i === 0} className="chip h-7 rounded-full px-2 text-[11px] disabled:opacity-30" onClick={() => { const a = [...current]; [a[i - 1], a[i]] = [a[i], a[i - 1]]; changeParts(a); }}>↑</button>
+                  <button type="button" aria-label="髮件下移" disabled={i === current.length - 1} className="chip h-7 rounded-full px-2 text-[11px] disabled:opacity-30" onClick={() => { const a = [...current]; [a[i + 1], a[i]] = [a[i], a[i + 1]]; changeParts(a); }}>↓</button>
+                  <button type="button" aria-label="移除髮件" className="chip grid h-7 w-7 place-items-center rounded-full text-[11px]" onClick={() => { changeParts(current.filter((x) => x.id !== p.id)); if (selectedHair === p.id) onSelectHair(null); }}><IconClose /></button>
+                </div>
+              ))}</div>
+              {selected && (
+                <div className="mt-2 rounded-xl bg-white/5 p-2" data-testid="hair-editor">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11.5px] text-gold-soft">編輯：{hairPartName(selected)}</span>
+                    <button type="button" className={pill(hairTool === "place")} onClick={() => setHairTool("place")}>位置</button>
+                    <button type="button" data-testid="hair-mesh" className={pill(hairTool === "mesh")} onClick={() => setHairTool("mesh")}>變形</button>
+                    <button type="button" disabled={!selected.mesh} className="chip rounded-full px-3 py-1.5 disabled:opacity-40" onClick={() => onHairPatch(selected.id, { mesh: undefined })}>重設變形</button>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-mauve">分類</span>
+                    <select aria-label="髮件分類" data-testid="hair-part-cat" value={hairCatOf(selected)} onChange={(e) => onHairPatch(selected.id, { cat: e.target.value as HairCat })} className="rounded-full bg-velvet px-2 py-1 text-[12px]">{HAIR_CATS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>
+                    {(["back", "mid", "front"] as const).map((l) => <button type="button" key={l} className={pill(selected.layer === l)} onClick={() => onHairPatch(selected.id, { layer: l })}>{l === "front" ? "臉前面" : l === "mid" ? "衣服前面" : "身體後面"}</button>)}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <button type="button" data-testid="hair-autoplace" className="chip rounded-full px-3 py-1.5" onClick={() => onAutoPlace(selected.id)}>自動對準頭部</button>
+                    {selected.src && !selected.src.startsWith("builtin:") && <button type="button" data-testid="hair-save-default" disabled={busy} className="chip rounded-full px-3 py-1.5" onClick={() => onSaveHairDefault(selected.id)}>存為這件髮件的預設位置</button>}
+                  </div>
+                  <p className="pt-1 text-[11px] leading-snug text-mauve">在角色上拖動髮件；右下角把手縮放，上方把手旋轉。雙指只放大畫面。</p>
+                </div>
+              )}
+              <button type="button" data-testid="save-hair-combo" disabled={busy} onClick={onSaveHair} className="btn-jewel mt-2 w-full rounded-full py-2">保存目前組合為新髮型</button>
+            </>
+          )}
         </>)}
         {tab === "color" && (
           <>

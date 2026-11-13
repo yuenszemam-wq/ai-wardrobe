@@ -1,10 +1,10 @@
 // 角色素材編輯面板：新增／修改頭部及髮型。在角色身上直接拖動、縮放校正位置，角色保持可見。
 import { useRef } from "react";
-import { HAIR_LAYER_LABEL, HairLayer, HairPart } from "../../shared/avatarV2";
+import { HAIR_CATS, HAIR_CAT_BONE, HAIR_CAT_LAYER, HAIR_LAYER_LABEL, HairCat, HairLayer, HairPart, hairCatOf, hairPartName, placeHairPart } from "../../shared/avatarV2";
 import { IconChevronDown, IconChevronUp, IconPlus, IconTrash } from "../components/icons";
 import { pill } from "./panels";
 
-export interface Draft { id: string; isNew: boolean; kind: "hair" | "head"; name: string; category: string; parts: HairPart[]; sel: string | null }
+export interface Draft { id: string; isNew: boolean; kind: "hair" | "head"; name: string; category: string; parts: HairPart[]; sel: string | null; /** 新上傳的髮件預設分類（由分類入口新增時） */ cat?: HairCat }
 const LAYERS: HairLayer[] = ["back", "mid", "front"];
 
 export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, onDelete, hairTool, setHairTool }: { draft: Draft; setDraft: (d: Draft) => void; busy: boolean; onFiles: (files: File[]) => void; onSave: () => void; onCancel: () => void; onDelete: () => void; hairTool:"place"|"mesh"; setHairTool:(t:"place"|"mesh")=>void }) {
@@ -32,7 +32,7 @@ export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, o
         <input ref={input} type="file" accept="image/png,image/webp" multiple={hair} hidden data-testid="asset-file" onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ""; if (f.length) onFiles(f); }} />
         <div className="scrollbar-none -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-2">
           <button type="button" disabled={busy} onClick={() => input.current?.click()} className="chip flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5"><IconPlus className="text-[12px]" />{busy ? "處理中…" : hair ? "加入透明圖（可多選）" : draft.parts.length ? "更換透明圖" : "選擇透明頭部圖"}</button>
-          {hair && draft.parts.map((p) => <button key={p.id} type="button" data-part={p.id} onClick={() => setDraft({ ...draft, sel: p.id })} className={pill(draft.sel === p.id)}>{p.label}</button>)}
+          {hair && draft.parts.map((p) => <button key={p.id} type="button" data-part={p.id} onClick={() => setDraft({ ...draft, sel: p.id })} className={pill(draft.sel === p.id)}>{hairPartName(p)}</button>)}
         </div>
         {!draft.parts.length && <p className="py-3 text-[11.5px] leading-relaxed text-mauve">{hair ? "上傳透明背景的髮型圖。只有一張圖也可以；有拆件（後髮、瀏海、側髮、馬尾…）的話可一次選多張，各自設定在身體前面或後面。" : "上傳透明背景的頭部圖（臉、妝容或表情）。頭部獨立於頭髮和身體，可隨時更換。"}上傳後在角色身上拖動及縮放，對好位置再儲存。</p>}
         {part && (
@@ -53,6 +53,11 @@ export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, o
             {hair && (
               <>
                 <div className="mt-2 flex gap-1"><button type="button" className={pill(hairTool==="place")} onClick={()=>setHairTool("place")}>位置</button><button type="button" className={pill(hairTool==="mesh")} onClick={()=>setHairTool("mesh")}>變形</button><button type="button" className="chip rounded-full px-3" onClick={()=>patch(part.id,{mesh:undefined})}>重設變形</button></div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="part-cat">
+                  <span className="text-[11px] text-mauve">分類</span>
+                  <select aria-label="髮件分類" data-testid="asset-part-cat" value={hairCatOf(part)} onChange={(e) => { const cat = e.target.value as HairCat; patch(part.id, { cat, layer: HAIR_CAT_LAYER[cat], ...(HAIR_CAT_BONE[cat] && part.bone !== "own" ? { bone: HAIR_CAT_BONE[cat]! } : {}), ...(/^(髮束|瀏海|後髮|左側髮|右側髮|左馬尾|右馬尾|髮尾|其他)$/.test(part.label) || hairPartName(part) !== part.label ? { label: HAIR_CATS.find((c) => c.id === cat)!.label } : {}) }); }} className="rounded-full bg-velvet px-2 py-1 text-[12px]">{HAIR_CATS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>
+                  <button type="button" data-testid="asset-autoplace" onClick={() => patch(part.id, { ...placeHairPart(hairCatOf(part), part.h / part.w), rotation: undefined, mesh: undefined })} className="chip rounded-full px-3 py-1">按分類對準頭部</button>
+                </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="part-layer">
                   <span className="text-[11px] text-mauve">位置</span>
                   {LAYERS.map((l) => <button key={l} type="button" data-layer={l} onClick={() => patch(part.id, { layer: l })} className={pill(part.layer === l)}>{HAIR_LAYER_LABEL[l]}</button>)}

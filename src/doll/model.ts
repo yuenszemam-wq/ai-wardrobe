@@ -1,4 +1,5 @@
 // 換裝頁的資料模型：衣物預設（template）、造型內的個別調整、舊造型轉換，以及相關 API。
+import { HairPart, hairCatOf } from "../../shared/avatarV2";
 import { BUILTIN_HAIRS, BUILTIN_HAIR_ID, BUILTIN_HEADS, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairConfig, HeadConfig, NO_HAIR_ID, RIG_V2, normalizeColorValue, normalizeHairConfig, normalizeHeadConfig } from "../../shared/avatarV2";
 import { Pose, normalizePose } from "../../shared/avatarRig";
 import { Content, Fit, LEGACY_AVATAR, LookItem, LookState, Slot, TemplateData, WearOpts, convertLegacyFit, defaultFit, defaultOpts, isSlot, normalizeFit, slotFor } from "../../shared/doll";
@@ -42,6 +43,19 @@ export function addHairParts(config: HairConfig | null, parts: HairConfig["parts
   const used = new Set(existing.map(p=>p.id));
   const added=parts.slice(0,Math.max(0,16-existing.length)).map(p=>{let id=p.id; for(let i=1;used.has(id);i++) id=p.id.slice(0,20)+"_"+i;used.add(id);return {...p,id};});
   return {parts:[...existing,...added],ref_luma:config?.ref_luma??null};
+}
+/**
+ * 像換裝遊戲一樣穿上一件髮件：預設替換同一分類的髮件（例如新瀏海取代舊瀏海），其他髮件不變。
+ * 已經穿著同一張圖時不會重複加入（回傳 already）。extra＝加入額外髮件（不替換）。
+ */
+export function wearHairPart(config: HairConfig | null, part: HairPart, extra = false): { config: HairConfig; id: string; already: boolean } {
+  const cur = config?.parts ?? [];
+  const same = cur.find((p) => p.file === part.file && !extra);
+  if (same) return { config: config!, id: same.id, already: true };
+  const cat = hairCatOf(part);
+  const kept = extra ? cur : cur.filter((p) => hairCatOf(p) !== cat);
+  const next = addHairParts({ parts: kept, ref_luma: config?.ref_luma ?? null }, [{ ...part, cat }]);
+  return { config: next, id: next.parts[next.parts.length - 1].id, already: false };
 }
 export function headOf(assets: DollAsset[], id: string): HeadConfig {
   const a = assets.find((x) => x.id === id && x.kind === "head") ?? BUILTIN_HEADS[0];

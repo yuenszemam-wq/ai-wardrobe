@@ -4,7 +4,7 @@ import { PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRe
 import { Pose, applyMat, boneMap, clampPose, invert, matAngle, samePose, solve } from "../../shared/avatarRig";
 import { Camera, FULL_CAMERA, Rect, Size, VIEW_PRESETS, ZOOM, boundsOf, frame, zoomAt, zoomTo } from "../../shared/camera";
 import { DragMode, Region, controlsFor, poseControls, regionBones } from "../../shared/poseControls";
-import { BUILTIN_HAIR_ID, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairConfig, HairPart, refUrl, POSE_PRESETS, hairBoneId, hexToRgb, resolveHairColors, rigFor } from "../../shared/avatarV2";
+import { BUILTIN_HAIR_ID, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairCat, HairConfig, HairPart, HAIR_CAT_BONE, HAIR_CAT_LABEL, HAIR_CAT_LAYER, hairCatOf, placeHairPart, refUrl, POSE_PRESETS, hairBoneId, hexToRgb, resolveHairColors, rigFor } from "../../shared/avatarV2";
 import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, SLOT_SKIN, fitHeight, LookState, SLEEVE_ROT_LIMIT, SY_LIMIT, insertIndex, layeringHints, normalizeFit, normalizeTemplateData, sameFit, defaultFit, Variant, WearOpts } from "../../shared/doll";
 import { poseDistance, suggestSleeveRot } from "../../shared/garmentMesh";
 import { api, Garment } from "../api";
@@ -13,7 +13,7 @@ import { Spinner, toast } from "../components/ui";
 import { AssetPanel, Draft } from "../doll/AssetPanel";
 import { Analysis, analyze, canvasBlob, loadImage, prepareAsset } from "../doll/content";
 import { DollRenderer, Scene, flatLocate, flatRect, mainBone } from "../doll/engine";
-import { Appearance, DEFAULT_APPEARANCE, GarmentLite, Resolved, Template, Templates, Worn, fetchLook, fetchTemplates, addHairParts, hairOf, headOf, imageOf, resolve, sceneItem, userAsset, wornFor } from "../doll/model";
+import { Appearance, DEFAULT_APPEARANCE, GarmentLite, Resolved, Template, Templates, Worn, fetchLook, fetchTemplates, addHairParts, wearHairPart, hairOf, headOf, imageOf, resolve, sceneItem, userAsset, wornFor } from "../doll/model";
 import { AppearancePanel, ClothesPanel, FitDelta, FitPanel, FitTool, GarmentView, WearMode, wearMode, LayersPanel, LookTab, MaskTool, PartTool, PosePanel, PoseTab, SkeletonMode } from "../doll/panels";
 import { PaintPhase, Selection, Stage, StageMode } from "../doll/Stage";
 import { navigate } from "../router";
@@ -30,6 +30,17 @@ const MASK_W = 256;
 interface EditBuf { kind: "mask" | "parts"; key: string; w: number; h: number; data: Uint8ClampedArray; ready: boolean; committed: string | null; last: [number, number] | null; dirty: boolean; at: number; /** 這一筆開始前的內容（第二根手指落下時用來作廢這一筆） */ backup: Uint8ClampedArray | null }
 type PanelSize = "mini" | "mid" | "max";
 interface Snap { worn: Worn[]; pose: Pose; front: FrontPart[]; look: Appearance }
+
+/** 按檔名及形狀估計髮件分類（使用者之後可以更改） */
+function guessHairCat(name: string, ar: number, small?: boolean): HairCat {
+  const n = name.toLowerCase();
+  if (/瀏海|劉海|bang|fringe|front/.test(n)) return "bangs";
+  if (/馬尾|tail/.test(n)) return /左|_l\b|left/.test(n) ? "tail_l" : "tail_r";
+  if (/側|side/.test(n)) return /左|_l\b|left/.test(n) ? "side_l" : "side_r";
+  if (/後|back/.test(n)) return "back";
+  if (/髮尾|tip/.test(n)) return "tip";
+  return small ?? ar < 1.15 ? "bangs" : "back";
+}
 
 export default function DressingRoom({ id }: { id?: string }) {
   const renderer = useMemo(() => new DollRenderer(), []);
@@ -487,11 +498,11 @@ export default function DressingRoom({ id }: { id?: string }) {
   }
 
   // ───── 角色素材（頭部／髮型） ─────
-  async function newAsset(kind: "hair" | "head") {
+  async function newAsset(kind: "hair" | "head", cat?: HairCat) {
     setBusy(true);
     try {
       const a = await api<{ id: string; name: string }>("/api/doll/assets", { method: "POST", json: { kind, name: kind === "hair" ? "新髮型" : "新頭部" } });
-      setDraft({ id: a.id, isNew: true, kind, name: "", category: "", parts: [], sel: null }); setHairTool("place");
+      setDraft({ id: a.id, isNew: true, kind, name: "", category: cat ? HAIR_CAT_LABEL[cat] : "", parts: [], sel: null, cat }); setHairTool("place");
       setSelected(null);
       setViewKey("upper");
       if (panel === "mini") setPanel("mid");
@@ -518,13 +529,19 @@ export default function DressingRoom({ id }: { id?: string }) {
           part = { id: "head", label: "頭部", layer: "front", bone: "head", file: up.ref, x: 601 - w / 2, y: 36, w, h };
           d = { ...d, parts: [part], sel: "head" };
         } else {
-          // 同一組拆件通常畫在相同的畫布上：整張畫布按頭部比例縮放後置中，各部件的相對位置自動保持。
-          // 第一張圖的頂部對齊頭頂稍上的位置；之後加入的部件沿用同一個畫布位置。
-          const k = 450 / Math.max(p.sourceW, 1);
-          if (!hairFrame.current || hairFrame.current.id !== d.id) hairFrame.current = { id: d.id, y0: 12 - p.box.y0 * p.sourceH * k };
-          const w = (p.box.x1 - p.box.x0) * p.sourceW * k;
           const pid = "p" + Math.random().toString(36).slice(2, 8);
-          part = { id: pid, label: f.name.replace(/\.[^.]+$/, "").slice(0, 12) || "髮束", layer: w * ar < 330 ? "front" : "back", bone: "head", file: up.ref, x: 601 - 225 + p.box.x0 * p.sourceW * k, y: hairFrame.current.y0 + p.box.y0 * p.sourceH * k, w, h: w * ar };
+          if (d.cat || files.length === 1) {
+            // 單件髮件：按分類自動放到頭上（圖片已裁走透明留白，髮根＝圖片頂部）
+            const cat: HairCat = d.cat ?? guessHairCat(f.name, ar);
+            part = { id: pid, label: HAIR_CAT_LABEL[cat], cat, layer: HAIR_CAT_LAYER[cat], bone: HAIR_CAT_BONE[cat] ?? "head", file: up.ref, ...placeHairPart(cat, ar) };
+          } else {
+            // 一次上傳多張：通常是同一張畫布拆出來的部件，整張畫布按頭部比例縮放後置中，各部件的相對位置自動保持
+            const k = 450 / Math.max(p.sourceW, 1);
+            if (!hairFrame.current || hairFrame.current.id !== d.id) hairFrame.current = { id: d.id, y0: 12 - p.box.y0 * p.sourceH * k };
+            const w = (p.box.x1 - p.box.x0) * p.sourceW * k;
+            const cat = guessHairCat(f.name, ar, w * ar < 330);
+            part = { id: pid, label: HAIR_CAT_LABEL[cat], cat, layer: HAIR_CAT_LAYER[cat], bone: HAIR_CAT_BONE[cat] ?? "head", file: up.ref, x: 601 - 225 + p.box.x0 * p.sourceW * k, y: hairFrame.current.y0 + p.box.y0 * p.sourceH * k, w, h: w * ar };
+          }
           d = { ...d, parts: [...d.parts, part], sel: pid };
         }
         setDraft(d);
@@ -536,7 +553,7 @@ export default function DressingRoom({ id }: { id?: string }) {
     setBusy(true);
     try {
       const round = (p: HairPart) => ({ ...p, x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, w: Math.round(p.w * 10) / 10, h: Math.round(p.h * 10) / 10 });
-      const parts = draft.parts.map(round);
+      const parts = draft.parts.map(round).map((p) => (draft.kind === "hair" ? { ...p, cat: hairCatOf(p) } : p));
       const config = draft.kind === "hair" ? { parts } : { file: parts[0].file, x: parts[0].x, y: parts[0].y, w: parts[0].w, h: parts[0].h };
       await api(`/api/doll/assets/${draft.id}`, { method: "PATCH", json: { name: draft.name.trim() || (draft.kind === "hair" ? "我的髮型" : "我的頭部"), category: draft.category.trim() || null, config } });
       // 縮圖：把各部件按位置合成
@@ -551,7 +568,13 @@ export default function DressingRoom({ id }: { id?: string }) {
         await api(`/api/doll/assets/${draft.id}/thumb`, { method: "PUT", body: await canvasBlob(c, "image/png"), headers: { "content-type": "image/png" } });
       } catch { /* 縮圖失敗不影響素材 */ }
       await loadAssets();
-      if(draft.kind==="hair"){if(draft.isNew&&parts.length===1){const next=addHairParts(hairOf(assets,look.hair,look.hair_config),parts);editLook({...look,hair_config:next});}else editLook({...look,hair:draft.id,hair_config:null});} else editLook({...look,head:draft.id});
+      if (draft.kind === "hair") {
+        if (draft.isNew && parts.length === 1) {
+          // 新增的單件髮件：像換裝一樣穿上，替換同一分類（例如舊瀏海），其他髮件不變
+          const r = wearHairPart(hairOf(assets, look.hair, look.hair_config), { ...parts[0], src: draft.id });
+          editLook({ ...look, hair_config: r.config });
+        } else editLook({ ...look, hair: draft.id, hair_config: null });
+      } else editLook({ ...look, head: draft.id });
       setDraft(null);
       toast(draft.kind === "hair" ? "已儲存髮型，並套用到角色" : "已儲存頭部，並套用到角色");
     } catch (e) { toast((e as Error).message, "err"); } finally { setBusy(false); }
@@ -574,6 +597,22 @@ export default function DressingRoom({ id }: { id?: string }) {
     } catch (e) { toast((e as Error).message, "err"); } finally { setBusy(false); }
   }
 
+  /** 把造型內校正好的髮件位置存回該髮件素材，以後每次選用都使用這個位置 */
+  async function saveHairDefault(id: string) {
+    const p = hair?.parts.find((x) => x.id === id);
+    const a = p?.src ? assets.find((x) => x.id === p.src && x.kind === "hair") : null;
+    if (!p || !a) return toast("這件髮件不是來自你上傳的素材", "err");
+    setBusy(true);
+    try {
+      const cfg = a.config as HairConfig;
+      const keep = { x: p.x, y: p.y, w: p.w, h: p.h, rotation: p.rotation, mesh: p.mesh, layer: p.layer, cat: hairCatOf(p), bone: p.bone, pivot: p.pivot, range: p.range };
+      const parts = cfg.parts.map((q) => (q.file === p.file ? { ...q, ...keep } : q));
+      await api(`/api/doll/assets/${a.id}`, { method: "PATCH", json: { name: a.name, category: a.category, config: { ...cfg, parts } } });
+      await loadAssets();
+      toast("已存為這件髮件的預設位置");
+    } catch (e) { toast((e as Error).message, "err"); } finally { setBusy(false); }
+  }
+  const autoPlaceHair = (id: string) => { const p = hair?.parts.find((x) => x.id === id); if (p) patchHair(id, { ...placeHairPart(hairCatOf(p), p.h / p.w), rotation: undefined, mesh: undefined }); };
   async function saveHairCombo(){
     if(!hair?.parts.length||busy)return;
     const name=prompt("新髮型名稱", "我的混搭髮型")?.trim();if(!name)return;
@@ -854,7 +893,7 @@ export default function DressingRoom({ id }: { id?: string }) {
                   mask={maskTool} setMask={setMaskTool} onClearMask={() => clearMask(sel)} />
               ) : tab === "clothes" ? <ClothesPanel garments={garments} wornIds={wornIds} pending={pending} onToggle={toggle} />
               : tab === "layers" ? <LayersPanel items={resolved} selected={selected} onSelect={(g) => { setSelected(g); setTool("place"); }} onReorder={(ids) => change((cur) => ids.map((i) => cur.find((w) => w.garment_id === i)!).filter(Boolean))} onHide={(g) => setItem(g, { hidden: !worn.find((w) => w.garment_id === g)?.hidden })} onRemove={remove} onClear={() => { if (confirm("脫下全部衣物？")) { change(() => []); setSelected(null); } }} hints={hints} />
-              : tab === "look" ? <AppearancePanel tab={lookTab} setTab={t=>{setLookTab(t);selectHair(null);}} value={look} onChange={editLook} assets={assets} onNew={(k) => void newAsset(k)} onEdit={editAsset} hair={hair} selectedHair={hairSelected} onSelectHair={selectHair} hairTool={hairTool} setHairTool={setHairTool} onHairPatch={patchHair} onSaveHair={()=>void saveHairCombo()} busy={busy} />
+              : tab === "look" ? <AppearancePanel tab={lookTab} setTab={t=>{setLookTab(t);selectHair(null);}} value={look} onChange={editLook} assets={assets} onNew={(k, c) => void newAsset(k, c)} onEdit={editAsset} hair={hair} selectedHair={hairSelected} onSelectHair={selectHair} hairTool={hairTool} setHairTool={setHairTool} onHairPatch={patchHair} onSaveHair={()=>void saveHairCombo()} busy={busy} onSaveHairDefault={(i) => void saveHairDefault(i)} onAutoPlace={autoPlaceHair} />
               : <PosePanel rig={rig} pose={pose} front={front} onPose={setPose} onFront={(f) => { setFront(f); setDirty(true); }} skel={skel} setSkel={(m) => { setSkel(m); setControlId(null); }} drag={dragMode} setDrag={(d) => { setDragMode(d); setControlId(null); }}
                   region={region} setRegion={(r) => { setRegion(r); setControlId(null); }} joint={joint} setJoint={(j) => { setJoint(j); setControlId(null); }} control={control} opacity={skelOpacity} setOpacity={setSkelOpacity} compact={compact} tab={poseTab} setTab={setPoseTab} onFrame={frameTarget} />}
           </div>
