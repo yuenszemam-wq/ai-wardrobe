@@ -39,13 +39,18 @@ export async function putTemplate(env: Env, actor: Actor, garmentId: string, inp
   if (Object.prototype.hasOwnProperty.call(input, "image_id") && input.image_id !== g.image_id) throw new HttpError(409, "image_changed", "衣物圖片已更新，請重新載入再校正");
   const data = JSON.stringify(normalizeTemplateData({ ...(input.data && typeof input.data === "object" ? input.data : {}), sy: fit.sy, mesh: fit.mesh }, slot));
   if (data.length > 600_000) throw new HttpError(413, "template_too_large", "穿著設定過大，請減少穿法或遮罩");
+  const expected = input.expected_version;
+  if (expected != null && (!Number.isSafeInteger(expected) || Number(expected) < 0)) throw new HttpError(400, "bad_version", "版本不正確");
+  // Older clients may create a first preset, but must reload before updating an existing one.
+  const version = expected == null ? 0 : Number(expected);
   const now = nowIso();
-  await env.DB.prepare(
+  const saved = await env.DB.prepare(
     `INSERT INTO doll_fit_templates (garment_id, avatar_id, image_id, cx, cy, w, rotation, slot, data, version, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,1,?,?)
+     SELECT ?,?,?,?,?,?,?,?,?,1,?,? WHERE ? = 0 OR EXISTS (SELECT 1 FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ? AND version = ?)
      ON CONFLICT(garment_id, avatar_id) DO UPDATE SET image_id = excluded.image_id, cx = excluded.cx, cy = excluded.cy, w = excluded.w,
-       rotation = excluded.rotation, slot = excluded.slot, data = excluded.data, version = doll_fit_templates.version + 1, updated_at = excluded.updated_at`,
-  ).bind(garmentId, DEFAULT_AVATAR, g.image_id, fit.cx, fit.cy, fit.w, fit.rotation, slot, data, now, now).run();
+       rotation = excluded.rotation, slot = excluded.slot, data = excluded.data, version = doll_fit_templates.version + 1, updated_at = excluded.updated_at WHERE doll_fit_templates.version = ?`,
+  ).bind(garmentId, DEFAULT_AVATAR, g.image_id, fit.cx, fit.cy, fit.w, fit.rotation, slot, data, now, now, version, garmentId, DEFAULT_AVATAR, version, version).run();
+  if (!saved.meta.changes) throw new HttpError(409, "template_conflict", "另一裝置已更新衣物設定。你的編輯仍保留；請重新載入最新預設後再保存，避免覆蓋其他部件。");
   await audit(env, actor, "doll.template.save", garmentId);
   const row = await env.DB.prepare("SELECT * FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ?").bind(garmentId, DEFAULT_AVATAR).first<TemplateRow>();
   return templateOut(row!);
@@ -285,6 +290,9 @@ export async function updateAsset(env: Env, actor: Actor, id: string, input: Rec
 /** 刪除素材：連同它在 R2 doll/ 路徑下的檔案一併刪除（不涉及衣物圖片）。使用中的造型會改用預設頭部／髮型。 */
 export async function deleteAsset(env: Env, actor: Actor, id: string) {
   await assetRow(env, id);
+  if (await env.DB.prepare("SELECT id FROM doll_looks WHERE state LIKE ? LIMIT 1").bind('%' + id + '%').first()) throw new HttpError(409, "asset_in_use", "已保存造型仍在使用這個素材，請保留");
+  const files = await env.DB.prepare("SELECT id FROM doll_asset_files WHERE asset_id = ?").bind(id).all<{id:string}>();
+  for (const f of files.results) await checkFileReferences(env, f.id);
   const { results } = await env.DB.prepare("SELECT r2_key FROM doll_asset_files WHERE asset_id = ?").bind(id).all<{ r2_key: string }>();
   await env.DB.batch([env.DB.prepare("DELETE FROM doll_asset_files WHERE asset_id = ?").bind(id), env.DB.prepare("DELETE FROM doll_assets WHERE id = ?").bind(id)]);
   const keys = results.map((r) => r.r2_key).filter((k) => k.startsWith("doll/"));
@@ -320,7 +328,14 @@ export async function addAssetFile(req: Request, env: Env, actor: Actor, id: str
   await audit(env, actor, "doll.asset.file", id, { file: fileId });
   return json({ id: fileId, ref: "file:" + fileId, width: info.width, height: info.height, file_size: bytes.byteLength }, 201);
 }
+async function checkFileReferences(env: Env, fileId: string) {
+  const ref = '%file:' + fileId + '%';
+  const used = await env.DB.prepare("SELECT id FROM doll_looks WHERE state LIKE ? LIMIT 1").bind(ref).first();
+  const template = await env.DB.prepare("SELECT garment_id FROM doll_fit_templates WHERE data LIKE ? LIMIT 1").bind(ref).first();
+  if (used || template) throw new HttpError(409, "file_in_use", "已保存造型或衣物預設仍在使用這張圖片，請保留此版本");
+}
 export async function deleteAssetFile(env: Env, actor: Actor, fileId: string) {
+  await checkFileReferences(env, fileId);
   const f = await env.DB.prepare("SELECT asset_id, r2_key FROM doll_asset_files WHERE id = ?").bind(fileId).first<{ asset_id: string; r2_key: string }>();
   if (!f) throw new HttpError(404, "file_not_found", "找不到這張圖片");
   await env.DB.prepare("DELETE FROM doll_asset_files WHERE id = ?").bind(fileId).run();

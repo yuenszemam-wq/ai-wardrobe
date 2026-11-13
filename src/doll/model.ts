@@ -3,9 +3,24 @@ import { HairPart, hairCatOf } from "../../shared/avatarV2";
 import { BUILTIN_HAIRS, BUILTIN_HAIR_ID, BUILTIN_HEADS, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairConfig, HeadConfig, NO_HAIR_ID, RIG_V2, normalizeColorValue, normalizeHairConfig, normalizeHeadConfig } from "../../shared/avatarV2";
 import { Pose, normalizePose } from "../../shared/avatarRig";
 import { Content, Fit, Piece, itemKey, pieceFit, LEGACY_AVATAR, LookItem, LookState, Slot, TemplateData, WearOpts, convertLegacyFit, defaultFit, defaultOpts, isSlot, normalizeFit, slotFor } from "../../shared/doll";
-import { api } from "../api";
+import { api, Garment } from "../api";
 import { Analysis } from "./content";
 import { SceneItem } from "./engine";
+
+/** Metadata only, sequential pages; never preloads garment image pixels. */
+export async function fetchStudioGarments(): Promise<Garment[]> {
+  const rows = new Map<string, Garment>();
+  let offset: number | null = 0;
+  const seen = new Set<number>();
+  while (offset !== null) {
+    if (seen.has(offset)) throw new Error("衣物分頁未能繼續，請重新載入");
+    seen.add(offset);
+    const r: { garments: Garment[]; next_offset: number | null } = await api(`/api/garments?limit=200&status=active&transparent=1&sort=name&offset=${offset}`);
+    for (const g of r.garments) rows.set(g.id, g);
+    offset = r.next_offset ?? null;
+  }
+  return [...rows.values()];
+}
 
 export interface GarmentLite { id: string; name: string; display_no?: number | null; category: string | null; subcategory: string | null; transparent_image_id?: string | null; thumb_image_id?: string | null }
 export interface Template { garment_id: string; avatar_id: string; image_id: string | null; fit: Fit; slot: string | null; data: TemplateData | null; version: number; updated_at?: string }
@@ -82,7 +97,7 @@ export interface Resolved {
   template: Template | null;
 }
 const validTemplate = (t: Template | undefined, g: GarmentLite) => (t && t.image_id === (g.transparent_image_id ?? null) ? t : null);
-export const imageOf = (w: Worn, g: GarmentLite, tpl: Template | null) => (w.variant && tpl?.data?.variants[w.variant]?.image) || (g.transparent_image_id ? "img:" + g.transparent_image_id : null);
+export const imageOf = (w: Worn, g: GarmentLite, tpl: Template | null) => (w.snapshot && w.image) || (w.variant && tpl?.data?.variants[w.variant]?.image) || (g.transparent_image_id ? "img:" + g.transparent_image_id : null);
 
 /** 一件已穿衣物最終怎樣顯示：造型個別調整 → 穿法 → 衣物預設 → 舊角色換算 → 自動估算 */
 /** 穿著中的部件設定：造型快照優先，否則用套裝目前的拆件設定 */
@@ -112,13 +127,13 @@ export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<
     const analysis = image ? analyses.get(image) : undefined;
     if (!piece || !image || !analysis) return null;
     // 預設位置：部件自己的預設；沒有的話按套裝放在角色身上的位置換算（拆出來的部件留在原本的位置）
-    const full = g.transparent_image_id ? analyses.get("img:" + g.transparent_image_id) : undefined;
+    const full = w.snapshot && w.image ? analyses.get(w.image) : g.transparent_image_id ? analyses.get("img:" + g.transparent_image_id) : undefined;
     const setFit = tpl?.fit ?? (full ? defaultFit(tpl && isSlot(tpl.slot) ? tpl.slot : slotFor(g.category, g.subcategory), full.content, g.category, g.subcategory, g.name) : null);
     const base = piece.fit ?? (setFit && full ? pieceFit(setFit, full.content.ar, piece.box) : defaultFit(piece.slot, analysis.content, null, null, piece.name));
     const opts = w.opts ?? piece.opts ?? { ...defaultOpts(piece.slot), follow: "none" as const, bone: pieceBone(piece) };
     // 穿著遮罩：造型快照（null＝確實沒有）→ 個別調整 → 部件預設的穿著遮罩
     const mask = w.snapshot ? w.mask ?? null : w.mask ?? piece.wear_mask ?? null;
-    return { key: itemKey(w), worn: w, garment: g, piece, image, base, fit: w.fit ?? base, opts, mask, parts: w.parts ?? null, analysis, from: w.fit || w.opts || w.mask || w.parts ? "override" : piece.fit ? "template" : "default", template: tpl };
+    return { key: itemKey(w), worn: w, garment: g, piece, image, base, fit: w.fit ?? base, opts, mask, parts: w.snapshot ? w.parts ?? null : w.parts ?? piece.parts ?? null, analysis, from: w.fit || w.opts || w.mask || w.parts ? "override" : piece.fit ? "template" : "default", template: tpl };
   }
   const variant = w.variant ? tpl?.data?.variants[w.variant] ?? null : null;
   const image = imageOf(w, g, tpl);

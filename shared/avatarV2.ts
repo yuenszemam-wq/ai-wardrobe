@@ -32,6 +32,8 @@ export interface HairPart {
   file: ImageRef;
   /** 染色遮罩（R＝挑染比重、G＝是否頭髮）；沒有則自動分辨主髮色及挑染 */
   mask?: ImageRef | null;
+  /** Optional per-part overrides; absent channels inherit the global palette. */
+  color?: { hair_color?: string; accent_color?: string | null; tip_color?: string | null };
   layer: HairLayer;
   /** 在 1200×1800 畫布上的位置（靜止姿勢） */
   x: number; y: number; w: number; h: number;
@@ -97,6 +99,16 @@ export function normalizeHairConfig(v: unknown): HairConfig | null {
     seen.add(id);
     const layer = LAYERS.includes(o.layer as HairLayer) ? (o.layer as HairLayer) : "back";
     const part: HairPart = { id, label: text(o.label, 30) || "髮束", file: o.file, layer, x, y, w, h, bone: "head" };
+    if (o.color && typeof o.color === "object") {
+      const c = o.color as Record<string, unknown>;
+      const color: NonNullable<HairPart["color"]> = {};
+      const main = normalizeColorValue(c.hair_color); if (main) color.hair_color = main;
+      if (c.accent_color === null || c.accent_color === "original") color.accent_color = c.accent_color;
+      else { const a = normalizeColorValue(c.accent_color); if (a) color.accent_color = a; }
+      if (c.tip_color === null) color.tip_color = null;
+      else if (typeof c.tip_color === "string" && /^#[0-9a-f]{6}$/i.test(c.tip_color)) color.tip_color = c.tip_color.toLowerCase();
+      if (Object.keys(color).length) part.color = color;
+    }
     const rotation=num(o.rotation,-180,180); if(rotation) part.rotation=rotation;
     const mesh=normalizeManualMesh(o.mesh); if(mesh) part.mesh=mesh;
     if(o.hidden===true) part.hidden=true;

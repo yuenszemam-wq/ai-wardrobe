@@ -1,7 +1,7 @@
 // 角色換裝的畫布渲染器：身體部件、頭部、髮型、衣物全部畫在同一張 Canvas 上。
 // 衣物用連續網格跟隨骨架（shared/garmentMesh.ts）；畫面、造型縮圖及匯出圖片用同一套繪畫程式。
 import { Mat, Pose, Rig, applyMat, invert, multiply, solve } from "../../shared/avatarRig";
-import { AVATAR_V2_BASE, FrontPart, HairConfig, HairPart, HairStats, HeadConfig, RIG_V2, Rgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
+import { AVATAR_V2_BASE, FrontPart, HairConfig, HairPart, HairStats, HeadConfig, RIG_V2, Rgb, resolveHairColors, hexToRgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
 import { Content, DOLL_H, DOLL_W, Fit, FULL_CONTENT, defaultOpts, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
 import { GarmentRig, Mesh, PartMap, RigInfo, boneMatrices, buildRig, cellVerts, locate, posedBounds, rigCoverage, skinMesh } from "../../shared/garmentMesh";
 import { AlphaGrid, Bitmap, alphaAt, loadImage, pixelsOf } from "./content";
@@ -417,8 +417,13 @@ export class DollRenderer {
   private hairImage(hair: HairConfig, part: HairPart, scene: Scene): Bitmap | null {
     const src = this.img(part.file);
     if (!src) return null;
-    if (!scene.main && !scene.accent && !scene.tip) return src;
-    const key = [part.file, part.mask??"", scene.main, scene.accent, scene.tip, part.y, part.h, hair.parts.map(p=>[p.file,p.y,p.h]).join(";")].join("|");
+    const override = part.color;
+    const mainOverride = override?.hair_color ? resolveHairColors(override.hair_color, override.accent_color) : null;
+    const main = mainOverride ? mainOverride.main : scene.main;
+    const accent = override && Object.prototype.hasOwnProperty.call(override, "accent_color") ? resolveHairColors(override.hair_color ?? "original", override.accent_color).accent : mainOverride ? mainOverride.accent : scene.accent;
+    const tipColor = override && Object.prototype.hasOwnProperty.call(override, "tip_color") ? (override.tip_color ? hexToRgb(override.tip_color) : null) : scene.tip;
+    if (!main && !accent && !tipColor) return src;
+    const key = [part.file, part.mask??"", main, accent, tipColor, !!override, part.y, part.h, hair.parts.map(p=>[p.file,p.y,p.h]).join(";")].join("|");
     const hit = this.hairPx.get(key);
     if (hit) return hit;
     const mask = part.mask ? this.img(part.mask) : null;
@@ -442,12 +447,12 @@ export class DollRenderer {
     const ref = hair.ref_luma ?? (stats ? { main: stats.main, accent: stats.accent } : { main: 0.33, accent: 0.6 });
     // 髮尾漸層按整款髮型的高度計算（由 55% 開始，到 92% 完全變色）
     let tip = null;
-    if (scene.tip) {
-      const top = Math.min(...hair.parts.map((p) => p.y)), bottom = Math.max(...hair.parts.map((p) => p.y + p.h));
+    if (tipColor) {
+      const top = override ? part.y : Math.min(...hair.parts.map((p) => p.y)), bottom = override ? part.y + part.h : Math.max(...hair.parts.map((p) => p.y + p.h));
       const row = (cy: number) => ((cy - part.y) / part.h) * h;
-      tip = { color: scene.tip, row0: row(top + (bottom - top) * 0.55), row1: row(top + (bottom - top) * 0.92) };
+      tip = { color: tipColor, row0: row(top + (bottom - top) * 0.55), row1: row(top + (bottom - top) * 0.92) };
     }
-    recolorHair(data.data, mask ? pixelsOf(mask, w, h).data : null, { main: scene.main, accent: scene.accent, ref, stats, tip, width: w });
+    recolorHair(data.data, mask ? pixelsOf(mask, w, h).data : null, { main, accent, ref, stats, tip, width: w });
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     canvas.getContext("2d")!.putImageData(data, 0, 0);

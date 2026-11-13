@@ -3,6 +3,8 @@ import { api, AppSettings, formatDate } from "../api";
 import { Button, copyText, Field, inputCls, Link, PageTitle, setSettingsCache, toast, useSettings } from "../components/ui";
 import { CopyBlock } from "./ImportCenter";
 
+import { BUILD } from "../build";
+
 interface TokenRow {
   id: string;
   name: string;
@@ -38,6 +40,7 @@ export default function Settings({ username, onLogout }: { username: string | nu
   return (
     <div>
       <PageTitle>設定</PageTitle>
+      <p data-testid="app-version" className="mb-4 text-xs text-mauve">AI Wardrobe · Phase {BUILD.phase}<br/>Build：{BUILD.sha}{BUILD.built && <> · {new Date(BUILD.built).toLocaleString("zh-HK", {timeZone:"Asia/Hong_Kong"})}</>}</p>
       <ThumbnailStatus/>
 
       <Link to="/taxonomy" className="paper mb-5 flex items-center justify-between px-4 py-4">
