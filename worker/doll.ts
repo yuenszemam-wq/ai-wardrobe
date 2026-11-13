@@ -21,7 +21,7 @@ interface TemplateRow { garment_id: string; avatar_id: string; image_id: string 
 const templateOut = (r: TemplateRow) => {
   const data = r.avatar_id === DEFAULT_AVATAR && isSlot(r.slot) ? normalizeTemplateData(parse(r.data), r.slot) : null;
   // 高度拉伸（Phase 3.1）存在 data.sy，資料表欄位不變
-  return { garment_id: r.garment_id, avatar_id: r.avatar_id, image_id: r.image_id, fit: { cx: r.cx, cy: r.cy, w: r.w, rotation: r.rotation, ...(data?.sy ? { sy: data.sy } : {}) }, slot: r.slot, data, version: r.version, updated_at: r.updated_at };
+  return { garment_id: r.garment_id, avatar_id: r.avatar_id, image_id: r.image_id, fit: { cx: r.cx, cy: r.cy, w: r.w, rotation: r.rotation, ...(data?.sy ? { sy: data.sy } : {}), ...(data?.mesh ? { mesh: data.mesh } : {}) }, slot: r.slot, data, version: r.version, updated_at: r.updated_at };
 };
 
 /** 回傳目前角色的設定；另附舊角色（V1）的位置，前端只在該衣物未有 V2 設定時換算使用 */
@@ -37,7 +37,7 @@ export async function putTemplate(env: Env, actor: Actor, garmentId: string, inp
   if (input.slot != null && !isSlot(input.slot)) throw new HttpError(400, "bad_slot", "圖層位置不正確");
   const slot = isSlot(input.slot) ? input.slot : slotFor(g.category, g.subcategory);
   if (Object.prototype.hasOwnProperty.call(input, "image_id") && input.image_id !== g.image_id) throw new HttpError(409, "image_changed", "衣物圖片已更新，請重新載入再校正");
-  const data = JSON.stringify(normalizeTemplateData({ ...(input.data && typeof input.data === "object" ? input.data : {}), sy: fit.sy }, slot));
+  const data = JSON.stringify(normalizeTemplateData({ ...(input.data && typeof input.data === "object" ? input.data : {}), sy: fit.sy, mesh: fit.mesh }, slot));
   if (data.length > 600_000) throw new HttpError(413, "template_too_large", "穿著設定過大，請減少穿法或遮罩");
   const now = nowIso();
   await env.DB.prepare(

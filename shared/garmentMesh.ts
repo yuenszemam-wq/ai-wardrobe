@@ -5,7 +5,7 @@
 // 全部是純函數，前端及測試共用。座標＝1200×1800 邏輯畫布像素。
 import { RIG_V2 } from "./avatarV2";
 import { Mat, applyMat, boneMap, multiply, rotateAbout } from "./avatarRig";
-import { Fit, Follow, SkinKind, fitHeight, fromImage, toImage } from "./doll";
+import { Fit, Follow, SkinKind, fitHeight, fromImage, manualPoint, toImage } from "./doll";
 
 export interface AlphaField { w: number; h: number; data: Uint8Array }
 /** 部件編號 */
@@ -46,7 +46,7 @@ export function detectSleeves(grid: AlphaField, fit: Fit, ar: number, loose = fa
   const out: AutoParts = { labels, sleeve_r: false, sleeve_l: false, unsure: false };
   // 衣物在畫布上的範圍
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]] as Pt[]) { const [x, y] = fromImage(fit, ar, u, v); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]] as Pt[]) { const [x, y] = manualPoint(fit, ar, u, v); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   const s = Math.min(6, Math.max(3, fit.w / 170));
   const W = Math.min(520, Math.ceil((x1 - x0) / s)), H = Math.min(640, Math.ceil((y1 - y0) / s));
   if (W < 4 || H < 4) return out;
@@ -321,7 +321,7 @@ function meshFor(inp: RigInput, part: number, matte: Uint8Array | null, bones: M
     if (!any) { cell[k] = -2; continue; }
     let same = -1;
     for (let b = 0; b < nb; b++) if (vs.every((q) => weights[q * nb + b] > 0.995)) { same = b; break; }
-    cell[k] = same;
+    cell[k] = fit.mesh ? -1 : same;
     list.push(k);
   }
   // 同一節骨骼的格排在一起（可以合併成一次繪畫）；混合的格放在中間
@@ -335,7 +335,7 @@ export function buildRig(inp: RigInput): GarmentRig {
   const info: RigInfo = { mode: "rigid", source: "auto", sleeve_r: false, sleeve_l: false, forearm: false, legs: false, unsure: false };
   let labels: Uint8Array = new Uint8Array(grid.w * grid.h);
   const done = (layers: (Mesh | null)[], matteKey = ""): GarmentRig => ({ layers: layers.filter((l): l is Mesh => !!l), labels: { w: grid.w, h: grid.h, data: labels }, matteKey, info });
-  if (inp.kind === "rigid" || inp.pinned || inp.follow === "none") return done([meshFor(inp, 0, null, [{ id: inp.bone, pre: null }], () => undefined, 90)]);
+  if (fit.mesh || inp.kind === "rigid" || inp.pinned || inp.follow === "none") return done([meshFor(inp, 0, null, [{ id: inp.bone, pre: null }], () => undefined, fit.mesh ? 32 : 90)]);
 
   const cellPx = fit.w / grid.w;
   const trunk: Mesh["bones"] = ["pelvis", "torso", "chest"].map((id) => ({ id, pre: null }));
@@ -433,7 +433,7 @@ export function buildRig(inp: RigInput): GarmentRig {
 
 /** 各節骨骼在目前姿勢下的矩陣（已計及袖子的靜止角度） */
 export function boneMatrices(mesh: Mesh, mats: Record<string, Mat>): Mat[] {
-  return mesh.bones.map((b) => { const m = mats[b.id] ?? mats.root; return b.pre ? multiply(m, b.pre) : m; });
+  return mesh.bones.map((b) => { const m = b.id === "world" ? [1, 0, 0, 1, 0, 0] as Mat : mats[b.id] ?? mats.root; return b.pre ? multiply(m, b.pre) : m; });
 }
 /** 把網格頂點變到目前姿勢（Linear Blend Skinning） */
 export function skinMesh(mesh: Mesh, mats: Record<string, Mat>, bm = boneMatrices(mesh, mats)): Float32Array {

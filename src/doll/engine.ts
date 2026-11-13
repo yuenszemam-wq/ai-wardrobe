@@ -176,7 +176,7 @@ export class DollRenderer {
   /** 衣物的部件、網格及骨骼權重（位置、部件或穿法改變時才重做） */
   geometry(it: SceneItem): GarmentRig {
     const parts = this.partsOf(it) ?? { map: null, key: "pending" };
-    const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key].join("|");
+    const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, JSON.stringify(it.fit.mesh ?? []), it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key].join("|");
     const hit = this.geo.get(it.key);
     if (hit?.key === key) return hit.rig;
     const rig = buildRig({ grid: it.grid, fit: it.fit, ar: it.content.ar, kind: SLOT_SKIN[it.slot], follow: it.opts.follow, bone: mainBone(it), pinned: !!it.opts.bone, parts: parts.map, sleeveRot: [it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0], loose: it.slot === "top" || it.slot === "outer" });
@@ -259,7 +259,7 @@ export class DollRenderer {
     const f = it.fit, H = fitHeight(f, it.content.ar), t = (f.rotation * Math.PI) / 180, cos = Math.cos(t), sin = Math.sin(t);
     // 圖片像素 → 靜止畫布座標
     const F: Mat = [(f.w / tw) * cos, (f.w / tw) * sin, (-H / th) * sin, (H / th) * cos, f.cx - 0.5 * f.w * cos + 0.5 * H * sin, f.cy - 0.5 * f.w * sin - 0.5 * H * cos];
-    if (mesh.bones.length === 1) {
+    if (mesh.bones.length === 1 && !f.mesh) {
       const m = multiply(pre, multiply(bm[0], F));
       c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
       c.drawImage(tex, tx.x, tx.y, tx.w, tx.h);

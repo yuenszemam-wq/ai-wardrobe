@@ -1,11 +1,11 @@
 import { PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Mat, Pose, Rig, aimBone, applyMat, boneMap, invert, moveBone, reachIK, solve } from "../../shared/avatarRig";
 import { HairConfig, RIG_V2, hairBoneId } from "../../shared/avatarV2";
-import { Content, FIT_LIMIT, Fit, fitHeight, hitTest } from "../../shared/doll";
+import { Content, FIT_LIMIT, Fit, fitHeight, hitTest, manualPoint, normalizeManualMesh, toImage } from "../../shared/doll";
 import { DollRenderer, Scene, View } from "./engine";
 
 export interface Selection { fit: Fit; content: Content; bone: string; /** 可否旋轉（髮束、頭部只可移動及縮放） */ rotate?: boolean; /** 變形後實際佔的範圍（邏輯座標）；有＝選取框跟隨實際衣物範圍 */ bounds?: [number, number, number, number] }
-export type StageMode = "dress" | "pose" | "mask";
+export type StageMode = "dress" | "pose" | "mask" | "mesh" | "preview";
 type HandleKind = "ik" | "aim" | "move";
 export interface PoseHandle { id: string; kind: HandleKind; bone: string; /** 靜止姿勢下的位置，以及它跟隨的骨骼 */ at: [number, number]; follow: string; upper?: string; mid?: string }
 
@@ -61,7 +61,8 @@ interface Props {
 }
 type Gesture =
   | { kind: "move"; sx: number; sy: number; fit: Fit }
-  | { kind: "pinch"; d0: number; a0: number; fit: Fit }
+  | { kind: "pinch"; d0: number; z0: number; x0: number; y0: number; wx: number; wy: number }
+  | { kind: "mesh"; index: number; fit: Fit }
   | { kind: "resize"; d0: number; fit: Fit }
   | { kind: "rotate"; a0: number; fit: Fit }
   | { kind: "pose"; handle: PoseHandle; dx: number; dy: number }
@@ -74,6 +75,8 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [tick, setTick] = useState(0);
+  const [camera, setCamera] = useState({ zoom: 1, x: 0, y: 0 });
+  useEffect(() => { setCamera({ zoom: 1, x: 0, y: 0 }); }, [view.x, view.y, view.w, view.h]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
@@ -91,8 +94,10 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
   }, []);
 
   // 邏輯座標 → 螢幕（CSS 像素）
-  const k = size.w && size.h ? Math.min(size.w / view.w, size.h / view.h) : 0;
-  const ox = (size.w - view.w * k) / 2 - view.x * k, oy = (size.h - view.h * k) / 2 - view.y * k;
+  const baseK = size.w && size.h ? Math.min(size.w / view.w, size.h / view.h) : 0;
+  const k = baseK * camera.zoom;
+  const ox = size.w / 2 - (view.x + view.w / 2) * k + camera.x, oy = size.h / 2 - (view.y + view.h / 2) * k + camera.y;
+  const changeZoom = (factor: number) => setCamera(c => ({ ...c, zoom: clamp(c.zoom * factor, 1, 4) }));
   const mats = useMemo(() => solve(rig, scene.pose), [rig, scene.pose]);
   const handles = useMemo(() => (showHandles ? poseHandles(scene.hair) : []), [showHandles, scene.hair]);
   const toScreen = (x: number, y: number): [number, number] => [x * k + ox, y * k + oy];
@@ -126,7 +131,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
   const frame = useMemo(() => {
     if (!selection || !k) return null;
     const { fit, content, bone } = selection;
-    const m = mats[bone] ?? mats.root;
+    const m = bone === "world" ? [1,0,0,1,0,0] as Mat : mats[bone] ?? mats.root;
     const h = fitHeight(fit, content.ar);
     const t = (fit.rotation * Math.PI) / 180;
     const corner = (u: number, v: number): [number, number] => {
@@ -150,7 +155,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
 
   const restPoint = (clientX: number, clientY: number, bone: string): [number, number] => {
     const [x, y] = toLogical(clientX, clientY);
-    return applyMat(invert(mats[bone] ?? mats.root), x, y);
+    return applyMat(invert(bone === "world" ? [1,0,0,1,0,0] : mats[bone] ?? mats.root), x, y);
   };
   const near = (p: [number, number] | undefined, e: { clientX: number; clientY: number }, r: number) => {
     if (!p) return false;
@@ -158,10 +163,11 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     return Math.hypot(e.clientX - b.left - p[0], e.clientY - b.top - p[1]) <= r;
   };
   const startPinch = () => {
-    const sel = latest.current.selection;
-    if (!sel) return;
     const [a, b] = [...pointers.current.values()];
-    gesture.current = { kind: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, a0: Math.atan2(b.y - a.y, b.x - a.x), fit: sel.fit };
+    const cx=(a.x+b.x)/2, cy=(a.y+b.y)/2;
+    const [wx,wy]=toLogical(cx,cy);
+    if (gesture.current?.kind === "paint") latest.current.onPaint?.(0,0,"end");
+    gesture.current = { kind: "pinch", d0: Math.hypot(a.x-b.x,a.y-b.y)||1, z0:camera.zoom, x0:cx, y0:cy, wx,wy };
   };
   const emitFit = (fit: Fit) => {
     const sel = latest.current.selection;
@@ -175,6 +181,14 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     e.currentTarget.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const sel = selection;
+    if (pointers.current.size >= 2) { if (pointers.current.size === 2) startPinch(); return; }
+    if (mode === "preview") return;
+    if (mode === "mesh" && sel) {
+      let best=-1, dist=25;
+      for(let i=0;i<16;i++){ const pt=manualPoint(sel.fit,sel.content.ar,i%4/3,Math.floor(i/4)/3); const q=toScreen(...applyMat(sel.bone === "world" ? [1,0,0,1,0,0] : mats[sel.bone]??mats.root,...pt)); const b=wrap.current!.getBoundingClientRect(); const d=Math.hypot(e.clientX-b.left-q[0],e.clientY-b.top-q[1]); if(d<dist){best=i;dist=d;} }
+      if(best>=0) gesture.current={kind:"mesh",index:best,fit:sel.fit};
+      return;
+    }
     if (mode === "pose") {
       if (pointers.current.size > 1) return;
       const b = wrap.current!.getBoundingClientRect();
@@ -198,7 +212,6 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
       onPaint?.(...toLogical(e.clientX, e.clientY), "start");
       return;
     }
-    if (pointers.current.size >= 2 && sel) return startPinch();
     if (sel && frame) {
       if (near(frame.resize, e, 24)) {
         const b = wrap.current!.getBoundingClientRect();
@@ -227,6 +240,11 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     const g = gesture.current;
     const sel = latest.current.selection;
     if (!g || !k) return;
+    if (g.kind === "pinch") {
+      const pts=[...pointers.current.values()]; if(pts.length<2)return;
+      const a=pts[0], b=pts[1], z=clamp(g.z0*Math.hypot(a.x-b.x,a.y-b.y)/g.d0,1,4), nk=baseK*z, rect=wrap.current!.getBoundingClientRect();
+      setCamera({zoom:z,x:(a.x+b.x)/2-rect.left-size.w/2-(g.wx-view.x-view.w/2)*nk,y:(a.y+b.y)/2-rect.top-size.h/2-(g.wy-view.y-view.h/2)*nk}); return;
+    }
     if (g.kind === "pose") {
       const [lx, ly] = toLogical(e.clientX, e.clientY);
       const target: [number, number] = [lx + g.dx, ly + g.dy];
@@ -241,15 +259,10 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
       return;
     }
     const f = g.fit;
+    if(g.kind === "mesh") { const [x,y]=restPoint(e.clientX,e.clientY,sel.bone); const [u,v]=toImage(f,sel.content.ar,x,y); const a=[...(f.mesh??Array(32).fill(0))]; a[g.index*2]=clamp(u-g.index%4/3,-.75,.75); a[g.index*2+1]=clamp(v-Math.floor(g.index/4)/3,-.75,.75); const mesh=normalizeManualMesh(a); if(mesh || a.every(n=>Math.abs(n)<.0001)) emitFit({...f,mesh}); return; }
     if (g.kind === "move") {
       const [x, y] = restPoint(e.clientX, e.clientY, sel.bone);
       emitFit({ ...f, cx: f.cx + x - g.sx, cy: f.cy + y - g.sy });
-    } else if (g.kind === "pinch") {
-      const pts = [...pointers.current.values()];
-      if (pts.length < 2) return;
-      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      const a = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
-      emitFit({ ...f, w: (f.w * d) / g.d0, rotation: f.rotation + ((a - g.a0) * 180) / Math.PI });
     } else if (frame) {
       const b = wrap.current!.getBoundingClientRect();
       const dx = e.clientX - b.left - frame.center[0], dy = e.clientY - b.top - frame.center[1];
@@ -263,11 +276,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     if (!g) return;
     if (g.kind === "paint") latest.current.onPaint?.(0, 0, "end");
     const rest = [...pointers.current.values()];
-    const sel = latest.current.selection;
-    if (g.kind === "pinch" && rest.length === 1 && sel) {
-      const [x, y] = restPoint(rest[0].x, rest[0].y, sel.bone);
-      gesture.current = { kind: "move", sx: x, sy: y, fit: sel.fit };
-    } else if (!rest.length) gesture.current = null;
+    if (g.kind === "pinch" || !rest.length) gesture.current = null;
   }
 
   const COLOR: Record<HandleKind, string> = { ik: "#f28ba3", aim: "#c9a0e8", move: "#f0d9c0" };
@@ -277,7 +286,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
       <canvas ref={canvas} data-testid="doll-canvas" className="pointer-events-none absolute inset-0 h-full w-full" />
       {k > 0 && (
         <svg className="pointer-events-none absolute inset-0 h-full w-full" width={size.w} height={size.h}>
-          {frame && mode !== "pose" && (
+          {frame && mode !== "pose" && mode !== "mesh" && mode !== "preview" && (
             <g data-testid="fit-frame">
               <polygon points={frame.pts.map((p) => p.join(",")).join(" ")} fill="none" stroke="#c9a0e8" strokeWidth={1.5} strokeDasharray="5 4" />
               {mode === "dress" && (
@@ -296,6 +305,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
               )}
             </g>
           )}
+          {mode === "mesh" && selection && (()=>{ const pts=Array.from({length:16},(_,i)=>toScreen(...applyMat(selection.bone === "world" ? [1,0,0,1,0,0] : mats[selection.bone]??mats.root,...manualPoint(selection.fit,selection.content.ar,i%4/3,Math.floor(i/4)/3)))); return <g data-testid="manual-mesh">{pts.map((q,i)=><g key={i}>{i%4<3&&<line x1={q[0]} y1={q[1]} x2={pts[i+1][0]} y2={pts[i+1][1]} stroke="#a96bda" strokeWidth={1.2}/>} {i<12&&<line x1={q[0]} y1={q[1]} x2={pts[i+4][0]} y2={pts[i+4][1]} stroke="#a96bda" strokeWidth={1.2}/>}<circle data-mesh-point={i} data-x={q[0]} data-y={q[1]} cx={q[0]} cy={q[1]} r={5} fill="#f9efff" stroke="#8752b3" strokeWidth={1.5}/></g>)}</g>; })()}
           {mode === "pose" && handles.length > 0 && (
             <g data-testid="pose-handles">
               {rig.bones.filter((b) => b.parent && b.parent !== "root" && !b.id.startsWith("hair") && !b.id.startsWith("hp_")).map((b) => {
@@ -308,7 +318,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
                 const on = activeHandle === h.id;
                 return (
                   <g key={h.id} data-handle={h.id} data-x={x.toFixed(1)} data-y={y.toFixed(1)} transform={`translate(${x},${y})`}>
-                    <circle r={on ? 11 : 8} fill={COLOR[h.kind]} fillOpacity={on ? 0.95 : 0.8} stroke="#3b1f35" strokeWidth={1.5} />
+                    <circle r={on ? 7 : 4.5} fill={COLOR[h.kind]} fillOpacity={on ? 0.85 : 0.48} stroke="#3b1f35" strokeWidth={1.5} />
                     {h.kind === "move" && <path d="M-4 0h8M0-4v8" stroke="#3b1f35" strokeWidth={1.6} strokeLinecap="round" />}
                     {on && <circle r={15} fill="none" stroke="#fffaf6" strokeWidth={1.2} />}
                   </g>
@@ -320,6 +330,11 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
         </svg>
       )}
       {children}
+      <div data-stage-ui className="absolute right-2 top-12 flex flex-col gap-1 text-[11px]">
+        <button type="button" aria-label="放大人物" data-testid="camera-in" onClick={()=>changeZoom(1.25)} className="rounded-full bg-ink/60 px-3 py-1 text-cream">＋</button>
+        <button type="button" aria-label="恢復人物視角" data-testid="camera-reset" onClick={()=>setCamera({zoom:1,x:0,y:0})} className="rounded-full bg-ink/60 px-2 py-1 text-cream">{Math.round(camera.zoom*100)}%</button>
+        <button type="button" aria-label="縮小人物" onClick={()=>changeZoom(.8)} className="rounded-full bg-ink/60 px-3 py-1 text-cream">－</button>
+      </div>
     </div>
   );
 }

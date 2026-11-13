@@ -83,7 +83,8 @@ export const sceneItem = (r: Resolved): SceneItem => ({ key: r.garment.id, image
 
 export function wornFor(g: GarmentLite, tpls: Templates): Worn {
   const t = validTemplate(tpls.v2.get(g.id), g) ?? validTemplate(tpls.v1.get(g.id), g);
-  return { garment_id: g.id, slot: isSlot(t?.slot) ? t.slot : slotFor(g.category, g.subcategory), hidden: false, variant: null, fit: null, opts: null, mask: null };
+  const slot = isSlot(t?.slot) ? t.slot : slotFor(g.category, g.subcategory);
+  return { garment_id: g.id, slot, hidden: false, variant: null, fit: null, opts: t?.data ? null : { ...defaultOpts(slot), follow: "none", bone: "world" }, mask: null };
 }
 
 /** 舊造型（Phase 3 之前保存）→ 新格式。V1 的個別位置待圖片讀取後換算。 */

@@ -104,7 +104,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
 }
 
 // ───── 已選衣物的校正 ─────
-export type FitTool = "place" | "wear" | "parts" | "follow" | "mask";
+export type FitTool = "place" | "wear" | "parts" | "follow" | "mask" | "mesh";
 export interface MaskTool { mode: "hide" | "behind" | "restore"; size: number }
 /** 部件筆刷：0＝衣身、1＝右袖、2＝左袖 */
 export interface PartTool { label: number; size: number }
@@ -119,9 +119,10 @@ export function rigSummary(info: RigInfo | null, skin: string): string {
   if (!sides) return info.source === "whole" ? "整件衣物（不拆袖）：衣身跟隨上身彎曲，保持完整。" : info.unsure ? "未能可靠分辨袖子，現時以整件衣物顯示（保持完整）。可以用筆刷標記袖子。" : "沒有找到袖子：整件衣物跟隨上身，保持完整。";
   return `${info.source === "manual" ? "人工標記" : info.source === "zone" ? "按手臂位置估計" : "自動分辨"}：${sides}跟隨手臂${info.forearm ? "（連手肘）" : ""}，衣身保持完整。`;
 }
-export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onSleeveAuto, onPoseFix }: {
+export function FitPanel({ r, info, tool, setTool, busy, onFit, onMeshReset, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onSleeveAuto, onPoseFix }: {
   r: Resolved; info: RigInfo | null; tool: FitTool; setTool: (t: FitTool) => void; busy: boolean;
   part: PartTool; setPart: (p: PartTool) => void; hint: boolean; setHint: (v: boolean) => void; onParts: (v: string | null) => void; onSleeveAuto: () => void; onPoseFix: () => void;
+  onMeshReset: () => void;
   onFit: (f: { dx?: number; dy?: number; scale?: number; rot?: number; wide?: number; tall?: number }) => void; onOpts: (o: Partial<WearOpts>) => void; onAuto: () => void; onRestore: () => void; onSaveDefault: () => void; onRemove: () => void; onDone: () => void;
   onOrder: (to: "top" | "up" | "down" | "bottom") => void; onVariant: (id: string | null) => void; onAddVariant: (withImage: boolean) => void; onDeleteVariant: (id: string) => void; onSavePose: () => void; onApplyPose: () => void;
   mask: MaskTool; setMask: (m: MaskTool) => void; onClearMask: () => void;
@@ -142,12 +143,12 @@ export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, 
         <button type="button" data-testid="fit-done" onClick={onDone} className="btn-jewel h-8 rounded-full px-3.5 text-[12.5px]">完成</button>
       </div>
       <Row className="pb-2">
-        {([["place", "位置"], ["wear", "穿法"], ["parts", "部件"], ["follow", "骨架"], ["mask", "遮罩"]] as [FitTool, string][]).map(([t, label]) => <button key={t} type="button" data-tool={t} onClick={() => setTool(t)} className={pill(tool === t)}>{label}</button>)}
+        {([["place", "位置"], ["mesh", "變形"], ["mask", "遮罩"], ["wear", "穿法"], ["parts", "部件"], ["follow", "進階骨架"]] as [FitTool, string][]).map(([t, label]) => <button key={t} type="button" data-tool={t} onClick={() => setTool(t)} className={pill(tool === t)}>{label}</button>)}
       </Row>
       <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2 text-[12.5px]">
         {tool === "place" && (
           <>
-            <p className="mb-2 text-[11px] leading-snug text-mauve">在角色上直接拖動衣物；雙指或角位把手可縮放、旋轉。</p>
+            <p className="mb-2 text-[11px] leading-snug text-mauve">在角色上直接拖動衣物；角位把手調整衣物大小，雙指放大或平移人物畫布。</p>
             <div className="flex flex-wrap items-center gap-1.5">
               <B label="向左微調" onClick={() => onFit({ dx: -4 })}>←</B><B label="向右微調" onClick={() => onFit({ dx: 4 })}>→</B><B label="向上微調" onClick={() => onFit({ dy: -4 })}>↑</B><B label="向下微調" onClick={() => onFit({ dy: 4 })}>↓</B>
               <B label="放大" onClick={() => onFit({ scale: 1.03 })}>＋</B><B label="縮小" onClick={() => onFit({ scale: 1 / 1.03 })}>－</B>
@@ -168,6 +169,7 @@ export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, 
             </div>
           </>
         )}
+        {tool === "mesh" && <><p className="mb-2 text-[11px] text-mauve">直接拖動紫色網格控制點，整件衣服保持連續。雙指放大人物；切換位置可隱藏網格。若要調整手臂配合袖口，可先把衣物固定於畫布。</p><div className="flex flex-wrap gap-2"><button type="button" data-testid="mesh-reset" onClick={onMeshReset} className="chip h-9 rounded-full px-3">重設變形</button><button type="button" data-testid="mesh-fixed" onClick={()=>onOpts({follow:"none",bone:"world"})} className={pill(r.opts.bone==="world")}>衣物固定</button><button type="button" onClick={()=>onOpts({follow:"none",bone:null})} className={pill(r.opts.follow==="none"&&!r.opts.bone)}>跟隨身體</button></div></>}
         {tool === "wear" && (
           <>
             <p className="mb-2 text-[11px] leading-snug text-mauve">同一件衣服可以保存不同穿著方式，例如外套打開／關上、襯衫收入裙內／放出。需要另一張圖的穿法（例如打開的外套）可上傳透明圖。</p>

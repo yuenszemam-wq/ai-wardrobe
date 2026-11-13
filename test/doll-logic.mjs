@@ -86,6 +86,10 @@ console.log("造型及衣物預設資料");
   const td = D.normalizeTemplateData({ opts: { follow: "upper", bone: "evil" }, mask: "data:image/png;base64,AAAA", pose: { head: 99 }, front: ["hand_l"], variants: { open: { name: " 打開 ", image: "file:daf_abcdefgh", fit: { cx: 600, cy: 500, w: 500 } }, "BAD ID": {}, tucked: { name: "", image: "http://x" } } }, "outer");
   check("衣物預設：跟隨方式、遮罩、建議姿勢", td.opts.follow === "upper" && td.opts.bone === null && td.opts.neck === true && td.mask && td.pose.head === 22 && td.front[0] === "hand_l", td);
   check("穿法：名稱、另一張圖、位置", Object.keys(td.variants).join() === "open,tucked" && td.variants.open.name === "打開" && td.variants.open.image === "file:daf_abcdefgh" && td.variants.open.fit.w === 500 && td.variants.tucked.image === null && td.variants.tucked.name === "穿法");
+  const manual = Array(32).fill(0); manual[2] = .04;
+  check("手動網格可保存且改變對應控制點", !!D.normalizeManualMesh(manual) && Math.abs(D.manualUV(manual,1/3,0)[0] - (1/3+.04))<.001);
+  const folded = [...manual]; folded[2]=-.7;
+  check("拒絕翻面控制格", !D.normalizeManualMesh(folded));
   check("頭飾預設蓋在頭髮上，其他不會", D.defaultOpts("headwear").over_head && !D.defaultOpts("dress").over_head && D.defaultOpts("dress").neck && !D.defaultOpts("skirt").neck);
   check("遮罩只接受細小的 PNG data URL", !D.isMask("data:image/png;base64," + "A".repeat(90000)) && !D.isMask("javascript:alert(1)"));
 }

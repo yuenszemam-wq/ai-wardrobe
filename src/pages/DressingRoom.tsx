@@ -214,7 +214,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   const nudge = (r: Resolved, f: { dx?: number; dy?: number; scale?: number; rot?: number; wide?: number; tall?: number }) => {
     // wide＝只改闊度（高度不變）；tall＝只改高度
     const sy = Math.min(SY_LIMIT.max, Math.max(SY_LIMIT.min, ((r.fit.sy ?? 1) * (f.tall ?? 1)) / (f.wide ?? 1)));
-    applyFit(r, { cx: r.fit.cx + (f.dx ?? 0), cy: r.fit.cy + (f.dy ?? 0), w: r.fit.w * (f.scale ?? 1) * (f.wide ?? 1), rotation: r.fit.rotation + (f.rot ?? 0), sy });
+    applyFit(r, { ...r.fit, cx: r.fit.cx + (f.dx ?? 0), cy: r.fit.cy + (f.dy ?? 0), w: r.fit.w * (f.scale ?? 1) * (f.wide ?? 1), rotation: r.fit.rotation + (f.rot ?? 0), sy });
   };
   const setOpts = (r: Resolved, o: Partial<WearOpts>) => setItem(r.garment.id, { opts: { ...r.opts, ...o } });
 
@@ -236,7 +236,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   }
   const saveDefault = (r: Resolved) => {
     const v = r.worn.variant;
-    return saveTemplate(r, (d) => (v && d.variants[v] ? { data: { ...d, variants: { ...d.variants, [v]: { ...d.variants[v], fit: r.fit, opts: r.opts, mask: r.mask, parts: r.parts } } }, fit: r.template!.fit } : { data: { ...d, opts: r.opts, mask: r.mask, parts: r.parts }, fit: r.fit }), "已存為這件衣物的預設，之後任何造型穿上都會自動套用");
+    return saveTemplate(r, (d) => (v && d.variants[v] ? { data: { ...d, variants: { ...d.variants, [v]: { ...d.variants[v], fit: r.fit, opts: r.opts, mask: r.mask, parts: r.parts, pose: clampPose(rig, pose) } } }, fit: r.template!.fit } : { data: { ...d, opts: r.opts, mask: r.mask, parts: r.parts, pose: clampPose(rig, pose), front }, fit: r.fit }), "已存為這件衣物的預設，之後任何造型穿上都會自動套用");
   };
   const baseRowFit = (r: Resolved) => r.template?.fit ?? (r.worn.variant ? defaultFit(r.worn.slot, r.analysis.content, r.garment.category, r.garment.subcategory, r.garment.name) : r.base);
   async function addVariant(r: Resolved, file?: File, forPose = false) {
@@ -472,7 +472,7 @@ export default function DressingRoom({ id }: { id?: string }) {
     setBusy(true);
     const state: LookState = {
       v: 3, head: look.head, hair: look.hair, hair_color: look.hair_color, accent_color: look.accent_color, tip_color: look.tip_color, pose: clampPose(rig, pose), front,
-      items: resolved.map((r) => ({ garment_id: r.garment.id, slot: r.worn.slot, hidden: r.worn.hidden, variant: r.worn.variant, fit: r.worn.fit ?? (r.worn.v1fit ? r.fit : null), opts: r.worn.opts, mask: r.worn.mask, ...(r.worn.parts ? { parts: r.worn.parts } : {}) })),
+      items: resolved.map((r) => ({ garment_id: r.garment.id, slot: r.worn.slot, hidden: r.worn.hidden, variant: r.worn.variant, fit: r.fit, opts: r.opts, mask: r.mask, ...(r.parts ? { parts: r.parts } : {}) })),
     };
     const target = asNew ? undefined : id;
     try {
@@ -503,7 +503,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   const stageSel: Selection | null = draftPart
     ? { fit: { cx: draftPart.x + draftPart.w / 2, cy: draftPart.y + draftPart.h / 2, w: draftPart.w, rotation: 0 }, content: FULL_CONTENT(draftPart.h / draftPart.w), bone: draft!.kind === "head" ? "head" : hairBoneId(draftPart), rotate: false }
     : sel && !draft ? { fit: sel.fit, content: sel.analysis.content, bone: mainBone({ slot: sel.worn.slot, opts: sel.opts }), bounds: selItem ? renderer.bounds(selItem, mats) : undefined } : null;
-  const mode = draft ? "dress" : sel ? (editing ? "mask" : "dress") : tab === "pose" ? "pose" : "dress";
+  const mode = focus ? "preview" : draft ? "dress" : sel ? (editing ? "mask" : tool === "mesh" ? "mesh" : "dress") : tab === "pose" ? "pose" : "dress";
   // 這個姿勢有對應的衣物校正（保存穿法時連同姿勢）：提示可以套用，不會自動更改
   const poseFix = useMemo(() => {
     for (const r of resolved) { const vs: Record<string, Variant> = r.template?.data?.variants ?? {}; for (const [vid, v] of Object.entries(vs)) if (v.pose && r.worn.variant !== vid && Object.keys(pose).length > 0 && poseDistance(pose, v.pose) < 13) return { gid: r.garment.id, vid, name: v.name, garment: r.garment.name }; }
@@ -563,7 +563,7 @@ export default function DressingRoom({ id }: { id?: string }) {
 
       {/* ───── 舞台 ───── */}
       <div className="doll-stage relative min-h-0 flex-1" onClick={() => menu && setMenu(false)}>
-        <Stage renderer={renderer} scene={scene} rig={rig} view={VIEWS[viewKey]} mode={mode} selection={stageSel} onPick={onPick} onFit={onFit}
+        <Stage renderer={renderer} scene={focus ? {...scene,overlay:null} : scene} rig={rig} view={VIEWS[viewKey]} mode={mode} selection={stageSel} onPick={onPick} onFit={onFit}
           showHandles={showHandles && mode === "pose"} activeHandle={activeHandle} onPose={(p, h) => { setActiveHandle(h.id); if (p !== pose) setPose(p); }}
           onPaint={(x, y, phase) => sel && paint(sel, x, y, phase)} brush={editing === "mask" ? maskTool.size : editing === "parts" ? partTool.size : undefined} onReadyChange={setReady}>
           <div data-stage-ui className="absolute left-2 top-2 flex flex-col gap-1">
@@ -602,7 +602,7 @@ export default function DressingRoom({ id }: { id?: string }) {
             <button type="button" aria-label={panel === "max" ? "縮小面板" : "放大面板"} data-testid="panel-size" onClick={() => setPanel(panel === "max" ? "mid" : "max")} className="absolute -top-3 left-1/2 z-10 grid h-5 w-12 -translate-x-1/2 place-items-center rounded-full border border-gold/50 bg-velvet text-[12px] text-gold-soft">{panel === "max" ? "︾" : "︽"}</button>
             {draft ? <AssetPanel draft={draft} setDraft={setDraft} busy={busy} onFiles={(f) => void addAssetFiles(f)} onSave={() => void saveAsset()} onCancel={() => void cancelAsset()} onDelete={() => void deleteAsset()} />
               : sel ? (
-                <FitPanel r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onOpts={(o) => setOpts(sel, o)}
+                <FitPanel r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onMeshReset={() => applyFit(sel, {...sel.fit, mesh:undefined})} onOpts={(o) => setOpts(sel, o)}
                   part={partTool} setPart={setPartTool} hint={hint} setHint={setHint} onParts={(v) => setItem(sel.garment.id, { parts: v })}
                   onSleeveAuto={() => { if (!selItem) return; const [a, b] = suggestSleeveRot(renderer.geometry({ ...selItem, opts: { ...selItem.opts, sleeve_r: 0, sleeve_l: 0 } }), sel.fit, sel.analysis.content.ar); setOpts(sel, { sleeve_r: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, a)), sleeve_l: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, b)) }); }}
                   onPoseFix={() => void addVariant(sel, undefined, true)}

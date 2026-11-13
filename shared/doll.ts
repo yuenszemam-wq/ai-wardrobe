@@ -19,6 +19,8 @@ export interface Fit {
   rotation: number; // 度
   /** 高度的額外拉伸（1＝按圖片比例）；沒有＝1。用來獨立微調衣物的高度 */
   sy?: number;
+  /** 4×4 手動控制格：每點的圖片相對偏移 dx,dy。 */
+  mesh?: number[];
 }
 /** 衣物顯示高度（已計及獨立的高度拉伸） */
 export const fitHeight = (fit: Fit, ar: number) => fit.w * (ar > 0 ? ar : 4 / 3) * (fit.sy ?? 1);
@@ -34,6 +36,25 @@ export function fromImage(fit: Fit, ar: number, u: number, v: number): [number, 
   const lx = (u - 0.5) * fit.w, ly = (v - 0.5) * fitHeight(fit, ar);
   return [fit.cx + lx * Math.cos(t) - ly * Math.sin(t), fit.cy + lx * Math.sin(t) + ly * Math.cos(t)];
 }
+
+/** 手動網格：固定 4×4，儲存為原圖比例偏移，限制翻面及極端拉伸。 */
+export const MANUAL_GRID = 4;
+export function normalizeManualMesh(v: unknown): number[] | undefined {
+  if (!Array.isArray(v) || v.length !== 32 || v.some(x => typeof x !== "number" || !Number.isFinite(x) || Math.abs(x) > 0.75)) return undefined;
+  const a = v.map(x => Math.round(x * 10000) / 10000);
+  const pt = (i: number) => [i % 4 / 3 + a[i*2], Math.floor(i / 4) / 3 + a[i*2+1]];
+  const cross = (a: number[], b: number[], c: number[]) => (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  for (let y=0;y<3;y++) for(let x=0;x<3;x++) { const i=y*4+x, p=pt(i), q=pt(i+1), s=pt(i+4), t=pt(i+5); if ([cross(p,q,s),cross(q,t,p),cross(t,s,q),cross(s,p,t)].some(c=>c<0.002)) return undefined; }
+  return a.some(x=>x!==0) ? a : undefined;
+}
+export function manualUV(mesh: number[] | undefined, u: number, v: number): [number,number] {
+  if (!mesh) return [u,v];
+  const x=Math.max(0,Math.min(3,u*3)), y=Math.max(0,Math.min(3,v*3)), i=Math.min(2,Math.floor(x)), j=Math.min(2,Math.floor(y)), s=x-i,t=y-j;
+  const k=(j*4+i)*2;
+  const d=(c:number)=>mesh[k+c]*(1-s)*(1-t)+mesh[k+2+c]*s*(1-t)+mesh[k+8+c]*(1-s)*t+mesh[k+10+c]*s*t;
+  return [u+d(0),v+d(1)];
+}
+export function manualPoint(fit: Fit, ar: number, u: number, v: number): [number,number] { return fromImage(fit,ar,...manualUV(fit.mesh,u,v)); }
 
 export const ANCHORS = posedAnchors(RIG_V2, {});
 
@@ -162,10 +183,10 @@ export function normalizeFit(v: unknown): Fit | null {
     if (Number.isNaN(sy) || sy < SY_LIMIT.min - 1e-6 || sy > SY_LIMIT.max + 1e-6) return null;
     sy = Math.round(sy * 1000) / 1000;
   }
-  return { cx: round(cx), cy: round(cy), w: round(w), rotation: round(r), ...(Math.abs(sy - 1) > 0.0005 ? { sy } : {}) };
+  return { cx: round(cx), cy: round(cy), w: round(w), rotation: round(r), ...(Math.abs(sy - 1) > 0.0005 ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}) };
 }
 export const SY_LIMIT = { min: 0.5, max: 2 };
-export const sameFit = (a: Fit, b: Fit) => Math.abs(a.cx - b.cx) < 0.06 && Math.abs(a.cy - b.cy) < 0.06 && Math.abs(a.w - b.w) < 0.06 && Math.abs(a.rotation - b.rotation) < 0.06 && Math.abs((a.sy ?? 1) - (b.sy ?? 1)) < 0.0006;
+export const sameFit = (a: Fit, b: Fit) => Math.abs(a.cx - b.cx) < 0.06 && Math.abs(a.cy - b.cy) < 0.06 && Math.abs(a.w - b.w) < 0.06 && Math.abs(a.rotation - b.rotation) < 0.06 && Math.abs((a.sy ?? 1) - (b.sy ?? 1)) < 0.0006 && JSON.stringify(a.mesh ?? []) === JSON.stringify(b.mesh ?? []);
 
 /** 點（與 fit 同一座標系）是否落在衣物的實際內容範圍內（已計及旋轉）。透明留白不會擋住下面的衣物。 */
 export function hitTest(fit: Fit, content: Content, x: number, y: number, margin = 12): boolean {
@@ -222,7 +243,7 @@ export interface WearOpts {
 }
 export const SLEEVE_ROT_LIMIT = 80;
 export const SLOT_BONE: Record<Slot, string> = { top: "chest", outer: "chest", dress: "chest", set: "chest", skirt: "pelvis", petticoat: "pelvis", pants: "pelvis", socks: "pelvis", shoes: "root", headwear: "head", bag: "wrist_l", accessory: "chest" };
-export const ATTACHABLE_BONES = ["head", "neck", "chest", "torso", "pelvis", "wrist_r", "wrist_l", "elbow_r", "elbow_l", "ankle_r", "ankle_l", "root"];
+export const ATTACHABLE_BONES = ["head", "neck", "chest", "torso", "pelvis", "wrist_r", "wrist_l", "elbow_r", "elbow_l", "ankle_r", "ankle_l", "root", "world"];
 export type SkinKind = "upper" | "legs" | "rigid";
 export const SLOT_SKIN: Record<Slot, SkinKind> = { top: "upper", outer: "upper", dress: "upper", set: "upper", pants: "legs", socks: "legs", shoes: "legs", skirt: "rigid", petticoat: "rigid", headwear: "rigid", bag: "rigid", accessory: "rigid" };
 export const defaultOpts = (slot: Slot): WearOpts => ({ follow: "auto", neck: slot === "top" || slot === "dress" || slot === "outer" || slot === "set", bone: null, over_head: slot === "headwear" });
@@ -279,6 +300,7 @@ export interface TemplateData {
   parts?: PartsRef | null;
   /** 預設穿法的高度拉伸（位置的其他數值存在資料表欄位） */
   sy?: number;
+  mesh?: number[];
   /** 適合這件衣物的姿勢（可選擇套用） */
   pose: Pose | null;
   front: FrontPart[];
@@ -307,7 +329,7 @@ export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
     }
   }
   const sy = typeof o.sy === "number" && o.sy >= SY_LIMIT.min && o.sy <= SY_LIMIT.max && Math.abs(o.sy - 1) > 0.0005 ? Math.round(o.sy * 1000) / 1000 : undefined;
-  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}) };
+  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}) };
 }
 
 // ───── 造型 ─────

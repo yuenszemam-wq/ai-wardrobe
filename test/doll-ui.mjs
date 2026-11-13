@@ -177,7 +177,7 @@ try {
   await page.click('[data-testid="fit-save-default"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="fit-from"]')?.textContent.includes("衣物預設"));
   const tpl = await env.DB.prepare("SELECT cx, cy, data FROM doll_fit_templates WHERE garment_id='gar_bl' AND avatar_id='avatar_v2'").first();
-  check("存為衣物預設：位置及穿法設定寫入", tpl && Math.abs(tpl.cx - 640) < 12 && JSON.parse(tpl.data).opts.follow === "auto", tpl);
+  check("存為衣物預設：位置及穿法設定寫入", tpl && Math.abs(tpl.cx - 640) < 12 && JSON.parse(tpl.data).opts.follow === "none", tpl);
   await page.click('[data-tool="follow"]');
   await page.click('[data-follow="none"]');
   check("只在這個造型改變骨架跟隨方式", (await page.textContent('[data-testid="fit-from"]')).includes("只用於這個造型"));
@@ -207,6 +207,9 @@ try {
   await ready();
   check("重做", (await room("data-masked")) === "1");
   await page.click('[data-testid="mask-clear"]');
+  await page.click('[data-tool="parts"]');
+  await page.click('[data-tool="follow"]');
+  await page.click('[data-follow="auto"]');
   await page.click('[data-tool="parts"]');
   const sum0 = await page.textContent('[data-testid="rig-summary"]');
   check("部件：自動分辨出左右袖，並說明衣身保持完整", sum0.includes("自動分辨") && sum0.includes("右袖") && sum0.includes("左袖"), sum0);
