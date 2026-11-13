@@ -238,3 +238,14 @@ export const IconCheck = (p: P) => (
     <path d="M5 12.500l4.500 4.500L19 7.500" />
   </Svg>
 );
+export const IconHand = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 10.5V4.5a1.5 1.5 0 0 1 3 0v6M14 10.5V6a1.5 1.5 0 0 1 3 0v8.5c0 3.6-2.4 6-6 6-2.4 0-3.9-1-5.2-3L4 14.6a1.5 1.5 0 0 1 2.5-1.6L8 15" />
+  </Svg>
+);
+export const IconTarget = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="6.5" />
+    <path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4" />
+  </Svg>
+);
