@@ -9,7 +9,8 @@ try {
   for(let i=0;i<206;i++) {
     const id='gar_many_'+i, image='img_'+i.toString(32).replace(/[0-9a-v]/g,c=>'abcdefghijklmnopqrstuvwxyz234567'[parseInt(c,32)]).padStart(8,'z');
     await env.DB.prepare("INSERT INTO garments (id,name,category,subcategory,status,created_at,updated_at) VALUES (?,?, '上衣', '第206件', 'active','t','t')").bind(id,`衣物${String(i).padStart(3,'0')}`).run();
-    await env.DB.prepare("INSERT INTO garment_images (id,garment_id,image_type,r2_key,mime_type,width,height,file_size,sha256,has_alpha,is_primary,created_at) SELECT ?,?,'processed',r2_key,mime_type,width,height,file_size,sha256,1,1,'t' FROM garment_images WHERE garment_id='gar_seed'").bind(image,id).run();
+    await env.DB.prepare("INSERT INTO garment_images (id,garment_id,image_type,r2_key,mime_type,width,height,file_size,sha256,has_alpha,is_primary,created_at) SELECT ?,?,'processed',?,mime_type,width,height,file_size,sha256,1,1,'t' FROM garment_images WHERE garment_id='gar_seed'").bind(image,id,`garments/${id}/p.png`).run();
+    await env.DB.prepare("INSERT INTO garment_thumbnails (image_id,garment_id,data,mime_type,byte_size,width,height,has_alpha,source_sha256,version,updated_at) SELECT ?,?,data,mime_type,byte_size,width,height,has_alpha,source_sha256,version,updated_at FROM garment_thumbnails WHERE garment_id='gar_seed'").bind(image,id).run();
   }
   let hd=0;page.on('request',req=>{if(/\/api\/images\/[^/?]+(?:\?|$)/.test(req.url())&&!/thumb/.test(req.url()))hd++;});
   await page.goto(R.base+'/dressing/setup');
