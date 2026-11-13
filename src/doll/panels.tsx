@@ -18,12 +18,6 @@ const Row = ({ children, className = "" }: { children: ReactNode; className?: st
 // ───── 衣服 ─────
 export function ClothesPanel({ garments, wornIds, pending, onToggle }: { garments: Garment[] | null; wornIds: Set<string>; pending: Set<string>; onToggle: (g: Garment) => void }) {
   const [cat, setCat] = useState("");
-  const [source,setSource]=useState("");
-  const sourceHair=hairs.find(h=>h.id===source);
-  const current=hair?.parts??[];
-  const selected=current.find(p=>p.id===selectedHair);
-  const changeParts=(parts:HairPart[])=>onChange({...value,hair_config:{...hair,parts}});
-  const add=(parts:HairPart[])=>{const next=addHairParts(hair,parts);onChange({...value,hair_config:next});if(next.parts.length>current.length)onSelectHair(next.parts[next.parts.length-1].id);};
   const [q, setQ] = useState("");
   const [search, setSearch] = useState(false);
   const cats = useMemo(() => [...new Set((garments || []).map((g) => g.category || "").filter(Boolean))], [garments]);
@@ -310,12 +304,11 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
   const cats = [...new Set(hairs.map((h) => h.category).filter(Boolean))] as string[];
   const [cat, setCat] = useState("");
   const [source,setSource]=useState("");
-  const current=hair?.parts??[];
   const sourceHair=hairs.find(h=>h.id===source);
-  const changeParts=(parts:HairPart[])=>onChange({...value,hair_config:{...hair,parts}});
-  const add=(parts:HairPart[])=>changeParts(addHairParts(current,parts));
+  const current=hair?.parts??[];
   const selected=current.find(p=>p.id===selectedHair);
-
+  const changeParts=(parts:HairPart[])=>onChange({...value,hair_config:{...hair,parts}});
+  const add=(parts:HairPart[])=>{const next=addHairParts(hair,parts);onChange({...value,hair_config:next});if(next.parts.length>current.length)onSelectHair(next.parts[next.parts.length-1].id);};
   const Swatch = ({ label, value: v, fallback, onPick, onClear, testid }: { label: string; value: string | null; fallback: string; onPick: (hex: string) => void; onClear?: () => void; testid: string }) => (
     <label className="chip relative flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2.5 py-2">
       <span className="h-7 w-7 shrink-0 rounded-lg border border-white/40" style={{ background: v ?? fallback }} />
