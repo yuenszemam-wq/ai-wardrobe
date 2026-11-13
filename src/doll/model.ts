@@ -90,6 +90,18 @@ export function pieceOf(w: Worn, tpl: Template | null): Piece | null {
   if (!w.piece) return null;
   return w.piece_def ?? tpl?.data?.pieces?.find((p) => p.id === w.piece) ?? null;
 }
+/**
+ * 未設定跟隨方式的部件：按名稱建議附接的骨骼（之後可以在「骨架」修改）。
+ * 名稱的左右＝角色自己的左右（右袖套在畫面左邊，附接角色的右前臂）。
+ */
+export function pieceBone(p: Pick<Piece, "name" | "slot">): string {
+  const n = p.name;
+  if (/袖套|手套|手腕|手環|腕/.test(n)) return /左/.test(n) ? "elbow_l" : /右/.test(n) ? "elbow_r" : "world";
+  if (/頸|領|choker|項鍊/i.test(n)) return "neck";
+  if (p.slot === "headwear" || /頭飾|髮飾|帽|髮箍|kc|髮夾/i.test(n)) return "head";
+  if (/鞋|襪/.test(n)) return /左/.test(n) ? "ankle_l" : /右/.test(n) ? "ankle_r" : "world";
+  return "world";
+}
 export const templateFor = (tpls: Templates, g: GarmentLite) => validTemplate(tpls.v2.get(g.id), g);
 export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<string, Analysis>, pieceRefs?: Map<string, string>): Resolved | null {
   const tpl = validTemplate(tpls.v2.get(g.id), g);
@@ -102,8 +114,10 @@ export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<
     const full = g.transparent_image_id ? analyses.get("img:" + g.transparent_image_id) : undefined;
     const setFit = tpl?.fit ?? (full ? defaultFit(tpl && isSlot(tpl.slot) ? tpl.slot : slotFor(g.category, g.subcategory), full.content, g.category, g.subcategory, g.name) : null);
     const base = piece.fit ?? (setFit && full ? pieceFit(setFit, full.content.ar, piece.box) : defaultFit(piece.slot, analysis.content, null, null, piece.name));
-    const opts = w.opts ?? piece.opts ?? { ...defaultOpts(piece.slot), follow: "none" as const, bone: "world" };
-    return { key: itemKey(w), worn: w, garment: g, piece, image, base, fit: w.fit ?? base, opts, mask: w.mask ?? null, parts: w.parts ?? null, analysis, from: w.fit || w.opts || w.mask || w.parts ? "override" : piece.fit ? "template" : "default", template: tpl };
+    const opts = w.opts ?? piece.opts ?? { ...defaultOpts(piece.slot), follow: "none" as const, bone: pieceBone(piece) };
+    // 穿著遮罩：造型快照（null＝確實沒有）→ 個別調整 → 部件預設的穿著遮罩
+    const mask = w.snapshot ? w.mask ?? null : w.mask ?? piece.wear_mask ?? null;
+    return { key: itemKey(w), worn: w, garment: g, piece, image, base, fit: w.fit ?? base, opts, mask, parts: w.parts ?? null, analysis, from: w.fit || w.opts || w.mask || w.parts ? "override" : piece.fit ? "template" : "default", template: tpl };
   }
   const variant = w.variant ? tpl?.data?.variants[w.variant] ?? null : null;
   const image = imageOf(w, g, tpl);

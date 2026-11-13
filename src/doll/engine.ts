@@ -193,10 +193,11 @@ export class DollRenderer {
   /** 衣物的部件、網格及骨骼權重（位置、部件或穿法改變時才重做） */
   geometry(it: SceneItem): GarmentRig {
     const parts = this.partsOf(it) ?? { map: null, key: "pending" };
-    const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, JSON.stringify(it.fit.mesh ?? []), it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key].join("|");
+    const bindKey = it.opts.bind ? JSON.stringify(it.opts.bind) : "";
+    const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, JSON.stringify(it.fit.mesh ?? []), it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key, bindKey].join("|");
     const hit = this.geo.get(it.key);
     if (hit?.key === key) return hit.rig;
-    const inp = { grid: it.grid, fit: it.fit, ar: it.content.ar, kind: SLOT_SKIN[it.slot], follow: it.opts.follow, bone: mainBone(it), pinned: !!it.opts.bone, parts: parts.map, sleeveRot: [it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0] as [number, number], loose: it.slot === "top" || it.slot === "outer" };
+    const inp = { grid: it.grid, fit: it.fit, ar: it.content.ar, kind: SLOT_SKIN[it.slot], follow: it.opts.follow, bone: mainBone(it), pinned: !!it.opts.bone, parts: parts.map, sleeveRot: [it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0] as [number, number], loose: it.slot === "top" || it.slot === "outer", bind: bindKey ? solve(RIG_V2, it.opts.bind) : null };
     let rig = buildRig(inp);
     // 安全網：拆件後各部件合起來必須覆蓋差不多整件布料；否則（例如衣身被誤判而消失）改回整件衣物
     if (this.forceWhole.has(it.key + "|" + key) || (rig.layers.length > 1 && rigCoverage(rig, it.grid) < 0.97)) {
@@ -588,8 +589,20 @@ export class DollRenderer {
     ctx.fillStyle = "rgb(120 90 120 / 0.10)";
     const q = 40;
     for (let j = 0; j * q < r.h + 24; j++) for (let i = j % 2; i * q < r.w + 24; i += 2) ctx.fillRect(r.x - 12 + i * q, r.y - 12 + j * q, Math.min(q, r.w + 24 - i * q), Math.min(q, r.h + 24 - j * q));
-    ctx.drawImage(src, r.x, r.y, r.w, r.h);
     let complete = true;
+    // 已套用遮罩：淡淡顯示原圖（看得到已隱藏的位置），上面是遮罩後的實際效果，移到身後的部分半透明。
+    // 對比時（沒有遮罩）只顯示完整原圖。
+    const w = it.mask || this.liveMask.has(it.key) ? this.worked(it) : null;
+    if (w && w.front !== src) {
+      ctx.globalAlpha = 0.28;
+      ctx.drawImage(src, r.x, r.y, r.w, r.h);
+      ctx.globalAlpha = 1;
+      if (w.behind) { ctx.globalAlpha = 0.5; ctx.drawImage(w.behind, r.x, r.y, r.w, r.h); ctx.globalAlpha = 1; }
+      ctx.drawImage(w.front, r.x, r.y, r.w, r.h);
+    } else {
+      if (it.mask && !w) complete = false;
+      ctx.drawImage(src, r.x, r.y, r.w, r.h);
+    }
     if (scene.overlay && scene.overlay.key === it.key) {
       if (it.parts && it.parts !== "whole" && !this.partsOf(it)) complete = false;
       const o = this.overlay(it, scene.overlay.mode, this.geometry(it));

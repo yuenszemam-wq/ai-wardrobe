@@ -4,7 +4,7 @@
 // 部件（衣身／左右袖／左右腿）只用來決定權重；辨認不可靠時整件當作衣身（完整衣物模式）。
 // 全部是純函數，前端及測試共用。座標＝1200×1800 邏輯畫布像素。
 import { RIG_V2 } from "./avatarV2";
-import { Mat, applyMat, boneMap, multiply, rotateAbout } from "./avatarRig";
+import { Mat, applyMat, boneMap, invert, multiply, rotateAbout } from "./avatarRig";
 import { Fit, Follow, SkinKind, fitHeight, fromImage, manualPoint, toImage } from "./doll";
 
 export interface AlphaField { w: number; h: number; data: Uint8Array }
@@ -254,6 +254,23 @@ export interface RigInput {
   sleeveRot?: [number, number];
   /** 上衣／外套：袖子可以比衣身大 */
   loose?: boolean;
+  /**
+   * 綁定基準姿勢下各節骨骼的矩陣（Phase 3.4）。有＝衣物是在這個姿勢下校正的：
+   * 頂點（主骨骼的局部座標）先放到基準姿勢的位置，再按「目前姿勢 × 基準姿勢的逆」變形，
+   * 所以基準姿勢下衣物完全不變形，之後只按姿勢差異跟隨。手動網格亦可以同時使用（不會重複計算）。
+   */
+  bind?: Record<string, Mat> | null;
+}
+const IDENT: Mat = [1, 0, 0, 1, 0, 0];
+const nearIdent = (m: Mat) => Math.abs(m[0] - 1) < 1e-6 && Math.abs(m[1]) < 1e-6 && Math.abs(m[2]) < 1e-6 && Math.abs(m[3] - 1) < 1e-6 && Math.abs(m[4]) < 1e-4 && Math.abs(m[5]) < 1e-4;
+/** 骨骼 id 的預乘矩陣：inv(基準[b]) × 基準[主骨骼] × pre */
+function bindPre(inp: RigInput, id: string, pre: Mat | null): Mat | null {
+  const B = inp.bind;
+  if (!B || id === "world") return pre;
+  const bm = B[id] ?? B.root ?? IDENT, main = inp.bone === "world" ? IDENT : B[inp.bone] ?? B.root ?? IDENT;
+  let m = multiply(invert(bm), main);
+  if (pre) m = multiply(m, pre);
+  return nearIdent(m) ? null : m;
 }
 export interface RigInfo {
   /** rigid＝整件跟隨一節骨骼；body＝連續網格但沒有拆出袖子／腿；parts＝有袖子或腿跟隨 */
@@ -337,7 +354,8 @@ export function buildRig(inp: RigInput): GarmentRig {
   const info: RigInfo = { mode: "rigid", source: "auto", sleeve_r: false, sleeve_l: false, forearm: false, legs: false, unsure: false };
   let labels: Uint8Array = new Uint8Array(grid.w * grid.h);
   const done = (layers: (Mesh | null)[], matteKey = ""): GarmentRig => ({ layers: layers.filter((l): l is Mesh => !!l), labels: { w: grid.w, h: grid.h, data: labels }, matteKey, info });
-  if (fit.mesh || inp.kind === "rigid" || inp.pinned || inp.follow === "none") return done([meshFor(inp, 0, null, [{ id: inp.bone, pre: null }], () => undefined, fit.mesh ? 32 : 90)]);
+  if ((fit.mesh && !inp.bind) || inp.kind === "rigid" || inp.pinned || inp.follow === "none") return done([meshFor(inp, 0, null, [{ id: inp.bone, pre: null }], () => undefined, fit.mesh ? 32 : 90)]);
+  const withBind = (layers: (Mesh | null)[]) => (inp.bind ? layers.map((l) => (l ? { ...l, bones: l.bones.map((b) => ({ id: b.id, pre: bindPre(inp, b.id, b.pre) })) } : l)) : layers);
 
   const cellPx = fit.w / grid.w;
   const trunk: Mesh["bones"] = ["pelvis", "torso", "chest"].map((id) => ({ id, pre: null }));
@@ -372,7 +390,7 @@ export function buildRig(inp: RigInput): GarmentRig {
   if (inp.kind === "upper") { info.sleeve_r = has[0]; info.sleeve_l = has[1]; } else info.legs = has[0] || has[1];
   if (!has[0] && !has[1]) {
     info.mode = "body";
-    return done([inp.kind === "upper" ? meshFor(inp, 0, null, trunk, trunkW, 32) : meshFor(inp, 0, null, [{ id: "pelvis", pre: null }], () => undefined, 90)]);
+    return done(withBind([inp.kind === "upper" ? meshFor(inp, 0, null, trunk, trunkW, 32) : meshFor(inp, 0, null, [{ id: "pelvis", pre: null }], () => undefined, 90)]));
   }
   info.mode = "parts";
   // ───── 各部件佔圖片的範圍 ─────
@@ -398,9 +416,12 @@ export function buildRig(inp: RigInput): GarmentRig {
     const rot = inp.sleeveRot ?? [0, 0];
     const arms = (["r", "l"] as const).map((sd, idx) => {
       const S = piv("shoulder_" + sd), E = piv("elbow_" + sd), Wp = piv("wrist_" + sd), len = Math.hypot(Wp[0] - E[0], Wp[1] - E[1]);
-      return { S, E, dir: [(Wp[0] - E[0]) / len, (Wp[1] - E[1]) / len] as Pt, pre: Math.abs(rot[idx]) >= 0.5 ? rotateAbout(rot[idx], S[0], S[1]) : null, sd };
+      const pre = Math.abs(rot[idx]) >= 0.5 ? rotateAbout(rot[idx], S[0], S[1]) : null;
+      // 權重按「放回靜止站姿」後的位置計算：有基準姿勢時先把頂點由基準姿勢換算回該節骨骼的靜止位置
+      const ps = bindPre(inp, "shoulder_" + sd, pre) ?? IDENT, pe = bindPre(inp, "elbow_" + sd, pre) ?? IDENT;
+      return { S, E, dir: [(Wp[0] - E[0]) / len, (Wp[1] - E[1]) / len] as Pt, pre, ps, pe, sd };
     });
-    const along = (a: (typeof arms)[number], x: number, y: number) => { const [px, py] = a.pre ? applyMat(a.pre, x, y) : [x, y]; return (px - a.E[0]) * a.dir[0] + (py - a.E[1]) * a.dir[1]; };
+    const along = (a: (typeof arms)[number], x: number, y: number) => { const [px, py] = applyMat(a.pe, x, y); return (px - a.E[0]) * a.dir[0] + (py - a.E[1]) * a.dir[1]; };
     // 袖子有沒有長到前臂
     let reach = -Infinity;
     if (inp.follow !== "upper") for (let j = 0; j < grid.h; j += 2) for (let i = 0; i < grid.w; i += 2) { const l = labels[j * grid.w + i]; if ((l === 1 || l === 2) && grid.data[j * grid.w + i] > OPAQUE) { const [x, y] = fromImage(fit, ar, (i + 0.5) / grid.w, (j + 0.5) / grid.h); reach = Math.max(reach, along(arms[l - 1], x, y)); } }
@@ -411,9 +432,9 @@ export function buildRig(inp: RigInput): GarmentRig {
       // 袖根（肩關節附近）仍然跟隨上胸，向外逐漸過渡到手臂：袖子與衣身保持連接，彎曲位置平滑
       layers.push(meshFor(inp, ids[s], limbMatte[s], bones, (x, y, out, o) => {
         // 手肘的彎曲範圍：離手臂軸線愈遠（闊袖），過渡愈闊，布料才不會被扯長
-        const [px, py] = a.pre ? applyMat(a.pre, x, y) : [x, y];
+        const [px, py] = applyMat(a.ps, x, y);
         const side = Math.abs((px - a.E[0]) * a.dir[1] - (py - a.E[1]) * a.dir[0]), band = 36 + side * 0.7;
-        const t = ss(30, 115, Math.hypot(x - a.S[0], y - a.S[1])), lower = info.forearm ? ss(-band, band, along(a, x, y)) : 0;
+        const t = ss(30, 115, Math.hypot(px - a.S[0], py - a.S[1])), lower = info.forearm ? ss(-band, band, along(a, x, y)) : 0;
         out[o] = 1 - t; out[o + 1] = t * (1 - lower); out[o + 2] = t * lower;
       }, 28));
     });
@@ -423,14 +444,16 @@ export function buildRig(inp: RigInput): GarmentRig {
       if (!limbMatte[s]) return;
       const Hp = piv("hip_" + sd), K = piv("knee_" + sd), A = piv("ankle_" + sd), len = Math.hypot(A[0] - K[0], A[1] - K[1]), dir: Pt = [(A[0] - K[0]) / len, (A[1] - K[1]) / len];
       const bones: Mesh["bones"] = ["pelvis", "hip_" + sd, "knee_" + sd, "ankle_" + sd].map((id) => ({ id, pre: null }));
-      layers.push(meshFor(inp, ids[s], limbMatte[s], bones, (x, y, out, o) => {
+      const pk = bindPre(inp, "hip_" + sd, null) ?? IDENT;
+      layers.push(meshFor(inp, ids[s], limbMatte[s], bones, (x0, y0, out, o) => {
+        const [x, y] = applyMat(pk, x0, y0);
         const side = Math.abs((x - K[0]) * dir[1] - (y - K[1]) * dir[0]), band = 40 + side * 0.6;
         const t = bodyAny ? ss(Hp[1] - 30, Hp[1] + 70, y) : 1, shin = ss(-band, band, (x - K[0]) * dir[0] + (y - K[1]) * dir[1]), foot = ss(-30, 30, y - A[1]);
         out[o] = 1 - t; out[o + 1] = t * (1 - shin); out[o + 2] = t * shin * (1 - foot); out[o + 3] = t * shin * foot;
       }, 30));
     });
   }
-  return done(layers, key);
+  return done(withBind(layers), key);
 }
 
 /** 各節骨骼在目前姿勢下的矩陣（已計及袖子的靜止角度） */

@@ -225,6 +225,12 @@ export interface WearOpts {
   /** 袖子在靜止姿勢的額外角度（度；右袖、左袖）：令平放拍攝的袖子貼近手臂。沒有＝0 */
   sleeve_r?: number;
   sleeve_l?: number;
+  /**
+   * 綁定基準姿勢（Phase 3.4）：這件衣物是在這個角色姿勢下校正的。
+   * 角色擺出這個姿勢時衣物完全按校正時的樣子顯示；之後移動手臂／腳，只按「目前姿勢與基準姿勢的差異」變形。
+   * 沒有＝以靜止站姿為基準（舊行為）。
+   */
+  bind?: Pose;
 }
 export const SLEEVE_ROT_LIMIT = 80;
 export const SLOT_BONE: Record<Slot, string> = { top: "chest", outer: "chest", dress: "chest", set: "chest", skirt: "pelvis", petticoat: "pelvis", pants: "pelvis", socks: "pelvis", shoes: "root", headwear: "head", bag: "wrist_l", accessory: "chest" };
@@ -242,7 +248,13 @@ export function normalizeOpts(v: unknown, slot: Slot): WearOpts {
     bone: typeof o.bone === "string" && ATTACHABLE_BONES.includes(o.bone) ? o.bone : null,
     over_head: typeof o.over_head === "boolean" ? o.over_head : d.over_head,
     ...sleeveRot(o),
+    ...bindOf(o.bind),
   };
+}
+function bindOf(v: unknown): { bind?: Pose } {
+  if (!v || typeof v !== "object") return {};
+  const p = normalizePose(RIG_V2, v);
+  return p && Object.keys(p).length ? { bind: p } : {};
 }
 function sleeveRot(o: Record<string, unknown>): { sleeve_r?: number; sleeve_l?: number } {
   const out: { sleeve_r?: number; sleeve_l?: number } = {};
@@ -293,6 +305,27 @@ export interface Piece {
   /** 這個部件的預設位置及跟隨方式（沒有＝按套裝原本的位置） */
   fit?: Fit | null;
   opts?: WearOpts | null;
+  /**
+   * 部件的穿著遮罩（Phase 3.4）：穿上角色後哪些部分隱藏／移到身後。
+   * 與 mask（拆件選取遮罩：決定從原圖提取哪些像素）是兩件不同的事。
+   */
+  wear_mask?: string | null;
+  /** 適合這個部件的角色姿勢（可選擇套用） */
+  pose?: Pose | null;
+  /** 部件設定狀態（手動標記「已完成／不需要」） */
+  status?: SetupStatus;
+}
+/** 衣物設定的各個項目；狀態可以手動標記為已完成或不需要 */
+export const SETUP_KEYS = ["place", "mesh", "mask", "rig"] as const;
+export type SetupKey = (typeof SETUP_KEYS)[number];
+export type SetupMark = "done" | "na";
+export type SetupStatus = Partial<Record<SetupKey, SetupMark>>;
+export const SETUP_LABEL: Record<SetupKey, string> = { place: "位置", mesh: "變形", mask: "遮罩", rig: "骨架" };
+export function normalizeStatus(v: unknown): SetupStatus | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>, out: SetupStatus = {};
+  for (const k of SETUP_KEYS) if (o[k] === "done" || o[k] === "na") out[k] = o[k] as SetupMark;
+  return Object.keys(out).length ? out : undefined;
 }
 export const PIECE_MASK_MAX = 120_000;
 const isPieceMask = (v: unknown): v is string => typeof v === "string" && v.length <= PIECE_MASK_MAX && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(v);
@@ -309,6 +342,9 @@ export function normalizePiece(v: unknown): Piece | null {
     id, name: (typeof o.name === "string" ? o.name.trim().slice(0, 30) : "") || "部件", slot, box: b as Piece["box"],
     ...(mask ? { mask } : {}), ...(file ? { file } : {}), ...(o.rest === true ? { rest: true } : {}),
     ...(o.fit ? { fit: normalizeFit(o.fit) } : {}), ...(o.opts ? { opts: normalizeOpts(o.opts, slot) } : {}),
+    ...(isMask(o.wear_mask) ? { wear_mask: o.wear_mask } : {}),
+    ...(o.pose && typeof o.pose === "object" ? { pose: normalizePose(RIG_V2, o.pose) } : {}),
+    ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}),
   };
 }
 export const normalizePieces = (v: unknown): Piece[] => (Array.isArray(v) ? v.slice(0, 16).map(normalizePiece).filter((p): p is Piece => !!p).filter((p, i, a) => a.findIndex((q) => q.id === p.id) === i) : []);
@@ -338,6 +374,8 @@ export interface TemplateData {
   converted?: boolean;
   /** 套裝拆件 */
   pieces?: Piece[];
+  /** 各設定項目的手動狀態（已完成／不需要）；沒有標記的項目由程式按實際設定判斷 */
+  status?: SetupStatus;
 }
 const frontOf = (v: unknown): FrontPart[] => (Array.isArray(v) ? (["hand_r", "hand_l"] as FrontPart[]).filter((k) => v.includes(k)) : []);
 export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
@@ -359,7 +397,7 @@ export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
     }
   }
   const sy = typeof o.sy === "number" && o.sy >= SY_LIMIT.min && o.sy <= SY_LIMIT.max && Math.abs(o.sy - 1) > 0.0005 ? Math.round(o.sy * 1000) / 1000 : undefined;
-  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}), ...(normalizePieces(o.pieces).length ? { pieces: normalizePieces(o.pieces) } : {}) };
+  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}), ...(normalizePieces(o.pieces).length ? { pieces: normalizePieces(o.pieces) } : {}), ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}) };
 }
 
 // ───── 造型 ─────
