@@ -15,7 +15,26 @@ function check(name, cond, info) {
 }
 const near = (a, b, e = 0.6) => Math.abs(a - b) <= e;
 const rig = V.RIG_V2;
+const M = await buildModule("shared/avatarModel.ts", "t-avatar-model");
 
+
+console.log("Phase 3.6 model isolation");
+{
+  const shifted = JSON.parse(JSON.stringify(rig));
+  shifted.avatar_id = "test_body";
+  for (const b of shifted.bones) { b.pivot[0] += 30; b.rest_position[0] += 30; }
+  for (const p of Object.values(shifted.anchors)) p[0] += 30;
+  const c = D.FULL_CONTENT();
+  const a = D.defaultFit("dress", c);
+  const b = D.defaultFit("dress", c, null, null, null, shifted);
+  check("自訂模型的衣物對位使用模型錨點", near(b.cx - a.cx, 30));
+  check("預設模型保留 V2", M.DEFAULT_BODY_MODEL.id === V.AVATAR_V2_ID);
+  const hair = { parts: [] };
+  check("相同髮件不共用不同身體骨架快取", V.rigFor(hair, shifted) === shifted && V.rigFor(hair) === rig);
+  const extra = { parts: [{ id:"custom", bone:"own", pivot:[650,200], range:20 }] };
+  const r1 = V.rigFor(extra), r2 = V.rigFor(extra, shifted);
+  check("自訂髮束骨架按身體分開", r1 !== r2 && r2.bones.some(b => b.id === "hp_custom") && r2.bones.find(b=>b.id==="head").pivot[0] === shifted.bones.find(b=>b.id==="head").pivot[0]);
+}
 console.log("骨架");
 {
   const ids = rig.bones.map((b) => b.id);

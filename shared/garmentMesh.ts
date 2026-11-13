@@ -4,7 +4,7 @@
 // 部件（衣身／左右袖／左右腿）只用來決定權重；辨認不可靠時整件當作衣身（完整衣物模式）。
 // 全部是純函數，前端及測試共用。座標＝1200×1800 邏輯畫布像素。
 import { RIG_V2 } from "./avatarV2";
-import { Mat, applyMat, boneMap, invert, multiply, rotateAbout } from "./avatarRig";
+import { Mat, Rig, applyMat, boneMap, invert, multiply, rotateAbout } from "./avatarRig";
 import { Fit, Follow, SkinKind, fitHeight, fromImage, manualPoint, toImage } from "./doll";
 
 export interface AlphaField { w: number; h: number; data: Uint8Array }
@@ -14,13 +14,18 @@ export const PART_LABEL = ["衣身", "右袖", "左袖", "右腿", "左腿"];
 export interface PartMap { w: number; h: number; data: Uint8Array }
 
 type Pt = [number, number];
-const B = boneMap(RIG_V2);
-const piv = (id: string): Pt => B.get(id)!.pivot as Pt;
 const ss = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
-const MIRROR = piv("shoulder_r")[0] + piv("shoulder_l")[0];
-const CENTER = MIRROR / 2;
-const SR = piv("shoulder_r");
-const CHEST_Y = piv("chest")[1], WAIST_Y = piv("torso")[1], CROTCH_Y = piv("hip_r")[1] - 14;
+// Geometry is model-local. Never share V2 joint coordinates with another body.
+function anatomy(rig: Rig) {
+  const B = boneMap(rig);
+  const piv = (id: string): Pt => {
+    const b = B.get(id);
+    if (!b) throw new Error("Missing garment rig bone: " + id);
+    return b.pivot;
+  };
+  const MIRROR = piv("shoulder_r")[0] + piv("shoulder_l")[0];
+  return { piv, MIRROR, CENTER: MIRROR / 2, SR: piv("shoulder_r"), CHEST_Y: piv("chest")[1], WAIST_Y: piv("torso")[1], CROTCH_Y: piv("hip_r")[1] - 14 };
+}
 const OPAQUE = 48;
 const sample = (g: AlphaField, u: number, v: number) => (u < 0 || v < 0 || u >= 1 || v >= 1 ? 0 : g.data[Math.floor(v * g.h) * g.w + Math.floor(u * g.w)]);
 
@@ -41,7 +46,8 @@ export interface AutoParts {
  * 4. 袖子佔半件衣物的比例不合理時（例如長袖垂在裙身上連成一片）視為沒有把握，保持整件。
  * loose＝上衣／外套（袖子可以比衣身大）；連身裙的上限較嚴，避免把裙身當成袖子。
  */
-export function detectSleeves(grid: AlphaField, fit: Fit, ar: number, loose = false): AutoParts {
+export function detectSleeves(grid: AlphaField, fit: Fit, ar: number, loose = false, bodyRig: Rig = RIG_V2): AutoParts {
+  const { MIRROR, CENTER, SR, WAIST_Y } = anatomy(bodyRig);
   const labels = new Uint8Array(grid.w * grid.h);
   const out: AutoParts = { labels, sleeve_r: false, sleeve_l: false, unsure: false };
   // 衣物在畫布上的範圍
@@ -184,7 +190,8 @@ export function detectSleeves(grid: AlphaField, fit: Fit, ar: number, loose = fa
 }
 
 /** 使用者要求袖子跟隨、但輪廓找不到袖子時：按角色手臂位置劃分（保守範圍） */
-function armZone(grid: AlphaField, fit: Fit, ar: number): Uint8Array {
+function armZone(grid: AlphaField, fit: Fit, ar: number, bodyRig: Rig): Uint8Array {
+  const { piv, SR, MIRROR } = anatomy(bodyRig);
   const labels = new Uint8Array(grid.w * grid.h);
   const E = piv("elbow_r"), Wr = piv("wrist_r");
   const line: Pt[] = [SR, E, Wr];
@@ -199,7 +206,8 @@ function armZone(grid: AlphaField, fit: Fit, ar: number): Uint8Array {
 }
 
 /** 褲、襪、鞋：胯部以下按左右分給兩條腿；整塊都在一邊的獨立布料（一隻襪、一隻鞋）整塊跟隨那條腿 */
-export function detectLegs(grid: AlphaField, fit: Fit, ar: number): Uint8Array {
+export function detectLegs(grid: AlphaField, fit: Fit, ar: number, bodyRig: Rig = RIG_V2): Uint8Array {
+  const { CENTER, CROTCH_Y } = anatomy(bodyRig);
   const { w, h } = grid, labels = new Uint8Array(w * h), comp = new Int32Array(w * h).fill(-1);
   const pos = new Float32Array(w * h * 2);
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const [x, y] = fromImage(fit, ar, (i + 0.5) / w, (j + 0.5) / h); pos[(j * w + i) * 2] = x; pos[(j * w + i) * 2 + 1] = y; }
@@ -240,6 +248,8 @@ function spread(grid: AlphaField, isSrc: (k: number) => boolean, limit: number):
 }
 
 export interface RigInput {
+  /** Compatible body skeleton; omitted for existing V2 callers. */
+  bodyRig?: Rig;
   grid: AlphaField;
   fit: Fit;
   ar: number;
@@ -351,6 +361,8 @@ function meshFor(inp: RigInput, part: number, matte: Uint8Array | null, bones: M
 /** 建立衣物的部件、網格及骨骼權重 */
 export function buildRig(inp: RigInput): GarmentRig {
   const { grid, fit, ar } = inp;
+  const bodyRig = inp.bodyRig ?? RIG_V2;
+  const { piv, CHEST_Y, WAIST_Y } = anatomy(bodyRig);
   const info: RigInfo = { mode: "rigid", source: "auto", sleeve_r: false, sleeve_l: false, forearm: false, legs: false, unsure: false };
   let labels: Uint8Array = new Uint8Array(grid.w * grid.h);
   const done = (layers: (Mesh | null)[], matteKey = ""): GarmentRig => ({ layers: layers.filter((l): l is Mesh => !!l), labels: { w: grid.w, h: grid.h, data: labels }, matteKey, info });
@@ -365,12 +377,12 @@ export function buildRig(inp: RigInput): GarmentRig {
     if (inp.parts === "whole") info.source = "whole";
     else if (inp.parts) { labels = resample(inp.parts, grid); info.source = "manual"; for (let k = 0; k < labels.length; k++) if (labels[k] > 2) labels[k] = 0; }
     else {
-      const a = detectSleeves(grid, fit, ar, !!inp.loose);
+      const a = detectSleeves(grid, fit, ar, !!inp.loose, bodyRig);
       labels = a.labels; info.unsure = a.unsure;
       // 使用者明確要求袖子跟隨，但輪廓找不到袖子：改用手臂位置的保守分區
-      if (!a.sleeve_r && !a.sleeve_l && (inp.follow === "upper" || inp.follow === "full")) { labels = armZone(grid, fit, ar); info.source = "zone"; }
+      if (!a.sleeve_r && !a.sleeve_l && (inp.follow === "upper" || inp.follow === "full")) { labels = armZone(grid, fit, ar, bodyRig); info.source = "zone"; }
     }
-  } else labels = detectLegs(grid, fit, ar);
+  } else labels = detectLegs(grid, fit, ar, bodyRig);
   // 半透明的位置（抗鋸齒邊緣、薄紗、鏤空蕾絲）沿用最近的不透明布料的部件，否則袖子移開後會留下一圈輪廓
   {
     const { w, h } = grid, seen = new Uint8Array(w * h);
@@ -511,7 +523,8 @@ export function posedBounds(rig: GarmentRig, posed: Float32Array[]): [number, nu
   return [x0, y0, x1, y1];
 }
 /** 自動建議的袖子靜止角度：令袖子的方向貼近上臂（平放拍攝、袖子向外張開的衣物用） */
-export function suggestSleeveRot(rig: GarmentRig, fit: Fit, ar: number): [number, number] {
+export function suggestSleeveRot(rig: GarmentRig, fit: Fit, ar: number, bodyRig: Rig = RIG_V2): [number, number] {
+  const { piv } = anatomy(bodyRig);
   const out: [number, number] = [0, 0], g = rig.labels;
   for (const s of [1, 2] as const) {
     const S = piv(s === 1 ? "shoulder_r" : "shoulder_l"), E = piv(s === 1 ? "elbow_r" : "elbow_l");

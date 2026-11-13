@@ -165,17 +165,19 @@ export const NO_HAIR_ID = "none";
 
 /** 髮束的骨骼 id */
 export const hairBoneId = (p: HairPart) => (p.bone === "own" ? "hp_" + p.id : p.bone);
-const rigCache = new WeakMap<HairConfig, Rig>();
+const rigCache = new WeakMap<Rig, WeakMap<HairConfig, Rig>>();
 /** 目前髮型下的完整骨架：基本骨架＋這款髮型自帶的髮束骨骼 */
-export function rigFor(hair: HairConfig | null | undefined): Rig {
-  if (!hair) return RIG_V2;
-  let rig = rigCache.get(hair);
+export function rigFor(hair: HairConfig | null | undefined, base: Rig = RIG_V2): Rig {
+  if (!hair) return base;
+  let cache = rigCache.get(base);
+  if (!cache) { cache = new WeakMap(); rigCache.set(base, cache); }
+  let rig = cache.get(hair);
   if (!rig) {
     const extra: Bone[] = hair.parts.filter((p) => p.bone === "own" && p.pivot).map((p) => ({
       id: hairBoneId(p), parent: "head", rest_position: p.pivot!, rest_angle: 0, pivot: p.pivot!, min_angle: -(p.range ?? 20), max_angle: p.range ?? 20, attached_assets: [p.id],
     }));
-    rig = extra.length ? { ...RIG_V2, bones: [...RIG_V2.bones, ...extra] } : RIG_V2;
-    rigCache.set(hair, rig);
+    rig = extra.length ? { ...base, bones: [...base.bones, ...extra.filter((b) => !base.bones.some((existing) => existing.id === b.id))] } : base;
+    cache.set(hair, rig);
   }
   return rig;
 }
