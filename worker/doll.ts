@@ -1,7 +1,7 @@
 // 角色換裝 API：衣物預設穿著設定、造型、造型縮圖及角色素材（頭部／髮型／衣物額外部件）。
 // 只讀寫 doll_* 資料表及 R2 的 doll/ 路徑；不修改 garments、garment_images、outfits 或衣物圖片。
 import { DEFAULT_AVATAR, Fit, LEGACY_AVATAR, LookState, isSlot, normalizeFit, normalizeLookState, normalizeTemplateData, slotFor } from "../shared/doll";
-import { normalizeHairConfig, normalizeHeadConfig } from "../shared/avatarV2";
+import { normalizeHairConfig, normalizeHeadConfig, normalizePalette } from "../shared/avatarV2";
 import { parseImage } from "./images";
 import { transparentImageSql } from "./transparent";
 import { Actor, Env, HttpError, audit, json, newId, nowIso, sha256Hex, str } from "./util";
@@ -349,4 +349,19 @@ export async function getAssetThumb(env: Env, id: string) {
   const row = await env.DB.prepare("SELECT thumb, thumb_mime FROM doll_assets WHERE id = ?").bind(id).first<{ thumb: ArrayBuffer | null; thumb_mime: string | null }>();
   if (!row?.thumb) throw new HttpError(404, "thumb_not_found", "未有縮圖");
   return blobResponse(row.thumb, row.thumb_mime || "image/png");
+}
+
+// ───── 自訂髮色色票（存於 app_settings，不需要新資料表） ─────
+const PALETTE_KEY = "doll_hair_palette";
+export async function getPalette(env: Env) {
+  const r = await env.DB.prepare("SELECT value FROM app_settings WHERE key = ?").bind(PALETTE_KEY).first<{ value: string }>();
+  return normalizePalette(parse(r?.value));
+}
+export async function putPalette(env: Env, actor: Actor, input: unknown) {
+  const p = normalizePalette(input);
+  const value = JSON.stringify(p);
+  if (value.length > 40_000) throw new HttpError(413, "palette_too_large", "色票過多");
+  await env.DB.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(PALETTE_KEY, value, nowIso()).run();
+  await audit(env, actor, "doll.palette.save", undefined);
+  return p;
 }

@@ -1,7 +1,7 @@
 import { TransparentImage } from "../components/TransparentImage";
 import { useEffect, useMemo, useState } from "react";
 import { api, imageUrl } from "../api";
-import { IconHeart, IconPerson, IconPlus, IconSearch, IconShirt, IconSort } from "../components/icons";
+import { IconHeart, IconPerson, IconPlus, IconScissors, IconSearch, IconShirt, IconSort } from "../components/icons";
 import { Empty, Link, Spinner, toast } from "../components/ui";
 
 export interface OutfitSummary {
@@ -67,9 +67,10 @@ export default function Outfits() {
   return (
     <div data-testid="outfits-home">
       <h1 className="pb-3 pt-5 font-serif text-[22px] font-bold tracking-[0.12em] text-gold-soft">穿搭工作室</h1>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-2.5">
         <EntryCard to="/outfits/new" testid="entry-outfit" Icon={IconShirt} title="衣服配搭" text="自由組合衣櫃單品" />
         <EntryCard to="/dressing" testid="entry-look" Icon={IconPerson} title="角色換裝" text="為角色打造新造型" hot />
+        <EntryCard to="/dressing/setup" testid="entry-setup" Icon={IconScissors} title="衣服設定" text="校正每件衣服的穿著效果" />
       </div>
 
       <div className="mt-6 flex items-center justify-between">
@@ -118,11 +119,11 @@ export default function Outfits() {
 
 function EntryCard({ to, Icon, title, text, hot, testid }: { to: string; Icon: typeof IconShirt; title: string; text: string; hot?: boolean; testid: string }) {
   return (
-    <Link to={to} className={`frame ${hot ? "frame-hot" : ""} relative block px-3.5 pb-3 pt-3.5`}>
+    <Link to={to} className={`frame ${hot ? "frame-hot" : ""} relative block px-2.5 pb-2.5 pt-3`}>
       <span data-testid={testid} className="block">
-        <span className="block text-[24px] text-gold-soft"><Icon /></span>
-        <span className="mt-1.5 block font-serif text-[17px] font-bold tracking-[0.08em] text-white">{title}</span>
-        <span className="mt-0.5 block text-[12px] text-cream/75">{text}</span>
+        <span className="block text-[22px] text-gold-soft"><Icon /></span>
+        <span className="mt-1 block font-serif text-[15px] font-bold tracking-[0.06em] text-white">{title}</span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-cream/75">{text}</span>
         <span className="mt-2 flex justify-end text-gold-soft"><span className="grid h-6 w-6 place-items-center rounded-full border border-gold/70 text-[11px]"><IconPlus /></span></span>
       </span>
     </Link>

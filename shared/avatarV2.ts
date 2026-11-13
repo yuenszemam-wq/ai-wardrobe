@@ -348,3 +348,32 @@ export function placeHairPart(cat: HairCat, ar: number): { x: number; y: number;
   const r1 = (v: number) => Math.round(v * 10) / 10;
   return { x: r1(cx - w / 2), y: r1(y), w: r1(w), h: r1(h) };
 }
+
+// ───── 自訂髮色色票（Phase 3.4）：存於 app_settings 的 doll_hair_palette（JSON），不需要新資料表 ─────
+export interface PaletteColor { id: string; name: string; hex: string }
+/** 完整髮色組合：主髮色、挑染、髮尾（null＝原色） */
+export interface HairCombo { id: string; name: string; main: string | null; accent: string | null; tip: string | null }
+export interface HairPalette { colors: PaletteColor[]; combos: HairCombo[]; recent: string[] }
+export const EMPTY_PALETTE: HairPalette = { colors: [], combos: [], recent: [] };
+const PAL_ID = /^[a-z0-9_]{1,24}$/;
+const hexOrNull = (v: unknown): string | null => (typeof v === "string" && HEX.test(v) ? v.toLowerCase() : null);
+const nameOf = (v: unknown, fallback: string) => (typeof v === "string" ? v.trim().slice(0, 20) : "") || fallback;
+export function normalizePalette(v: unknown): HairPalette {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const arr = (x: unknown) => (Array.isArray(x) ? x : []);
+  const colors: PaletteColor[] = [];
+  for (const c of arr(o.colors).slice(0, 60)) {
+    const r = (c ?? {}) as Record<string, unknown>, hex = hexOrNull(r.hex);
+    if (!hex || typeof r.id !== "string" || !PAL_ID.test(r.id) || colors.some((x) => x.id === r.id)) continue;
+    colors.push({ id: r.id, name: nameOf(r.name, "自訂顏色"), hex });
+  }
+  const combos: HairCombo[] = [];
+  for (const c of arr(o.combos).slice(0, 40)) {
+    const r = (c ?? {}) as Record<string, unknown>;
+    if (typeof r.id !== "string" || !PAL_ID.test(r.id) || combos.some((x) => x.id === r.id)) continue;
+    const main = typeof r.main === "string" && HAIR_COLORS.some((h) => h.id === r.main) ? r.main : hexOrNull(r.main);
+    combos.push({ id: r.id, name: nameOf(r.name, "髮色組合"), main, accent: r.accent === "original" ? "original" : hexOrNull(r.accent), tip: hexOrNull(r.tip) });
+  }
+  const recent = [...new Set(arr(o.recent).map(hexOrNull).filter((x): x is string => !!x))].slice(0, 12);
+  return { colors, combos, recent };
+}

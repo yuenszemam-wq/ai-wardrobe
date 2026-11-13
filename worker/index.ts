@@ -10,7 +10,7 @@ import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
-import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, serveAssetFile, updateAsset, updateLook } from "./doll";
+import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getPalette, putPalette, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, serveAssetFile, updateAsset, updateLook } from "./doll";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
 
@@ -439,6 +439,10 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       requireSession(actor);
       return json(await deleteTemplate(env, actor, m[1]));
     }
+  }
+  if (path === "/api/doll/palette") {
+    if (method === "GET") { requireScope(actor, "read"); return json(await getPalette(env)); }
+    if (method === "PUT") { requireSession(actor); return json(await putPalette(env, actor, await readJson(req))); }
   }
   if (path === "/api/doll/looks") {
     if (method === "GET") {

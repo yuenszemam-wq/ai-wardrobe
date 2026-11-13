@@ -5,20 +5,21 @@ import { Pose, applyMat, boneMap, clampPose, invert, matAngle, samePose, solve }
 import { Camera, FULL_CAMERA, Rect, Size, VIEW_PRESETS, ZOOM, boundsOf, frame, zoomAt, zoomTo } from "../../shared/camera";
 import { DragMode, Region, controlsFor, poseControls, regionBones } from "../../shared/poseControls";
 import { BUILTIN_HAIR_ID, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairCat, HairConfig, HairPart, HAIR_CAT_BONE, HAIR_CAT_LABEL, HAIR_CAT_LAYER, hairCatOf, placeHairPart, refUrl, POSE_PRESETS, hairBoneId, hexToRgb, resolveHairColors, rigFor } from "../../shared/avatarV2";
-import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, Piece, SLOT_SKIN, itemKey, fitHeight, LookState, SLEEVE_ROT_LIMIT, SY_LIMIT, insertIndex, layeringHints, normalizeFit, normalizeTemplateData, sameFit, defaultFit, Variant, WearOpts } from "../../shared/doll";
+import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, Piece, SETUP_KEYS, SETUP_LABEL, SetupKey, SetupMark, SetupStatus, Slot, SLOT_SKIN, itemKey, fitHeight, LookState, SLEEVE_ROT_LIMIT, SY_LIMIT, insertIndex, layeringHints, normalizeFit, normalizeTemplateData, sameFit, defaultFit, Variant, WearOpts } from "../../shared/doll";
 import { poseDistance, suggestSleeveRot } from "../../shared/garmentMesh";
-import { api, Garment } from "../api";
-import { IconChevronLeft, IconEye, IconEyeOff, IconHand, IconHeart, IconLayers, IconMore, IconPerson, IconPose, IconSave, IconShirt, IconTarget } from "../components/icons";
+import { api, displayName, Garment } from "../api";
+import { IconChevronLeft, IconChevronRight, IconEye, IconEyeOff, IconHand, IconHeart, IconLayers, IconMore, IconPerson, IconPose, IconSave, IconShirt, IconTarget } from "../components/icons";
 import { Spinner, toast } from "../components/ui";
 import { AssetPanel, Draft } from "../doll/AssetPanel";
 import { Analysis, analyze, canvasBlob, loadImage, prepareAsset } from "../doll/content";
 import { DollRenderer, Scene, flatLocate, flatRect, mainBone } from "../doll/engine";
 import { pieceImage, pieceKey } from "../doll/pieces";
 import { SplitEditor } from "../doll/SplitEditor";
-import { Appearance, DEFAULT_APPEARANCE, GarmentLite, Resolved, Template, Templates, Worn, fetchLook, fetchTemplates, addHairParts, pieceOf, wearHairPart, hairOf, headOf, imageOf, resolve, sceneItem, userAsset, wornFor } from "../doll/model";
-import { AppearancePanel, ClothesPanel, FitDelta, FitPanel, FitTool, GarmentView, WearMode, wearMode, LayersPanel, LookTab, MaskTool, PartTool, PosePanel, PoseTab, SkeletonMode } from "../doll/panels";
+import { Appearance, DEFAULT_APPEARANCE, GarmentLite, Resolved, Template, Templates, Worn, fetchLook, fetchTemplates, templateFor, addHairParts, pieceOf, wearHairPart, hairOf, headOf, imageOf, resolve, sceneItem, userAsset, wornFor } from "../doll/model";
+import { AppearancePanel, COMPARE_LABEL, CompareKind, ClothesPanel, PieceEntry, FitDelta, FitPanel, FitTool, GarmentView, WearMode, wearMode, LayersPanel, LookTab, MaskTool, PartTool, PosePanel, PoseTab, SkeletonMode } from "../doll/panels";
 import { PaintPhase, Selection, Stage, StageMode } from "../doll/Stage";
 import { navigate } from "../router";
+import { ITEM_LABEL, pieceSetup, setupInfo } from "../doll/setup";
 
 type Tab = "clothes" | "layers" | "look" | "pose";
 const TABS: { id: Tab; label: string; Icon: typeof IconShirt }[] = [
@@ -28,6 +29,8 @@ const TABS: { id: Tab; label: string; Icon: typeof IconShirt }[] = [
   { id: "pose", label: "姿勢", Icon: IconPose },
 ];
 const MASK_W = 256;
+/** 主要衣物：決定人物姿勢的衣物（配件、半裙、頭飾等不會改變姿勢） */
+const MAIN_SLOTS = new Set<Slot>(["top", "dress", "set", "outer"]);
 /** 正在編輯的遮罩／部件圖（像素緩衝）。塗抹時直接預覽，放手才寫入造型（每一筆＝一步，可以撤銷） */
 interface EditBuf { kind: "mask" | "parts"; key: string; w: number; h: number; data: Uint8ClampedArray; ready: boolean; committed: string | null; last: [number, number] | null; dirty: boolean; at: number; /** 這一筆開始前的內容（第二根手指落下時用來作廢這一筆） */ backup: Uint8ClampedArray | null }
 type PanelSize = "mini" | "mid" | "max";
@@ -44,7 +47,10 @@ function guessHairCat(name: string, ar: number, small?: boolean): HairCat {
   return small ?? ar < 1.15 ? "bangs" : "back";
 }
 
-export default function DressingRoom({ id }: { id?: string }) {
+/** 衣服設定工作室：只校正一件衣物（或一個套裝部件）的預設，不建立穿搭造型 */
+export interface SetupTarget { gid: string; piece?: string | null }
+export default function DressingRoom({ id, setup }: { id?: string; setup?: SetupTarget }) {
+  const setupKey = setup ? setup.gid + "|" + (setup.piece ?? "") : "";
   const renderer = useMemo(() => new DollRenderer(), []);
   const [garments, setGarments] = useState<Garment[] | null>(null);
   /** 套裝部件的圖片（由原圖製作，只在記憶體） */
@@ -100,6 +106,8 @@ export default function DressingRoom({ id }: { id?: string }) {
   const [hairSelected,setHairSelected]=useState<string|null>(null);
   const [hairTool,setHairTool]=useState<"place"|"mesh">("place");
   const [menu, setMenu] = useState(false);
+  /** 新穿上的主要衣物有不同的預設姿勢：提示是否套用（不會自動更改） */
+  const [posePrompt, setPosePrompt] = useState<{ label: string; pose: Pose; front: FrontPart[] } | null>(null);
   const [ready, setReady] = useState(false);
 
   const requested = useRef(new Set<string>());
@@ -139,7 +147,23 @@ export default function DressingRoom({ id }: { id?: string }) {
       if (id) navigate("/dressing", true); else { setTpls({ v2: new Map(), v1: new Map() }); setLoaded(true); }
     });
     return () => { generation.current++; };
-  }, [id]);
+  }, [id, setupKey]);
+
+  // ───── 衣服設定模式：載入目標衣物及其預設（含預設姿勢）；只在切換目標時執行一次 ─────
+  const setupInit = useRef("");
+  useEffect(() => {
+    if (!setup || !loaded || !tpls || !garments || setupInit.current === setupKey) return;
+    setupInit.current = setupKey;
+    const g = garments.find((x) => x.id === setup.gid);
+    if (!g) { toast("找不到這件衣物（可能未有透明圖或已封存）", "err"); navigate("/dressing/setup", true); return; }
+    const t = templateFor(tpls, g), pc = setup.piece ? t?.data?.pieces?.find((p) => p.id === setup.piece) ?? null : null;
+    if (setup.piece && !pc) toast("找不到這個部件，改為設定整件衣物", "err");
+    const w: Worn = pc ? { garment_id: g.id, piece: pc.id, slot: pc.slot, hidden: false, variant: null, fit: null, opts: null, mask: null } : wornFor(g, tpls);
+    const p = pc ? pc.pose ?? t?.data?.pose ?? null : t?.data?.pose ?? null;
+    hist.current.base = null;
+    setWorn([w]); setPoseState(p ?? {}); setFront(pc ? [] : t?.data?.front ?? []);
+    setSelected(itemKey(w)); setTool("place"); setTab("clothes"); setDirty(false); setPosePrompt(null);
+  }, [setupKey, loaded, tpls, garments]);
 
   const gmap = useMemo(() => {
     const m = new Map<string, GarmentLite>();
@@ -200,14 +224,25 @@ export default function DressingRoom({ id }: { id?: string }) {
   const selId = sel?.key ?? null;
   // 部件顏色：標記袖子、衣物原圖及部件網格視圖一定顯示（完整衣物＋半透明顏色）；遮罩的已編輯位置按「顯示已編輯位置」
   const overlayMode = compare || preview || !selId ? null : editing === "mask" ? (hint ? "mask" : null) : tool === "follow" && autoParts && (editing === "parts" || view !== "worn" || hint) ? "parts" : null;
+  /**
+   * 對比：只暫時停用目前工具負責的那一項設定（位置、大小、旋轉、姿勢及其他設定保持不變；不會改動衣物資料）。
+   * 變形＝沒有手動網格；遮罩＝沒有遮罩；骨架＝不按骨架變形（整件跟隨主骨骼，即基準姿勢下的樣子）。
+   */
+  const compareKind: CompareKind | null = !compare || !sel ? null : tool === "mesh" ? "mesh" : tool === "mask" ? "mask" : tool === "follow" ? "rig" : null;
   const scene: Scene = useMemo(() => ({
     hair, head, ...colors, pose, front,
-    // 對比原圖：暫時不套用這件衣物的遮罩及拆件，顯示完整的原始衣物（不改動任何設定）
-    items: resolved.filter((r) => r.image).map((r) => (compare && r.key === selId ? { ...sceneItem(r), mask: null, parts: "whole" } : sceneItem(r))),
+    items: resolved.filter((r) => r.image).map((r) => {
+      const it = sceneItem(r);
+      if (!compareKind || r.key !== selId) return it;
+      if (compareKind === "mesh") return { ...it, fit: { ...it.fit, mesh: undefined } };
+      if (compareKind === "mask") return { ...it, mask: null };
+      return { ...it, parts: "whole", opts: { ...it.opts, follow: "none" as const, sleeve_r: 0, sleeve_l: 0, bind: undefined } };
+    }),
     overlay: overlayMode && selId ? { key: selId, mode: overlayMode } : null,
-    flat: view === "source" && !compare ? selId : null,
+    // 衣物原圖視圖與對比是兩件事：對比時仍然留在原圖，只是暫時不套用遮罩
+    flat: view === "source" ? selId : null,
     wire: view === "mesh" && !compare ? selId : null,
-  }), [hair, head, colors, pose, front, resolved, overlayMode, selId, compare, view]);
+  }), [hair, head, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare]);
   const mats = useMemo(() => solve(rig, pose), [rig, pose]);
 
   // ───── 撤銷／重做（衣物、位置、遮罩、部件、姿勢、外貌） ─────
@@ -274,6 +309,28 @@ export default function DressingRoom({ id }: { id?: string }) {
     }
     const w = wornFor(g, tpls);
     change((cur) => { const at = insertIndex(cur, w.slot); return [...cur.slice(0, at), w, ...cur.slice(at)]; });
+    const d = templateFor(tpls, g)?.data;
+    offerPose(w.slot, d?.pose ?? null, d?.front ?? [], displayName(g as Garment));
+  }
+  /** 直接穿上／脫下一個套裝部件（不需要先穿整套）；使用部件保存的完整預設 */
+  function togglePiece(e: PieceEntry) {
+    if (!tpls || busy) return;
+    const key = e.g.id + "#" + e.piece.id;
+    if (worn.some((w) => itemKey(w) === key)) { remove(key); return; }
+    const w: Worn = { garment_id: e.g.id, piece: e.piece.id, slot: e.piece.slot, hidden: false, variant: null, fit: null, opts: null, mask: null };
+    change((cur) => { const at = insertIndex(cur, w.slot); return [...cur.slice(0, at), w, ...cur.slice(at)]; });
+    offerPose(e.piece.slot, e.piece.pose ?? null, [], e.piece.name);
+  }
+  /**
+   * 穿上衣物時的姿勢：角色未穿著其他主要衣物（上衣／連身裙／套裝／外套）時，直接套用這件衣服的預設姿勢；
+   * 已穿著其他主要衣物時只提示，不會強制改變整個人物。配件、半裙、頭飾等不會改變姿勢。
+   */
+  function offerPose(slot: Slot, p: Pose | null, f: FrontPart[], label: string) {
+    // 預設姿勢是靜止站姿（舊預設會自動記下保存時的姿勢）：不當作指定姿勢，不改變目前人物
+    if (!p || !Object.keys(p).length || !MAIN_SLOTS.has(slot) || poseDistance(p, pose) < 6) return;
+    const others = worn.some((w) => !w.hidden && MAIN_SLOTS.has(w.slot));
+    if (!others) { setPose(p, f); toast(`已套用「${label}」的預設姿勢（可撤銷）`); return; }
+    setPosePrompt({ label, pose: p, front: f });
   }
   function remove(key: string) { change((cur) => cur.filter((w) => itemKey(w) !== key)); if (selected === key) setSelected(null); }
   function order(gid: string, to: "top" | "up" | "down" | "bottom") {
@@ -316,9 +373,19 @@ export default function DressingRoom({ id }: { id?: string }) {
     else if (m === "body") setOpts(r, { follow: "none", bone: null });
     else setOpts(r, { follow: "auto", bone: null });
   };
+  /**
+   * 基準姿勢：以目前角色姿勢作為這件衣物的綁定基準。畫面上的衣物形狀（位置、網格）就是基準形狀；
+   * 之後移動手臂時只按「目前姿勢與基準的差異」變形。袖子額外角度歸零，避免與網格／骨架重複計算。
+   */
+  const setBind = (r: Resolved, on: boolean) => {
+    flushHist();
+    if (!on) { setOpts(r, { bind: undefined }); return; }
+    setOpts(r, { follow: r.opts.follow === "none" ? "auto" : r.opts.follow, bone: null, bind: clampPose(rig, pose), sleeve_r: 0, sleeve_l: 0 });
+    toast("已把目前姿勢設為這件衣物的基準姿勢；記得「存為衣物預設」");
+  };
   /** 返回完整原圖：固定原圖，清除拆件、手動網格及遮罩（位置、大小、旋轉保留，可撤銷） */
   const wholeImage = (r: Resolved) => {
-    const opts = { ...r.opts, follow: "none" as const, bone: "world", sleeve_r: 0, sleeve_l: 0 };
+    const opts = { ...r.opts, follow: "none" as const, bone: "world", sleeve_r: 0, sleeve_l: 0, bind: undefined };
     const from = mainBone({ slot: r.worn.slot, opts: r.opts });
     let fit: Fit = { ...r.fit, mesh: undefined };
     if (from !== "world") { const a = mats[from]; if (a) { const [x, y] = applyMat(a, r.fit.cx, r.fit.cy); fit = { ...fit, cx: x, cy: y, rotation: r.fit.rotation + matAngle(a) }; } }
@@ -326,8 +393,8 @@ export default function DressingRoom({ id }: { id?: string }) {
     setItem(r.key, { snapshot: true, opts, fit, mask: null, parts: "whole" });
     setPartTool((p) => ({ ...p, label: -1 }));
   };
-  async function saveTemplate(r: Resolved, patch: (data: ReturnType<typeof normalizeTemplateData>) => { data: ReturnType<typeof normalizeTemplateData>; fit: Fit }, done: string, after?: Partial<Worn>) {
-    if (r.analysis.content.approximate) return toast("高清圖未讀取成功，暫時不能存為預設", "err");
+  async function saveTemplate(r: Resolved, patch: (data: ReturnType<typeof normalizeTemplateData>) => { data: ReturnType<typeof normalizeTemplateData>; fit: Fit }, done: string, after?: Partial<Worn>): Promise<boolean> {
+    if (r.analysis.content.approximate) { toast("高清圖未讀取成功，暫時不能存為預設", "err"); return false; }
     setBusy(true);
     try {
       const cur = r.template?.data ?? normalizeTemplateData(null, r.worn.slot);
@@ -336,8 +403,10 @@ export default function DressingRoom({ id }: { id?: string }) {
       setTpls((cur) => (cur ? { v1: cur.v1, v2: new Map(cur.v2).set(r.garment.id, t) } : cur));
       setItem(r.key, { snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null, ...after });
       toast(done);
+      return true;
     } catch (e) {
       toast((e as Error).message, "err");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -346,7 +415,9 @@ export default function DressingRoom({ id }: { id?: string }) {
     if (r.piece) {
       // 套裝部件：位置及跟隨方式存回套裝的拆件設定（其他造型穿上這個部件時使用）
       const pc = r.piece;
-      return saveTemplate(r, (d) => ({ data: { ...d, pieces: (d.pieces ?? []).map((q) => (q.id === pc.id ? { ...q, fit: r.fit, opts: r.opts } : q)) }, fit: r.template!.fit }), "已存為這個部件的預設位置", { piece_def: null });
+      // 完整預設：位置、網格（在 fit 內）、穿著遮罩、跟隨方式／基準姿勢及建議姿勢。只更新這一個部件，其他部件不受影響。
+      const wearMask = r.mask;
+      return saveTemplate(r, (d) => ({ data: { ...d, pieces: (d.pieces ?? []).map((q) => (q.id === pc.id ? { ...q, fit: r.fit, opts: r.opts, wear_mask: wearMask, pose: clampPose(rig, pose) } : q)) }, fit: r.template!.fit }), "已存為這個部件的完整預設", { piece_def: null });
     }
     const v = r.worn.variant;
     return saveTemplate(r, (d) => (v && d.variants[v] ? { data: { ...d, variants: { ...d.variants, [v]: { ...d.variants[v], fit: r.fit, opts: r.opts, mask: r.mask, parts: r.parts, pose: clampPose(rig, pose) } } }, fit: r.template!.fit } : { data: { ...d, opts: r.opts, mask: r.mask, parts: r.parts, pose: clampPose(rig, pose), front }, fit: r.fit }), "已存為這件衣物的預設，之後任何造型穿上都會自動套用");
@@ -681,6 +752,28 @@ export default function DressingRoom({ id }: { id?: string }) {
     }catch(e){if(assetId)await api(`/api/doll/assets/${assetId}`,{method:"DELETE"}).catch(()=>undefined);toast((e as Error).message,"err");}finally{setBusy(false);}
   }
 
+  // ───── 衣服設定模式：保存只更新衣物預設（不建立造型） ─────
+  const setupTarget = setup ? resolved.find((r) => r.garment.id === setup.gid && (r.piece?.id ?? null) === (setup.piece ?? null)) ?? null : null;
+  const neighbours = useMemo(() => {
+    if (!setup) return { prev: null, next: null };
+    let ids: string[] = [];
+    try { ids = JSON.parse(sessionStorage.getItem("aw:setup:list") || "[]"); } catch { /* 私密瀏覽 */ }
+    const i = ids.indexOf(setup.gid);
+    return { prev: i > 0 ? ids[i - 1] : null, next: i >= 0 && i < ids.length - 1 ? ids[i + 1] : null };
+  }, [setupKey]);
+  async function saveSetup() {
+    if (!setupTarget) return;
+    if (pending.size) return toast("衣物仍在載入，請稍後再保存", "err");
+    if (await saveDefault(setupTarget)) setDirty(false);
+  }
+  /** 手動標記設定項目：auto＝由程式判斷；done＝已完成；na＝不需要。立即保存到衣物預設（部件的標記存在部件內） */
+  async function markSetup(r: Resolved, key: SetupKey, mark: SetupMark | null) {
+    const set = (st: SetupStatus | undefined): SetupStatus | undefined => { const n: SetupStatus = { ...(st ?? {}) }; if (mark) n[key] = mark; else delete n[key]; return Object.keys(n).length ? n : undefined; };
+    const keep = { fit: r.worn.fit, opts: r.worn.opts, mask: r.worn.mask, parts: r.worn.parts ?? null, snapshot: r.worn.snapshot };
+    if (r.piece) { const pid = r.piece.id; return saveTemplate(r, (d) => ({ data: { ...d, pieces: (d.pieces ?? []).map((q) => (q.id === pid ? { ...q, status: set(q.status) } : q)) }, fit: r.template!.fit }), "已更新設定狀態", { ...keep, piece_def: null }); }
+    return saveTemplate(r, (d) => ({ data: { ...d, status: set(d.status) }, fit: baseRowFit(r) }), "已更新設定狀態", keep);
+  }
+
   // ───── 保存造型 ─────
   async function save(asNew = false) {
     if (pending.size) return toast("衣物仍在載入，請稍後再保存", "err");
@@ -713,7 +806,7 @@ export default function DressingRoom({ id }: { id?: string }) {
     toast("已刪除");
     navigate("/outfits", true);
   }
-  const leave = (to: string) => { if (!dirty || confirm("造型尚未保存，確定離開？")) navigate(to); };
+  const leave = (to: string) => { if (!dirty || confirm(setup ? "這件衣服的設定尚未保存，確定離開？" : "造型尚未保存，確定離開？")) navigate(to); };
 
   // ───── 舞台互動 ─────
   const hp = draftPart ?? activeHair;
@@ -721,7 +814,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   const stageSel: Selection | null = hp
     ? { fit: { cx: hp.x + hp.w / 2, cy: hp.y + hp.h / 2, w: hp.w, rotation: hp.rotation ?? 0, mesh: hp.mesh }, content: FULL_CONTENT(hp.h / hp.w), bone: draft?.kind === "head" ? "head" : hairBoneId(hp), rotate: draft?.kind !== "head" }
     : sel && !draft ? { fit: sel.fit, content: sel.analysis.content, bone: mainBone({ slot: sel.worn.slot, opts: sel.opts }), bounds: flatBox ? [flatBox.x, flatBox.y, flatBox.x + flatBox.w, flatBox.y + flatBox.h] : selItem && tool !== "mesh" ? renderer.bounds(selItem, mats) : undefined } : null;
-  const mode: StageMode = preview ? "view" : draft || activeHair ? (hairTool === "mesh" && draft?.kind !== "head" ? "mesh" : "dress") : sel ? (editing ? "mask" : view === "source" ? "view" : tool === "mesh" ? "mesh" : "dress") : tab === "pose" ? "pose" : "dress";
+  const mode: StageMode = preview || compareKind ? "view" : draft || activeHair ? (hairTool === "mesh" && draft?.kind !== "head" ? "mesh" : "dress") : sel ? (editing ? "mask" : view === "source" ? "view" : tool === "mesh" ? "mesh" : "dress") : tab === "pose" ? "pose" : "dress";
   // 這個姿勢有對應的衣物校正（保存穿法時連同姿勢）：提示可以套用，不會自動更改
   const poseFix = useMemo(() => {
     for (const r of resolved) { const vs: Record<string, Variant> = r.template?.data?.variants ?? {}; for (const [vid, v] of Object.entries(vs)) if (v.pose && r.worn.variant !== vid && Object.keys(pose).length > 0 && poseDistance(pose, v.pose) < 13) return { gid: r.key, vid, name: v.name, garment: r.garment.name }; }
@@ -819,6 +912,14 @@ export default function DressingRoom({ id }: { id?: string }) {
   const activeControl = control && shownControls.includes(control) ? control.id : shownControls.find((c) => c.kind !== "ik" && c.bone === joint)?.id ?? null;
   const hints = useMemo(() => layeringHints(worn.filter((w) => !w.hidden).map((w) => w.slot)), [worn]);
   const wornIds = useMemo(() => new Set(worn.filter((w) => !w.piece).map((w) => w.garment_id)), [worn]);
+  const wornKeys = useMemo(() => new Set(worn.map(itemKey)), [worn]);
+  /** 衣服選單內的套裝部件（只列出圖片仍然有效的拆件設定） */
+  const pieceEntries = useMemo(() => {
+    const out: PieceEntry[] = [];
+    if (!tpls) return out;
+    for (const g of garments ?? []) { const t = templateFor(tpls, g); for (const piece of t?.data?.pieces ?? []) out.push({ g, piece }); }
+    return out;
+  }, [garments, tpls]);
 
   // ───── 底部面板高度：迷你／一般／展開，可以拖動把手 ─────
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;
@@ -848,6 +949,19 @@ export default function DressingRoom({ id }: { id?: string }) {
       data-fits={JSON.stringify(resolved.map((r) => [r.key, Math.round(r.fit.cx * 10) / 10, Math.round(r.fit.cy * 10) / 10, Math.round(r.fit.w * 10) / 10, Math.round(r.fit.rotation * 10) / 10]))}>
       {/* ───── 頂部 ───── */}
       <div className="safe-top shrink-0 bg-ink">
+        {setup ? (
+          <div className="flex h-12 items-center gap-1.5 px-2.5" data-testid="setup-header">
+            <button type="button" aria-label="返回衣服設定列表" onClick={() => leave("/dressing/setup")} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="text-[10px] tracking-[0.12em] text-mauve">衣服設定{setupTarget?.piece ? "｜套裝部件" : ""}</div>
+              <div className="truncate font-serif text-[14.5px] font-bold text-gold-soft" data-testid="setup-title">{setupTarget ? (setupTarget.piece ? setupTarget.piece.name + "・" : "") + displayName(setupTarget.garment as Garment) : "載入中…"}</div>
+            </div>
+            {dirty && <span className="shrink-0 text-[10.5px] text-wine">未保存</span>}
+            <button type="button" aria-label="上一件" disabled={!neighbours.prev} onClick={() => neighbours.prev && leave(`/dressing/setup/${neighbours.prev}`)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[16px] disabled:opacity-35"><IconChevronLeft /></button>
+            <button type="button" aria-label="下一件" disabled={!neighbours.next} onClick={() => neighbours.next && leave(`/dressing/setup/${neighbours.next}`)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[16px] disabled:opacity-35"><IconChevronRight /></button>
+            <button type="button" data-testid="setup-save" disabled={busy || !setupTarget} onClick={() => void saveSetup()} className="btn-jewel flex h-9 shrink-0 items-center gap-1 rounded-full px-3 text-[13px] disabled:opacity-50"><IconSave className="text-[14px]" />{busy ? "…" : "保存設定"}</button>
+          </div>
+        ) : (
         <div className="flex h-12 items-center gap-1.5 px-2.5">
           <button type="button" aria-label="返回我的穿搭" onClick={() => leave("/outfits")} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
           <input value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} placeholder="未命名造型" aria-label="造型名稱" data-testid="look-name" className="h-9 min-w-0 flex-1 rounded-full border border-transparent bg-transparent px-2 font-serif text-[16px] font-bold tracking-[0.06em] text-gold-soft placeholder:text-mauve/70 focus:border-gold/50 focus:outline-none" />
@@ -856,7 +970,8 @@ export default function DressingRoom({ id }: { id?: string }) {
           <button type="button" data-testid="save-look" disabled={busy} onClick={() => void save()} className="btn-jewel flex h-9 shrink-0 items-center gap-1 rounded-full px-3.5 text-[13px] disabled:opacity-50"><IconSave className="text-[14px]" />{busy ? "…" : "保存"}</button>
           <button type="button" aria-label="更多" aria-expanded={menu} onClick={() => setMenu(!menu)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconMore /></button>
         </div>
-        {menu && (
+        )}
+        {menu && !setup && (
           <div className="absolute right-2.5 z-50 mt-1 w-44 overflow-hidden rounded-2xl border border-gold/50 bg-velvet text-[13px] shadow-xl" role="menu">
             <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); leave("/dressing"); }}>新造型</button>
             {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); void save(true); }}>另存為新造型</button>}
@@ -901,16 +1016,43 @@ export default function DressingRoom({ id }: { id?: string }) {
           {!preview && (!ready || pending.size > 0) && <span data-stage-ui className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-ink/60 px-3 py-1 text-[11px] text-cream">載入中…</span>}
           {!preview && renderer.errors.size > 0 && <button data-stage-ui type="button" onClick={() => { renderer.retry(); setAnalyses((m) => new Map(m)); }} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-[#a12c4b] px-3 py-1 text-[11px] text-white">有圖片未能讀取，按此重試</button>}
           {!preview && notice && <p data-stage-ui role="status" className="absolute inset-x-14 top-2 rounded-2xl bg-ink/80 px-3 py-2 text-center text-[11px] leading-snug text-gold-soft">{notice}</p>}
-          {!preview && sourceOn && <span data-stage-ui className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full bg-ink/70 px-3 py-1 text-[11px] text-gold-soft">衣物原圖{compare ? "" : "（塗抹位置＝原圖位置）"}</span>}
+          {!preview && (sourceOn || compareKind) && <span data-stage-ui data-testid="stage-badge" className={`pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full px-3 py-1 text-[11px] ${compareKind ? "bg-[#a12c4b]/85 text-white" : "bg-ink/70 text-gold-soft"}`}>{sourceOn ? "衣物原圖" : "穿著預覽"}{compareKind ? `｜對比：${COMPARE_LABEL[compareKind]}` : sourceOn ? "（塗抹位置＝原圖位置）" : ""}</span>}
           {!preview && (
             <div data-stage-ui className="absolute bottom-2 left-2 flex gap-1.5">
               <button type="button" aria-label="撤銷" data-testid="undo" disabled={!canUndo} onClick={() => timeTravel("undo")} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] disabled:opacity-35 ${float}`}>↶</button>
               <button type="button" aria-label="重做" data-testid="redo" disabled={!canRedo} onClick={() => timeTravel("redo")} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] disabled:opacity-35 ${float}`}>↷</button>
             </div>
           )}
+          {!preview && posePrompt && !editing && (
+            <div data-stage-ui data-testid="pose-prompt" className="absolute inset-x-2 bottom-12 mx-auto flex max-w-sm items-center gap-1.5 rounded-2xl bg-ink/80 px-3 py-2 text-[11.5px] text-gold-soft ring-1 ring-gold/50">
+              <span className="min-w-0 flex-1 leading-snug">「{posePrompt.label}」有不同的預設姿勢，要套用嗎？</span>
+              <button type="button" onClick={() => { setPose(posePrompt.pose, posePrompt.front); setPosePrompt(null); }} className="btn-jewel h-7 shrink-0 rounded-full px-3 text-[11.5px]">套用</button>
+              <button type="button" onClick={() => setPosePrompt(null)} className="chip h-7 shrink-0 rounded-full px-2.5 text-[11.5px]">保持</button>
+            </div>
+          )}
           {!preview && poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot: false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-2 right-2 max-w-[62%] truncate rounded-full bg-ink/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
         </Stage>
       </div>
+
+      {/* ───── 衣服設定：部件選擇及設定狀態 ───── */}
+      {!preview && setup && setupTarget && (() => {
+        const st = setupTarget.piece ? pieceSetup(setupTarget.piece) : tpls ? setupInfo(setupTarget.garment, tpls).items : null;
+        const pcs = templateFor(tpls, setupTarget.garment)?.data?.pieces ?? [];
+        const cycle = (k: SetupKey) => { const cur = (setupTarget.piece ? setupTarget.piece.status : setupTarget.template?.data?.status)?.[k] ?? null; void markSetup(setupTarget, k, cur === null ? "done" : cur === "done" ? "na" : null); };
+        return (
+          <div className="shrink-0 border-t border-gold/30 bg-ink/90 px-2.5 py-1.5" data-testid="setup-strip">
+            <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto">
+              {pcs.length > 0 && (
+                <select aria-label="選擇要設定的部件" data-testid="setup-piece" value={setup.piece ?? ""} onChange={(e) => leave(`/dressing/setup/${setup.gid}${e.target.value ? "?piece=" + e.target.value : ""}`)} className="h-7 max-w-[9.5rem] shrink-0 rounded-full bg-white/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
+                  <option value="">整件衣物</option>
+                  {pcs.map((p) => <option key={p.id} value={p.id}>{p.name}{p.fit ? "" : "（未校正）"}</option>)}
+                </select>
+              )}
+              {st && SETUP_KEYS.map((k) => <button key={k} type="button" data-mark={k} data-state={st[k]} disabled={busy} onClick={() => cycle(k)} title="輕按切換：自動判斷 → 已完成 → 不需要" className={`h-7 shrink-0 rounded-full px-2 text-[11px] ${st[k] === "done" ? "bg-[#6fbf8f]/30 text-[#d6f5e1]" : st[k] === "na" ? "bg-white/10 text-cream/60" : st[k] === "todo" ? "bg-[#a12c4b]/40 text-[#ffd3df]" : "bg-white/5 text-mauve"}`}>{SETUP_LABEL[k]}：{ITEM_LABEL[st[k]].replace("（可選）", "")}</button>)}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ───── 底部面板 ───── */}
       {!preview && (
@@ -934,7 +1076,7 @@ export default function DressingRoom({ id }: { id?: string }) {
           <div ref={panelBox} className={`relative overflow-clip px-3 ${panelH > 0 ? "pt-2.5" : ""}`} style={{ height: panelH, minHeight: panelH > 0 ? undefined : 8 }} data-testid="doll-panel" data-size={panel}>
             {panelH < 40 ? null : draft ? <AssetPanel draft={draft} setDraft={setDraft} busy={busy} onFiles={(f) => void addAssetFiles(f)} onSave={() => void saveAsset()} onCancel={() => void cancelAsset()} onDelete={() => void deleteAsset()} hairTool={hairTool} setHairTool={setHairTool} />
               : sel ? (
-                <FitPanel r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onMeshReset={() => applyFit(sel, { ...sel.fit, mesh: undefined })} onOpts={(o) => setOpts(sel, o)}
+                <FitPanel onBind={(on) => setBind(sel, on)} onApplyBind={() => { if (sel.opts.bind) setPose(sel.opts.bind); }} r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onMeshReset={() => applyFit(sel, { ...sel.fit, mesh: undefined })} onOpts={(o) => setOpts(sel, o)}
                   onMode={(m) => setMode(sel, m)} onWhole={() => wholeImage(sel)} compact={compact}
                   pieces={sel.piece ? null : sel.template?.data?.pieces ?? []} wornPieces={new Set(worn.filter((w) => w.garment_id === sel.garment.id && w.piece).map((w) => w.piece!))}
                   onOpenSplit={() => setSplit(sel.key)} onWearPieces={(ids, replace) => wearPieces(sel, ids, replace)} onTogglePiece={(pid) => { const k = sel.garment.id + "#" + pid; if (worn.some((w) => itemKey(w) === k)) remove(k); else wearPieces(sel, [pid], false); }} view={gview} setView={setGview} compare={compare} setCompare={setCompare} onFrame={frameTarget}
@@ -948,8 +1090,9 @@ export default function DressingRoom({ id }: { id?: string }) {
                   onSavePose={() => void saveTemplate(sel, (d) => ({ data: { ...d, pose: clampPose(rig, pose), front }, fit: baseRowFit(sel) }), "已把目前姿勢設為這件衣物的建議姿勢", { fit: sel.worn.fit, opts: sel.worn.opts, mask: sel.worn.mask, parts: sel.worn.parts ?? null })}
                   onApplyPose={() => { const d = sel.template?.data; if (d?.pose) setPose(d.pose, d.front); }}
                   mask={maskTool} setMask={setMaskTool} onClearMask={() => clearMask(sel)} />
-              ) : tab === "clothes" ? <ClothesPanel garments={garments} wornIds={wornIds} pending={pending} onToggle={toggle} />
-              : tab === "layers" ? <LayersPanel items={resolved} selected={selected} onSelect={(g) => { setSelected(g); setTool("place"); }} onReorder={(ids) => change((cur) => ids.map((i) => cur.find((w) => itemKey(w) === i)!).filter(Boolean))} onHide={(g) => setItem(g, { hidden: !worn.find((w) => itemKey(w) === g)?.hidden })} onRemove={remove} onClear={() => { if (confirm("脫下全部衣物？")) { change(() => []); setSelected(null); } }} hints={hints} />
+              ) : tab === "clothes" ? <ClothesPanel garments={garments} wornIds={wornIds} wornKeys={wornKeys} pending={pending} onToggle={toggle} pieces={pieceEntries} onPiece={togglePiece} />
+              : tab === "layers" ? <LayersPanel items={resolved} selected={selected} onSelect={(g) => { setSelected(g); setTool("place"); }} onReorder={(ids) => change((cur) => { const next = ids.map((i) => cur.find((w) => itemKey(w) === i)!).filter(Boolean); return next.length === cur.length ? next : cur; })} onHide={(g) => setItem(g, { hidden: !worn.find((w) => itemKey(w) === g)?.hidden })} onRemove={remove} onClear={() => { if (confirm("脫下全部衣物？")) { change(() => []); setSelected(null); } }} hints={hints}
+                  onHideGroup={(gid, hide) => change((cur) => cur.map((w) => (w.garment_id === gid && w.piece ? { ...w, hidden: hide } : w)))} onRemoveGroup={(gid) => { change((cur) => cur.filter((w) => !(w.garment_id === gid && w.piece))); if (selected?.startsWith(gid + "#")) setSelected(null); }} />
               : tab === "look" ? <AppearancePanel tab={lookTab} setTab={t=>{setLookTab(t);selectHair(null);}} value={look} onChange={editLook} assets={assets} onNew={(k, c) => void newAsset(k, c)} onEdit={editAsset} hair={hair} selectedHair={hairSelected} onSelectHair={selectHair} hairTool={hairTool} setHairTool={setHairTool} onHairPatch={patchHair} onSaveHair={()=>void saveHairCombo()} busy={busy} onSaveHairDefault={(i) => void saveHairDefault(i)} onAutoPlace={autoPlaceHair} />
               : <PosePanel rig={rig} pose={pose} front={front} onPose={setPose} onFront={(f) => { setFront(f); setDirty(true); }} skel={skel} setSkel={(m) => { setSkel(m); setControlId(null); }} drag={dragMode} setDrag={(d) => { setDragMode(d); setControlId(null); }}
                   region={region} setRegion={(r) => { setRegion(r); setControlId(null); }} joint={joint} setJoint={(j) => { setJoint(j); setControlId(null); }} control={control} opacity={skelOpacity} setOpacity={setSkelOpacity} compact={compact} tab={poseTab} setTab={setPoseTab} onFrame={frameTarget} />}
