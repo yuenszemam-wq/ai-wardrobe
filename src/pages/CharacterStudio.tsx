@@ -33,7 +33,7 @@ function AssetCard({ testid, id, thumb, name, sub, tags = [], badge, dim, onOpen
         </span>
         <span className="mt-1.5 block truncate text-[13px] font-medium leading-tight">{name}</span>
         <span className="block h-4 truncate text-[10.5px] leading-4 text-mauve">{sub}</span>
-        <span className="flex h-4 gap-0.5 overflow-hidden">{tags.slice(0, 3).map((t) => <span key={t} className="shrink-0 rounded-full bg-white/10 px-1.5 text-[9.5px] leading-4">{t}</span>)}</span>
+        <span className="flex h-4 gap-0.5 overflow-hidden">{tags.slice(0, 3).map((t) => <span key={t} className="shrink-0 rounded-full bg-cream/10 px-1.5 text-[9.5px] leading-4">{t}</span>)}</span>
       </button>
       {menu.length > 0 && (
         <div className="absolute right-1.5 top-1.5" data-menu-for={id}>
@@ -188,7 +188,7 @@ function Hairs({ busy, run }: { busy: boolean; run: Run }) {
         <button type="button" disabled={busy} onClick={() => file.current?.click()} className="btn-jewel rounded-full px-3.5 py-1.5 text-[13px]">上傳髮件</button>
       </div>
       <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-2">
-        {([["all", "全部"], ["set", "整套髮型"], ...HAIR_CATS.map((c) => [c.id, c.label])] as [string, string][]).map(([c, l]) => <button key={c} type="button" onClick={() => setCat(c as HairCat)} className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] ${cat === c ? "chip-on" : "bg-white/5 text-cream/85"}`}>{l}</button>)}
+        {([["all", "全部"], ["set", "整套髮型"], ...HAIR_CATS.map((c) => [c.id, c.label])] as [string, string][]).map(([c, l]) => <button key={c} type="button" onClick={() => setCat(c as HairCat)} className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] ${cat === c ? "chip-on" : "bg-cream/5 text-cream/85"}`}>{l}</button>)}
       </div>
       <p className="pb-2 text-[11.5px] leading-snug text-mauve">像換裝遊戲一樣：在換裝頁「外貌 › 髮型」按分類揀選瀏海、後髮、側髮、馬尾及髮尾，同一分類互相替換。網格變形、染色、挑染及髮尾漸層在換裝頁調整。</p>
       {!list ? <div className="py-10"><Spinner /></div> : (
@@ -236,7 +236,7 @@ function Poses({ busy, run }: { busy: boolean; run: Run }) {
                 menu={[
                   { label: "改名", onClick: () => { const name = prompt("新名稱", p.name)?.trim(); if (name) void run(() => api(`/api/doll/poses/${p.id}`, { method: "PATCH", json: { name } }).then(() => load()), "已改名"); } },
                   { label: "複製", disabled: busy, onClick: () => void run(() => api("/api/doll/poses", { method: "POST", json: { name: (p.name + " 副本").slice(0, 30), model_id: p.model_id, pose: p.pose, front: p.front } }).then(() => load()), "已複製") },
-                  { label: "適用身體", node: <label className="block text-[11px] text-mauve">適用身體<select aria-label="適用身體" value={p.model_id ?? ""} onChange={(e) => void run(() => api(`/api/doll/poses/${p.id}`, { method: "PATCH", json: { model_id: e.target.value || null } }).then(() => load()), "已更新")} className="mt-1 h-8 w-full rounded-full bg-white/10 px-2 text-[12px] text-cream"><option value="">所有身體</option>{models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label> },
+                  { label: "適用身體", node: <label className="block text-[11px] text-mauve">適用身體<select aria-label="適用身體" value={p.model_id ?? ""} onChange={(e) => void run(() => api(`/api/doll/poses/${p.id}`, { method: "PATCH", json: { model_id: e.target.value || null } }).then(() => load()), "已更新")} className="mt-1 h-8 w-full rounded-full bg-cream/10 px-2 text-[12px] text-cream"><option value="">所有身體</option>{models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label> },
                   { label: "刪除", danger: true, disabled: busy, onClick: () => { if (confirm(`刪除姿勢「${p.name}」？`)) void run(() => api(`/api/doll/poses/${p.id}`, { method: "DELETE" }).then(() => load()), "已刪除"); } },
                 ]} />
             </li>

@@ -232,7 +232,7 @@ function AnalysisSummary({ an, mode, title }: { an: AnalysisData; mode: string; 
       )}
       {key === "color" ? (
         <div className="flex flex-wrap gap-2">
-          {an.by_color.slice(0, 10).map((c) => <Link key={c.name} to={`/wardrobe?color=${encodeURIComponent(c.name)}`} className="flex items-center gap-1.5 rounded-full bg-white/5 py-0.5 pl-0.5 pr-2 text-[12px]"><span className="h-6 w-6 rounded-full ring-1 ring-gold/70" style={{ background: swatch(c.name) }} />{c.name} {c.n}</Link>)}
+          {an.by_color.slice(0, 10).map((c) => <Link key={c.name} to={`/wardrobe?color=${encodeURIComponent(c.name)}`} className="flex items-center gap-1.5 rounded-full bg-cream/5 py-0.5 pl-0.5 pr-2 text-[12px]"><span className="h-6 w-6 rounded-full ring-1 ring-gold/70" style={{ background: swatch(c.name) }} />{c.name} {c.n}</Link>)}
         </div>
       ) : key === "style" || key === "brand" ? (
         <Bars rows={source.slice(0, 5).map((x) => ({ name: x.name, n: x.n, sub: pct(x.n, an.total) }))} format={(n) => `${n} 件`} onPick={(name) => navigate(`/wardrobe?${key}=${encodeURIComponent(name)}`)} />

@@ -51,7 +51,7 @@ export function HomeEditor({ layout, onDraft, onClose, inline }: { layout: HomeL
             const spec = widgetSpec(w.type)!;
             const i = draft.widgets.indexOf(w);
             return (
-              <div className={`rounded-2xl border border-gold/25 ${w.visible ? "bg-white/5" : "bg-white/[0.02] opacity-60"}`} data-widget={w.id} data-visible={w.visible ? "1" : "0"}>
+              <div className={`rounded-2xl border border-gold/25 ${w.visible ? "bg-cream/5" : "bg-cream/[0.02] opacity-60"}`} data-widget={w.id} data-visible={w.visible ? "1" : "0"}>
                 <div className="flex items-center gap-1 px-1.5 py-1.5">
                   <span {...handle} className="grid h-9 w-8 shrink-0 place-items-center text-mauve"><IconGrip /></span>
                   <button type="button" onClick={() => setOpen(open === w.id ? null : w.id)} aria-expanded={open === w.id} className="min-w-0 flex-1 text-left">
