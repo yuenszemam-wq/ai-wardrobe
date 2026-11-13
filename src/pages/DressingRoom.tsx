@@ -5,10 +5,10 @@ import { Pose, applyMat, boneMap, clampPose, invert, matAngle, samePose, solve }
 import { Camera, FULL_CAMERA, Rect, Size, VIEW_PRESETS, ZOOM, boundsOf, frame, zoomAt, zoomTo } from "../../shared/camera";
 import { DragMode, Region, controlsFor, poseControls, regionBones } from "../../shared/poseControls";
 import { BUILTIN_HAIR_ID, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairCat, HairConfig, HairPart, HAIR_CAT_BONE, HAIR_CAT_LABEL, HAIR_CAT_LAYER, hairCatOf, placeHairPart, refUrl, POSE_PRESETS, hairBoneId, hexToRgb, resolveHairColors, rigFor } from "../../shared/avatarV2";
-import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, Piece, Slot, SLOT_SKIN, itemKey, fitHeight, LookState, SLEEVE_ROT_LIMIT, SY_LIMIT, insertIndex, layeringHints, normalizeFit, normalizeTemplateData, sameFit, defaultFit, Variant, WearOpts } from "../../shared/doll";
+import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, Piece, SETUP_KEYS, SETUP_LABEL, SetupKey, SetupMark, SetupStatus, Slot, SLOT_SKIN, itemKey, fitHeight, LookState, SLEEVE_ROT_LIMIT, SY_LIMIT, insertIndex, layeringHints, normalizeFit, normalizeTemplateData, sameFit, defaultFit, Variant, WearOpts } from "../../shared/doll";
 import { poseDistance, suggestSleeveRot } from "../../shared/garmentMesh";
 import { api, displayName, Garment } from "../api";
-import { IconChevronLeft, IconEye, IconEyeOff, IconHand, IconHeart, IconLayers, IconMore, IconPerson, IconPose, IconSave, IconShirt, IconTarget } from "../components/icons";
+import { IconChevronLeft, IconChevronRight, IconEye, IconEyeOff, IconHand, IconHeart, IconLayers, IconMore, IconPerson, IconPose, IconSave, IconShirt, IconTarget } from "../components/icons";
 import { Spinner, toast } from "../components/ui";
 import { AssetPanel, Draft } from "../doll/AssetPanel";
 import { Analysis, analyze, canvasBlob, loadImage, prepareAsset } from "../doll/content";
@@ -19,6 +19,7 @@ import { Appearance, DEFAULT_APPEARANCE, GarmentLite, Resolved, Template, Templa
 import { AppearancePanel, COMPARE_LABEL, CompareKind, ClothesPanel, PieceEntry, FitDelta, FitPanel, FitTool, GarmentView, WearMode, wearMode, LayersPanel, LookTab, MaskTool, PartTool, PosePanel, PoseTab, SkeletonMode } from "../doll/panels";
 import { PaintPhase, Selection, Stage, StageMode } from "../doll/Stage";
 import { navigate } from "../router";
+import { ITEM_LABEL, pieceSetup, setupInfo } from "../doll/setup";
 
 type Tab = "clothes" | "layers" | "look" | "pose";
 const TABS: { id: Tab; label: string; Icon: typeof IconShirt }[] = [
@@ -46,7 +47,10 @@ function guessHairCat(name: string, ar: number, small?: boolean): HairCat {
   return small ?? ar < 1.15 ? "bangs" : "back";
 }
 
-export default function DressingRoom({ id }: { id?: string }) {
+/** 衣服設定工作室：只校正一件衣物（或一個套裝部件）的預設，不建立穿搭造型 */
+export interface SetupTarget { gid: string; piece?: string | null }
+export default function DressingRoom({ id, setup }: { id?: string; setup?: SetupTarget }) {
+  const setupKey = setup ? setup.gid + "|" + (setup.piece ?? "") : "";
   const renderer = useMemo(() => new DollRenderer(), []);
   const [garments, setGarments] = useState<Garment[] | null>(null);
   /** 套裝部件的圖片（由原圖製作，只在記憶體） */
@@ -143,7 +147,23 @@ export default function DressingRoom({ id }: { id?: string }) {
       if (id) navigate("/dressing", true); else { setTpls({ v2: new Map(), v1: new Map() }); setLoaded(true); }
     });
     return () => { generation.current++; };
-  }, [id]);
+  }, [id, setupKey]);
+
+  // ───── 衣服設定模式：載入目標衣物及其預設（含預設姿勢）；只在切換目標時執行一次 ─────
+  const setupInit = useRef("");
+  useEffect(() => {
+    if (!setup || !loaded || !tpls || !garments || setupInit.current === setupKey) return;
+    setupInit.current = setupKey;
+    const g = garments.find((x) => x.id === setup.gid);
+    if (!g) { toast("找不到這件衣物（可能未有透明圖或已封存）", "err"); navigate("/dressing/setup", true); return; }
+    const t = templateFor(tpls, g), pc = setup.piece ? t?.data?.pieces?.find((p) => p.id === setup.piece) ?? null : null;
+    if (setup.piece && !pc) toast("找不到這個部件，改為設定整件衣物", "err");
+    const w: Worn = pc ? { garment_id: g.id, piece: pc.id, slot: pc.slot, hidden: false, variant: null, fit: null, opts: null, mask: null } : wornFor(g, tpls);
+    const p = pc ? pc.pose ?? t?.data?.pose ?? null : t?.data?.pose ?? null;
+    hist.current.base = null;
+    setWorn([w]); setPoseState(p ?? {}); setFront(pc ? [] : t?.data?.front ?? []);
+    setSelected(itemKey(w)); setTool("place"); setTab("clothes"); setDirty(false); setPosePrompt(null);
+  }, [setupKey, loaded, tpls, garments]);
 
   const gmap = useMemo(() => {
     const m = new Map<string, GarmentLite>();
@@ -372,8 +392,8 @@ export default function DressingRoom({ id }: { id?: string }) {
     setItem(r.key, { snapshot: true, opts, fit, mask: null, parts: "whole" });
     setPartTool((p) => ({ ...p, label: -1 }));
   };
-  async function saveTemplate(r: Resolved, patch: (data: ReturnType<typeof normalizeTemplateData>) => { data: ReturnType<typeof normalizeTemplateData>; fit: Fit }, done: string, after?: Partial<Worn>) {
-    if (r.analysis.content.approximate) return toast("高清圖未讀取成功，暫時不能存為預設", "err");
+  async function saveTemplate(r: Resolved, patch: (data: ReturnType<typeof normalizeTemplateData>) => { data: ReturnType<typeof normalizeTemplateData>; fit: Fit }, done: string, after?: Partial<Worn>): Promise<boolean> {
+    if (r.analysis.content.approximate) { toast("高清圖未讀取成功，暫時不能存為預設", "err"); return false; }
     setBusy(true);
     try {
       const cur = r.template?.data ?? normalizeTemplateData(null, r.worn.slot);
@@ -382,8 +402,10 @@ export default function DressingRoom({ id }: { id?: string }) {
       setTpls((cur) => (cur ? { v1: cur.v1, v2: new Map(cur.v2).set(r.garment.id, t) } : cur));
       setItem(r.key, { snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null, ...after });
       toast(done);
+      return true;
     } catch (e) {
       toast((e as Error).message, "err");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -729,6 +751,28 @@ export default function DressingRoom({ id }: { id?: string }) {
     }catch(e){if(assetId)await api(`/api/doll/assets/${assetId}`,{method:"DELETE"}).catch(()=>undefined);toast((e as Error).message,"err");}finally{setBusy(false);}
   }
 
+  // ───── 衣服設定模式：保存只更新衣物預設（不建立造型） ─────
+  const setupTarget = setup ? resolved.find((r) => r.garment.id === setup.gid && (r.piece?.id ?? null) === (setup.piece ?? null)) ?? null : null;
+  const neighbours = useMemo(() => {
+    if (!setup) return { prev: null, next: null };
+    let ids: string[] = [];
+    try { ids = JSON.parse(sessionStorage.getItem("aw:setup:list") || "[]"); } catch { /* 私密瀏覽 */ }
+    const i = ids.indexOf(setup.gid);
+    return { prev: i > 0 ? ids[i - 1] : null, next: i >= 0 && i < ids.length - 1 ? ids[i + 1] : null };
+  }, [setupKey]);
+  async function saveSetup() {
+    if (!setupTarget) return;
+    if (pending.size) return toast("衣物仍在載入，請稍後再保存", "err");
+    if (await saveDefault(setupTarget)) setDirty(false);
+  }
+  /** 手動標記設定項目：auto＝由程式判斷；done＝已完成；na＝不需要。立即保存到衣物預設（部件的標記存在部件內） */
+  async function markSetup(r: Resolved, key: SetupKey, mark: SetupMark | null) {
+    const set = (st: SetupStatus | undefined): SetupStatus | undefined => { const n: SetupStatus = { ...(st ?? {}) }; if (mark) n[key] = mark; else delete n[key]; return Object.keys(n).length ? n : undefined; };
+    const keep = { fit: r.worn.fit, opts: r.worn.opts, mask: r.worn.mask, parts: r.worn.parts ?? null, snapshot: r.worn.snapshot };
+    if (r.piece) { const pid = r.piece.id; return saveTemplate(r, (d) => ({ data: { ...d, pieces: (d.pieces ?? []).map((q) => (q.id === pid ? { ...q, status: set(q.status) } : q)) }, fit: r.template!.fit }), "已更新設定狀態", { ...keep, piece_def: null }); }
+    return saveTemplate(r, (d) => ({ data: { ...d, status: set(d.status) }, fit: baseRowFit(r) }), "已更新設定狀態", keep);
+  }
+
   // ───── 保存造型 ─────
   async function save(asNew = false) {
     if (pending.size) return toast("衣物仍在載入，請稍後再保存", "err");
@@ -761,7 +805,7 @@ export default function DressingRoom({ id }: { id?: string }) {
     toast("已刪除");
     navigate("/outfits", true);
   }
-  const leave = (to: string) => { if (!dirty || confirm("造型尚未保存，確定離開？")) navigate(to); };
+  const leave = (to: string) => { if (!dirty || confirm(setup ? "這件衣服的設定尚未保存，確定離開？" : "造型尚未保存，確定離開？")) navigate(to); };
 
   // ───── 舞台互動 ─────
   const hp = draftPart ?? activeHair;
@@ -904,6 +948,19 @@ export default function DressingRoom({ id }: { id?: string }) {
       data-fits={JSON.stringify(resolved.map((r) => [r.key, Math.round(r.fit.cx * 10) / 10, Math.round(r.fit.cy * 10) / 10, Math.round(r.fit.w * 10) / 10, Math.round(r.fit.rotation * 10) / 10]))}>
       {/* ───── 頂部 ───── */}
       <div className="safe-top shrink-0 bg-ink">
+        {setup ? (
+          <div className="flex h-12 items-center gap-1.5 px-2.5" data-testid="setup-header">
+            <button type="button" aria-label="返回衣服設定列表" onClick={() => leave("/dressing/setup")} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="text-[10px] tracking-[0.12em] text-mauve">衣服設定{setupTarget?.piece ? "｜套裝部件" : ""}</div>
+              <div className="truncate font-serif text-[14.5px] font-bold text-gold-soft" data-testid="setup-title">{setupTarget ? (setupTarget.piece ? setupTarget.piece.name + "・" : "") + displayName(setupTarget.garment as Garment) : "載入中…"}</div>
+            </div>
+            {dirty && <span className="shrink-0 text-[10.5px] text-wine">未保存</span>}
+            <button type="button" aria-label="上一件" disabled={!neighbours.prev} onClick={() => neighbours.prev && leave(`/dressing/setup/${neighbours.prev}`)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[16px] disabled:opacity-35"><IconChevronLeft /></button>
+            <button type="button" aria-label="下一件" disabled={!neighbours.next} onClick={() => neighbours.next && leave(`/dressing/setup/${neighbours.next}`)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[16px] disabled:opacity-35"><IconChevronRight /></button>
+            <button type="button" data-testid="setup-save" disabled={busy || !setupTarget} onClick={() => void saveSetup()} className="btn-jewel flex h-9 shrink-0 items-center gap-1 rounded-full px-3 text-[13px] disabled:opacity-50"><IconSave className="text-[14px]" />{busy ? "…" : "保存設定"}</button>
+          </div>
+        ) : (
         <div className="flex h-12 items-center gap-1.5 px-2.5">
           <button type="button" aria-label="返回我的穿搭" onClick={() => leave("/outfits")} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
           <input value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} placeholder="未命名造型" aria-label="造型名稱" data-testid="look-name" className="h-9 min-w-0 flex-1 rounded-full border border-transparent bg-transparent px-2 font-serif text-[16px] font-bold tracking-[0.06em] text-gold-soft placeholder:text-mauve/70 focus:border-gold/50 focus:outline-none" />
@@ -912,7 +969,8 @@ export default function DressingRoom({ id }: { id?: string }) {
           <button type="button" data-testid="save-look" disabled={busy} onClick={() => void save()} className="btn-jewel flex h-9 shrink-0 items-center gap-1 rounded-full px-3.5 text-[13px] disabled:opacity-50"><IconSave className="text-[14px]" />{busy ? "…" : "保存"}</button>
           <button type="button" aria-label="更多" aria-expanded={menu} onClick={() => setMenu(!menu)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconMore /></button>
         </div>
-        {menu && (
+        )}
+        {menu && !setup && (
           <div className="absolute right-2.5 z-50 mt-1 w-44 overflow-hidden rounded-2xl border border-gold/50 bg-velvet text-[13px] shadow-xl" role="menu">
             <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); leave("/dressing"); }}>新造型</button>
             {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); void save(true); }}>另存為新造型</button>}
@@ -974,6 +1032,26 @@ export default function DressingRoom({ id }: { id?: string }) {
           {!preview && poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot: false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-2 right-2 max-w-[62%] truncate rounded-full bg-ink/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
         </Stage>
       </div>
+
+      {/* ───── 衣服設定：部件選擇及設定狀態 ───── */}
+      {!preview && setup && setupTarget && (() => {
+        const st = setupTarget.piece ? pieceSetup(setupTarget.piece) : tpls ? setupInfo(setupTarget.garment, tpls).items : null;
+        const pcs = templateFor(tpls, setupTarget.garment)?.data?.pieces ?? [];
+        const cycle = (k: SetupKey) => { const cur = (setupTarget.piece ? setupTarget.piece.status : setupTarget.template?.data?.status)?.[k] ?? null; void markSetup(setupTarget, k, cur === null ? "done" : cur === "done" ? "na" : null); };
+        return (
+          <div className="shrink-0 border-t border-gold/30 bg-ink/90 px-2.5 py-1.5" data-testid="setup-strip">
+            <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto">
+              {pcs.length > 0 && (
+                <select aria-label="選擇要設定的部件" data-testid="setup-piece" value={setup.piece ?? ""} onChange={(e) => leave(`/dressing/setup/${setup.gid}${e.target.value ? "?piece=" + e.target.value : ""}`)} className="h-7 max-w-[9.5rem] shrink-0 rounded-full bg-white/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
+                  <option value="">整件衣物</option>
+                  {pcs.map((p) => <option key={p.id} value={p.id}>{p.name}{p.fit ? "" : "（未校正）"}</option>)}
+                </select>
+              )}
+              {st && SETUP_KEYS.map((k) => <button key={k} type="button" data-mark={k} data-state={st[k]} disabled={busy} onClick={() => cycle(k)} title="輕按切換：自動判斷 → 已完成 → 不需要" className={`h-7 shrink-0 rounded-full px-2 text-[11px] ${st[k] === "done" ? "bg-[#6fbf8f]/30 text-[#d6f5e1]" : st[k] === "na" ? "bg-white/10 text-cream/60" : st[k] === "todo" ? "bg-[#a12c4b]/40 text-[#ffd3df]" : "bg-white/5 text-mauve"}`}>{SETUP_LABEL[k]}：{ITEM_LABEL[st[k]].replace("（可選）", "")}</button>)}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ───── 底部面板 ───── */}
       {!preview && (
