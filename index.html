@@ -17,7 +17,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&display=swap" rel="stylesheet" />
     <title>AI 電子衣櫃</title>
     <!-- 樣式載入前也用深色底，避免開啟時閃白及 iOS 狀態列後面出現白色模糊邊 -->
-    <style>html{background:#1c0e1a}body{background:#2a1526;margin:0}</style>
+    <!-- Phase 3.8：顏色讀取介面主題變數（主題在 JavaScript 載入後立即套用），未有主題時與原本相同 -->
+    <style>html{background:var(--color-ink,#1c0e1a)}body{background-color:var(--color-plum,#2a1526);margin:0}</style>
   </head>
   <body>
     <div id="root"></div>

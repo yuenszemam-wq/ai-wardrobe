@@ -54,13 +54,14 @@
   body {
     margin: 0;
     background-color: var(--color-plum);
-    background-image: repeating-linear-gradient(90deg, var(--color-plum) 0 12px, var(--aw-stripe) 12px 24px);
+    /* 原本 index.html 的內聯樣式令條紋不顯示：預設維持純色；主題選擇「條紋」時才顯示 */
+    background-image: none;
     color: var(--color-cream);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
   }
-  :root[data-pattern="plain"] body { background-image: none; }
+  :root[data-pattern="stripe"] body { background-image: repeating-linear-gradient(90deg, var(--color-plum) 0 12px, var(--aw-stripe) 12px 24px); }
   :root[data-canvas] .doll-stage { background: var(--aw-canvas); }
   :root[data-pattern="dots"] body { background-image: radial-gradient(circle, var(--aw-stripe) 1.6px, transparent 2.2px); background-size: 16px 16px; }
   :root[data-lace="0"] .lace-b::after, :root[data-lace="0"] .lace-t::before, :root[data-lace="0"] .lace-trim, :root[data-lace="0"] .lace-trim-up { display: none; }
