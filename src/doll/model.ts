@@ -1,7 +1,9 @@
 // 換裝頁的資料模型：衣物預設（template）、造型內的個別調整、舊造型轉換，以及相關 API。
 import { HairPart, hairCatOf } from "../../shared/avatarV2";
 import { BUILTIN_HAIRS, BUILTIN_HAIR_ID, BUILTIN_HEADS, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairConfig, HeadConfig, NO_HAIR_ID, RIG_V2, normalizeColorValue, normalizeHairConfig, normalizeHeadConfig } from "../../shared/avatarV2";
-import { Pose, normalizePose } from "../../shared/avatarRig";
+import { Pose, Rig, normalizePose } from "../../shared/avatarRig";
+import { AVATAR_V2_ID } from "../../shared/avatarV2";
+import { transferFit, transferPieces, transferTemplateData } from "../../shared/modelFit";
 import { Content, Fit, Piece, itemKey, pieceFit, LEGACY_AVATAR, LookItem, LookState, Slot, TemplateData, WearOpts, convertLegacyFit, defaultFit, defaultOpts, isSlot, normalizeFit, slotFor } from "../../shared/doll";
 import { api, Garment } from "../api";
 import { Analysis } from "./content";
@@ -23,7 +25,7 @@ export async function fetchStudioGarments(): Promise<Garment[]> {
 }
 
 export interface GarmentLite { id: string; name: string; display_no?: number | null; category: string | null; subcategory: string | null; transparent_image_id?: string | null; thumb_image_id?: string | null }
-export interface Template { garment_id: string; avatar_id: string; image_id: string | null; fit: Fit; slot: string | null; data: TemplateData | null; version: number; updated_at?: string }
+export interface Template { garment_id: string; avatar_id: string; image_id: string | null; fit: Fit; slot: string | null; data: TemplateData | null; version: number; updated_at?: string; /** 由另一個身體換算的初始建議（前端暫時產生，未保存） */ converted?: boolean }
 /** 已穿上的衣物。v1fit＝舊角色上的個別位置，待讀到圖片後換算（只存在於前端） */
 export interface Worn extends LookItem { v1fit?: Fit | null }
 export interface Appearance { head: string; head_config?: HeadConfig | null; hair: string; hair_config?: HairConfig | null; hair_color: string; accent_color: string | null; tip_color: string | null }
@@ -32,13 +34,19 @@ export const DEFAULT_APPEARANCE: Appearance = { head: BUILTIN_HEAD_ID, hair: BUI
 export interface LookDetail { id: string; name: string; is_favorite: boolean; thumb_at: string | null; state: LookState | null; legacy: LegacyLook | null; garments: GarmentLite[] }
 interface LegacyLook { avatar_id: string; hair_color: string | null; accent_color: string | null; pose: unknown; items: { garment_id: string; slot: string; override: Fit | null }[] }
 
-export interface Templates { v2: Map<string, Template>; v1: Map<string, Template> }
-export async function fetchTemplates(): Promise<Templates> {
-  const r = await api<{ templates: Template[] }>("/api/doll/templates");
-  const out: Templates = { v2: new Map(), v1: new Map() };
-  for (const t of r.templates) (t.avatar_id === LEGACY_AVATAR ? out.v1 : out.v2).set(t.garment_id, t);
+/**
+ * 衣物預設。v2＝目前身體模型自己的設定（名稱沿用：Avatar V2 時就是 V2 的設定）；
+ * v1＝舊角色（只限 Avatar V2 使用）；base＝自訂身體時附上的 Avatar V2 設定，只用作換算的初始建議。
+ */
+export interface Templates { v2: Map<string, Template>; v1: Map<string, Template>; base?: Map<string, Template>; avatar?: string }
+export async function fetchTemplates(avatar: string = AVATAR_V2_ID): Promise<Templates> {
+  const r = await api<{ templates: Template[] }>("/api/doll/templates" + (avatar === AVATAR_V2_ID ? "" : `?avatar=${encodeURIComponent(avatar)}`));
+  const out: Templates = { v2: new Map(), v1: new Map(), avatar, ...(avatar === AVATAR_V2_ID ? {} : { base: new Map() }) };
+  for (const t of r.templates) (t.avatar_id === avatar ? out.v2 : t.avatar_id === LEGACY_AVATAR ? out.v1 : out.base ?? out.v1).set(t.garment_id, t);
   return out;
 }
+/** 身體骨架：resolve 用來自動對位或由 V2 設定換算 */
+export interface BodyCtx { rig: Rig; base: Rig }
 
 export function userAsset(a: { id: string; kind: string; name: string; category: string | null; config: unknown; thumb: string | null; garment_id?: string | null }): DollAsset | null {
   if (a.kind === "hair") { const c = normalizeHairConfig(a.config); return c && c.parts.length ? { id: a.id, kind: "hair", name: a.name, category: a.category, config: c, thumb: a.thumb } : null; }
@@ -94,6 +102,7 @@ export interface Resolved {
   parts: string | null;
   analysis: Analysis;
   from: "default" | "template" | "converted" | "override";
+  /** 使用中的衣物預設；converted＝由另一個身體換算的初始建議（未在這個身體上校正） */
   template: Template | null;
 }
 const validTemplate = (t: Template | undefined, g: GarmentLite) => (t && t.image_id === (g.transparent_image_id ?? null) ? t : null);
@@ -119,8 +128,20 @@ export function pieceBone(p: Pick<Piece, "name" | "slot">): string {
   return "world";
 }
 export const templateFor = (tpls: Templates, g: GarmentLite) => validTemplate(tpls.v2.get(g.id), g);
-export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<string, Analysis>, pieceRefs?: Map<string, string>): Resolved | null {
-  const tpl = validTemplate(tpls.v2.get(g.id), g);
+/** 自訂身體上這件衣物是否只有 V2 設定可以換算 */
+export const baseTemplateFor = (tpls: Templates, g: GarmentLite) => (tpls.base ? validTemplate(tpls.base.get(g.id), g) : null);
+/** 自訂身體未有自己的設定時：由 Avatar V2 的設定換算成初始建議（不當作已校正） */
+function convertedTemplate(tpls: Templates, g: GarmentLite, body: BodyCtx | undefined, content: Content | undefined): Template | null {
+  if (!tpls.base || !body) return null;
+  const src = validTemplate(tpls.base.get(g.id), g);
+  if (!src) return null;
+  const data = src.data ? (content ? transferTemplateData(src.data, body.base, body.rig, content, src.avatar_id) : { ...src.data, pieces: transferPieces(src.data.pieces, body.base, body.rig), converted: true, converted_from: src.avatar_id }) : null;
+  return { ...src, avatar_id: tpls.avatar ?? src.avatar_id, version: 0, fit: content ? transferFit(src.fit, content, body.base, body.rig) : src.fit, data, converted: true } as Template;
+}
+export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<string, Analysis>, pieceRefs?: Map<string, string>, body?: BodyCtx): Resolved | null {
+  const own = validTemplate(tpls.v2.get(g.id), g);
+  const fullRef = w.snapshot && w.image ? w.image : g.transparent_image_id ? "img:" + g.transparent_image_id : null;
+  const tpl = own ?? convertedTemplate(tpls, g, body, fullRef ? analyses.get(fullRef)?.content : undefined);
   if (w.piece) {
     const piece = pieceOf(w, tpl);
     const image = piece ? pieceRefs?.get(itemKey(w)) ?? null : null;
@@ -128,23 +149,24 @@ export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<
     if (!piece || !image || !analysis) return null;
     // 預設位置：部件自己的預設；沒有的話按套裝放在角色身上的位置換算（拆出來的部件留在原本的位置）
     const full = w.snapshot && w.image ? analyses.get(w.image) : g.transparent_image_id ? analyses.get("img:" + g.transparent_image_id) : undefined;
-    const setFit = tpl?.fit ?? (full ? defaultFit(tpl && isSlot(tpl.slot) ? tpl.slot : slotFor(g.category, g.subcategory), full.content, g.category, g.subcategory, g.name) : null);
-    const base = piece.fit ?? (setFit && full ? pieceFit(setFit, full.content.ar, piece.box) : defaultFit(piece.slot, analysis.content, null, null, piece.name));
+    const setFit = tpl?.fit ?? (full ? defaultFit(tpl && isSlot(tpl.slot) ? tpl.slot : slotFor(g.category, g.subcategory), full.content, g.category, g.subcategory, g.name, body?.rig) : null);
+    const base = piece.fit ?? (setFit && full ? pieceFit(setFit, full.content.ar, piece.box) : defaultFit(piece.slot, analysis.content, null, null, piece.name, body?.rig));
     const opts = w.opts ?? piece.opts ?? { ...defaultOpts(piece.slot), follow: "none" as const, bone: pieceBone(piece) };
     // 穿著遮罩：造型快照（null＝確實沒有）→ 個別調整 → 部件預設的穿著遮罩
     const mask = w.snapshot ? w.mask ?? null : w.mask ?? piece.wear_mask ?? null;
-    return { key: itemKey(w), worn: w, garment: g, piece, image, base, fit: w.fit ?? base, opts, mask, parts: w.snapshot ? w.parts ?? null : w.parts ?? piece.parts ?? null, analysis, from: w.fit || w.opts || w.mask || w.parts ? "override" : piece.fit ? "template" : "default", template: tpl };
+    return { key: itemKey(w), worn: w, garment: g, piece, image, base, fit: w.fit ?? base, opts, mask, parts: w.snapshot ? w.parts ?? null : w.parts ?? piece.parts ?? null, analysis, from: w.fit || w.opts || w.mask || w.parts ? "override" : piece.fit ? (tpl && !own ? "converted" : "template") : "default", template: tpl };
   }
   const variant = w.variant ? tpl?.data?.variants[w.variant] ?? null : null;
   const image = imageOf(w, g, tpl);
   const analysis = image ? analyses.get(image) : undefined;
   if (!analysis) return null;
   const content: Content = analysis.content;
-  const auto = () => defaultFit(w.slot, content, g.category, g.subcategory, g.name);
-  const v1 = validTemplate(tpls.v1.get(g.id), g);
+  const auto = () => defaultFit(w.slot, content, g.category, g.subcategory, g.name, body?.rig);
+  const v1 = tpls.base ? null : validTemplate(tpls.v1.get(g.id), g);
   let base: Fit, from: Resolved["from"];
-  if (variant) { base = variant.fit ?? (variant.image ? auto() : tpl!.fit); from = "template"; }
-  else if (tpl) { base = tpl.fit; from = "template"; }
+  const tfrom: Resolved["from"] = own ? "template" : "converted";
+  if (variant) { base = variant.fit ?? (variant.image ? auto() : tpl!.fit); from = tfrom; }
+  else if (tpl) { base = tpl.fit; from = tfrom; }
   else if (v1) { base = convertLegacyFit(v1.fit, content); from = "converted"; }
   else { base = auto(); from = "default"; }
   const fit = w.fit ?? (w.v1fit ? convertLegacyFit(w.v1fit, content) : base);
@@ -156,7 +178,7 @@ export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<
 export const sceneItem = (r: Resolved): SceneItem => ({ key: r.key, image: r.image!, slot: r.worn.slot, fit: r.fit, content: r.analysis.content, grid: r.analysis.grid, opts: r.opts, mask: r.mask, parts: r.parts === "auto" ? null : r.parts, hidden: r.worn.hidden });
 
 export function wornFor(g: GarmentLite, tpls: Templates): Worn {
-  const t = validTemplate(tpls.v2.get(g.id), g) ?? validTemplate(tpls.v1.get(g.id), g);
+  const t = validTemplate(tpls.v2.get(g.id), g) ?? (tpls.base ? validTemplate(tpls.base.get(g.id), g) : validTemplate(tpls.v1.get(g.id), g));
   const slot = isSlot(t?.slot) ? t.slot : slotFor(g.category, g.subcategory);
   return { garment_id: g.id, slot, hidden: false, variant: null, fit: null, opts: t?.data ? null : { ...defaultOpts(slot), follow: "none", bone: "world" }, mask: null };
 }

@@ -1,11 +1,11 @@
 // 角色換裝的畫布渲染器：身體部件、頭部、髮型、衣物全部畫在同一張 Canvas 上。
 // 衣物用連續網格跟隨骨架（shared/garmentMesh.ts）；畫面、造型縮圖及匯出圖片用同一套繪畫程式。
-import { Mat, Pose, Rig, applyMat, invert, multiply, solve } from "../../shared/avatarRig";
+import { Mat, Pose, Rig, applyMat, invert, multiply, rotateAbout, solve } from "../../shared/avatarRig";
 import { FrontPart, HairConfig, HairPart, HairStats, HeadConfig, Rgb, resolveHairColors, hexToRgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
 import { Content, DOLL_H, DOLL_W, Fit, FULL_CONTENT, defaultOpts, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
 import { GarmentRig, Mesh, PartMap, RigInfo, boneMatrices, buildRig, cellVerts, locate, posedBounds, rigCoverage, skinMesh } from "../../shared/garmentMesh";
 import { AlphaGrid, Bitmap, alphaAt, loadImage, pixelsOf } from "./content";
-import { AvatarModel, DEFAULT_BODY_MODEL } from "../../shared/avatarModel";
+import { AvatarModel, DEFAULT_BODY_MODEL, partImage } from "../../shared/avatarModel";
 
 export interface SceneItem {
   key: string;
@@ -88,7 +88,19 @@ const OVERLAY_COLOR: Record<number, [number, number, number]> = { 1: [255, 79, 1
 
 export class DollRenderer {
   // One renderer per immutable model revision: geometry and neck caches cannot cross models.
-  constructor(readonly model: AvatarModel = DEFAULT_BODY_MODEL) {}
+  constructor(model: AvatarModel = DEFAULT_BODY_MODEL) { this.current = model; }
+  private current: AvatarModel;
+  get model(): AvatarModel { return this.current; }
+  /** 只供身體編輯器：即時預覽未保存的身體定義（同一張圖片快取，避免拖動時閃爍）。換裝頁每個版本用獨立的渲染器。 */
+  setModel(model: AvatarModel) {
+    if (model === this.current) return;
+    this.current = model;
+    this.geo.clear();
+    this.neckMask = null;
+    for (const v of this.layerTex.values()) this.freeTex(v.tex);
+    this.layerTex.clear();
+    this.onReady();
+  }
   private images = new Map<string, Bitmap | "loading" | "error">();
   private work = new Map<string, Worked>();
   private geo = new Map<string, Geometry>();
@@ -417,22 +429,41 @@ export class DollRenderer {
     return this.overlayTex;
   }
 
+  /** 髮件在畫布上的繪畫項目（有網格變形或旋轉時用連續網格） */
+  private hairItem(p: HairPart): SceneItem {
+    const fit: Fit = { cx: p.x + p.w / 2, cy: p.y + p.h / 2, w: p.w, rotation: p.rotation ?? 0, mesh: p.mesh };
+    return { key: "hair:" + p.id, image: p.file, slot: "headwear", fit, content: FULL_CONTENT(p.h / p.w), grid: HAIR_GRID, opts: { ...defaultOpts("headwear"), follow: "none", bone: hairBoneId(p) }, mask: null, parts: null, hidden: false };
+  }
+  /** 畫面上的一點落在髮件原圖的哪個位置（0–1）；已計及骨架、旋轉及網格變形。塗抹可見性遮罩用。 */
+  locateHair(p: HairPart, mats: Record<string, Mat>, x: number, y: number): [number, number] | null {
+    if (p.mesh || p.rotation) return this.locate(this.hairItem(p), mats, x, y);
+    const [rx, ry] = applyMat(invert(mats[hairBoneId(p)] ?? mats.root), x, y);
+    const u = (rx - p.x) / p.w, v = (ry - p.y) / p.h;
+    return u >= 0 && v >= 0 && u < 1 && v < 1 ? [u, v] : null;
+  }
+  private liveHair = new Map<string, { buf: LiveMask; rev: number }>();
+  /** 正在塗抹的髮件可見性遮罩（即時預覽，不經 PNG 編碼）；null＝結束 */
+  setLiveHairMask(id: string, buf: LiveMask | null) { if (buf) this.liveHair.set(id, { buf, rev: ++this.rev }); else this.liveHair.delete(id); this.onReady(); }
   private hairImage(hair: HairConfig, part: HairPart, scene: Scene): Bitmap | null {
     const src = this.img(part.file);
     if (!src) return null;
+    const live = this.liveHair.get(part.id);
+    const vis = !live && part.vis ? this.img(part.vis) : null;
+    if (!live && part.vis && !vis) return null;
     const override = part.color;
     const mainOverride = override?.hair_color ? resolveHairColors(override.hair_color, override.accent_color) : null;
     const main = mainOverride ? mainOverride.main : scene.main;
     const accent = override && Object.prototype.hasOwnProperty.call(override, "accent_color") ? resolveHairColors(override.hair_color ?? "original", override.accent_color).accent : mainOverride ? mainOverride.accent : scene.accent;
     const tipColor = override && Object.prototype.hasOwnProperty.call(override, "tip_color") ? (override.tip_color ? hexToRgb(override.tip_color) : null) : scene.tip;
-    if (!main && !accent && !tipColor) return src;
-    const key = [part.file, part.mask??"", main, accent, tipColor, !!override, part.y, part.h, hair.parts.map(p=>[p.file,p.y,p.h]).join(";")].join("|");
+    const colored = !!(main || accent || tipColor);
+    if (!colored && !live && !part.vis) return src;
+    const key = [part.file, part.mask??"", main, accent, tipColor, !!override, part.y, part.h, hair.parts.map(p=>[p.file,p.y,p.h]).join(";"), live ? "live" + live.rev : part.vis ? hashOf(part.vis) : ""].join("|");
     const hit = this.hairPx.get(key);
     if (hit) return hit;
     const mask = part.mask ? this.img(part.mask) : null;
     if (part.mask && !mask) return src;
     let stats: HairStats | null = null;
-    if (!part.mask) {
+    if (colored && !part.mask) {
       const st = this.hairStats.get(hair);
       if (!st) {
         // 整款髮型一起分析一次，各部件的主髮色才一致
@@ -455,7 +486,12 @@ export class DollRenderer {
       const row = (cy: number) => ((cy - part.y) / part.h) * h;
       tip = { color: tipColor, row0: row(top + (bottom - top) * 0.55), row1: row(top + (bottom - top) * 0.92) };
     }
-    recolorHair(data.data, mask ? pixelsOf(mask, w, h).data : null, { main, accent, ref, stats, tip, width: w });
+    if (colored) recolorHair(data.data, mask ? pixelsOf(mask, w, h).data : null, { main, accent, ref, stats, tip, width: w });
+    // 可見性遮罩：R＝隱藏。只改透明度，原圖不變
+    let visPx: Uint8ClampedArray | null = null;
+    if (live) { const c = document.createElement("canvas"); c.width = live.buf.w; c.height = live.buf.h; c.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(live.buf.data), live.buf.w, live.buf.h), 0, 0); visPx = pixelsOf(c, w, h).data; c.width = c.height = 0; }
+    else if (vis) visPx = pixelsOf(vis, w, h).data;
+    if (visPx) for (let i = 0; i < data.data.length; i += 4) if (visPx[i]) data.data[i + 3] = Math.round((data.data[i + 3] * (255 - visPx[i])) / 255);
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     canvas.getContext("2d")!.putImageData(data, 0, 0);
@@ -467,7 +503,8 @@ export class DollRenderer {
   /** 頸部（上半）的遮罩：用來把頸部顯示在衣服後領前面 */
   private neck(): { mask: HTMLCanvasElement; img: Bitmap } | null {
     const p = this.model.rig.parts.neck;
-    const img = this.img(this.model.assetBase + p.src);
+    if (!p || p.hidden) return null;
+    const img = this.img(partImage(this.model, p));
     if (!img) return null;
     if (!this.neckMask) {
       const c = document.createElement("canvas");
@@ -495,11 +532,15 @@ export class DollRenderer {
     const mats = solve(rig, scene.pose);
     const T = (bone: string) => multiply(base, mats[bone] ?? mats.root);
     const set = (m: Mat) => ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-    const part = (src: string, x: number, y: number, w: number, h: number, bone: string) => {
+    const part = (src: string, x: number, y: number, w: number, h: number, bone: string, rot = 0) => {
       const img = this.img(src);
       if (!img) { complete = false; return; }
-      set(T(bone));
+      set(rot ? multiply(T(bone), rotateAbout(rot, x + w / 2, y + h / 2)) : T(bone));
       ctx.drawImage(img, x, y, w, h);
+    };
+    const bodyPart = (name: string) => {
+      const p = this.model.rig.parts[name];
+      if (p && !p.hidden) part(partImage(this.model, p), p.x, p.y, p.w, p.h, p.bone, p.rot ?? 0);
     };
     const hair = (layer: string) => {
       if (!scene.hair) return;
@@ -509,8 +550,7 @@ export class DollRenderer {
         if (!img) { complete = false; continue; }
         const bone=hairBoneId(p);
         if(p.mesh || p.rotation) {
-          const fit:Fit={cx:p.x+p.w/2,cy:p.y+p.h/2,w:p.w,rotation:p.rotation??0,mesh:p.mesh};
-          const it:SceneItem={key:"hair:"+p.id,image:p.file,slot:"headwear",fit,content:FULL_CONTENT(p.h/p.w),grid:HAIR_GRID,opts:{...defaultOpts("headwear"),follow:"none",bone},mask:null,parts:null,hidden:false};
+          const it = this.hairItem(p);
           const geo=this.geometry(it),[tw,th]=dims(img); const tex={img,x:0,y:0,w:tw,h:th,tw,th};
           for(const m of geo.layers){const bm=boneMatrices(m,mats);this.drawMesh(ctx,tex,it,m,skinMesh(m,mats,bm),bm,base);}
         } else {set(T(bone));ctx.drawImage(img,p.x,p.y,p.w,p.h);}
@@ -539,8 +579,7 @@ export class DollRenderer {
     const front = new Set<string>(scene.front);
     for (const name of this.model.rig.body_parts) {
       if (name === "head" || front.has(name)) continue;
-      const p = this.model.rig.parts[name];
-      part(this.model.assetBase + p.src, p.x, p.y, p.w, p.h, p.bone);
+      bodyPart(name);
     }
     const body = (over: boolean) => {
       for (const it of visible) {
@@ -553,10 +592,7 @@ export class DollRenderer {
     };
     body(false);
     hair("mid");
-    for (const name of scene.front) {
-      const p = this.model.rig.parts[name];
-      if (p) part(this.model.assetBase + p.src, p.x, p.y, p.w, p.h, p.bone);
-    }
+    for (const name of scene.front) bodyPart(name);
     part(scene.head.file, scene.head.x, scene.head.y, scene.head.w, scene.head.h, "head");
     hair("front");
     body(true);

@@ -9,6 +9,8 @@ import { Spinner, toast } from "../components/ui";
 import { Templates, fetchStudioGarments, fetchTemplates } from "../doll/model";
 import { ITEM_LABEL, ItemState, OVERALL_LABEL, Overall, SetupInfo, setupInfo } from "../doll/setup";
 import { navigate } from "../router";
+import { ModelSummary, V2_SUMMARY, listModels } from "../doll/models";
+import { isBuiltinModel } from "../../shared/avatarModel";
 import { useTaxonomy } from "../taxonomy";
 
 type Filter = "all" | Overall;
@@ -34,6 +36,9 @@ const ago = (iso: string | null) => {
 export default function GarmentSetup() {
   const [garments, setGarments] = useState<Garment[] | null>(null);
   const [tpls, setTpls] = useState<Templates | null>(null);
+  // 目前校正的身體模型（每個身體有自己的衣物設定；網址 ?model= 保留選擇）
+  const [model, setModel] = useState<string>(() => new URLSearchParams(location.search).get("model") || V2_SUMMARY.id);
+  const [models, setModels] = useState<ModelSummary[]>([V2_SUMMARY]);
   const init = loadView();
   const [filter, setFilter] = useState<Filter>(init.filter);
   const [sort, setSort] = useState<Sort>(init.sort);
@@ -44,10 +49,15 @@ export default function GarmentSetup() {
   const tax = useTaxonomy();
 
   useEffect(() => {
-    Promise.all([fetchStudioGarments(), fetchTemplates()])
-      .then(([g, t]) => { setGarments(g); setTpls(t); })
-      .catch((e) => toast((e as Error).message, "err"));
+    fetchStudioGarments().then(setGarments).catch((e) => toast((e as Error).message, "err"));
+    listModels().then((r) => setModels(r.models)).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    setTpls(null);
+    fetchTemplates(model).then(setTpls).catch((e) => { toast((e as Error).message, "err"); if (!isBuiltinModel(model)) setModel(V2_SUMMARY.id); });
+    try { history.replaceState(null, "", "/dressing/setup" + (isBuiltinModel(model) ? "" : `?model=${model}`)); } catch { /* 忽略 */ }
+  }, [model]);
+  const modelQs = isBuiltinModel(model) ? "" : `?model=${model}`;
   useEffect(() => { try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ filter, sort, cat, sub })); } catch { /* 私密瀏覽 */ } }, [filter, sort, cat, sub]);
 
   const infos = useMemo(() => {
@@ -83,7 +93,7 @@ export default function GarmentSetup() {
 
   const open = (id: string) => {
     try { sessionStorage.setItem(SETUP_LIST_KEY, JSON.stringify(list.map((g) => g.id))); } catch { /* 私密瀏覽 */ }
-    navigate(`/dressing/setup/${id}`);
+    navigate(`/dressing/setup/${id}${modelQs}`);
   };
 
   return (
@@ -94,7 +104,13 @@ export default function GarmentSetup() {
         <button type="button" aria-label="搜尋衣物" aria-pressed={search} onClick={() => { setSearch(!search); setQ(""); }} className={`grid h-9 w-9 place-items-center rounded-full text-[16px] ${search ? "chip-on" : "chip"}`}><IconSearch /></button>
         <button type="button" aria-label={`排序：${SORT_LABEL[sort]}`} data-testid="setup-sort" onClick={() => setSort(sort === "todo" ? "recent" : sort === "recent" ? "name" : "todo")} className="chip flex h-9 items-center gap-1 rounded-full px-3 text-[12px]"><IconSort className="text-[15px]" />{SORT_LABEL[sort]}</button>
       </div>
-      <p className="pb-2 text-[11.5px] leading-snug text-mauve">每件衣服校正一次（位置、網格、遮罩、骨架及基準姿勢），之後任何新造型穿上時都會自動使用。這裡不會建立穿搭造型。</p>
+      <p className="pb-2 text-[11.5px] leading-snug text-mauve">每件衣服在每個身體校正一次（位置、網格、遮罩、骨架及基準姿勢），之後任何新造型穿上時都會自動使用。這裡不會建立穿搭造型。</p>
+      {models.length > 1 && (
+        <div className="scrollbar-none -mx-4 mb-2 flex items-center gap-1.5 overflow-x-auto px-4" data-testid="setup-models">
+          <span className="shrink-0 text-[11.5px] text-gold-soft">目前校正模型</span>
+          {models.map((m) => <button key={m.id} type="button" data-setup-model={m.id} aria-pressed={model === m.id} onClick={() => setModel(m.id)} className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] ${model === m.id ? "chip-on" : "chip"}`}>{m.name}</button>)}
+        </div>
+      )}
       {search && <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋衣服名稱" aria-label="搜尋衣服名稱" className="mb-2 h-10 w-full rounded-full bg-white px-4 text-[14px] text-ink ring-1 ring-gold focus:outline-none" />}
       <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-2" data-testid="setup-filters">
         {FILTERS.map(([f, label]) => <button key={f} type="button" data-filter={f} aria-pressed={filter === f} onClick={() => setFilter(f)} className={`shrink-0 rounded-full px-3 py-1.5 text-[12.5px] ${filter === f ? "chip-on" : "chip"}`}>{label} <span className="opacity-70">{counts[f]}</span></button>)}
@@ -122,6 +138,7 @@ export default function GarmentSetup() {
                     <span className="block truncate text-[10.5px] text-mauve">{[g.category, g.subcategory].filter(Boolean).join("・")}{i.updated_at ? `｜${ago(i.updated_at)}設定` : ""}</span>
                     <span className="mt-1 flex flex-wrap gap-1">
                       {SETUP_KEYS.map((k) => <span key={k} data-item={k} data-state={i.items[k]} className={`rounded-full px-1.5 text-[10px] leading-[17px] ${STATE_TONE[i.items[k]]}`}>{SETUP_LABEL[k]}：{i.items[k] === "optional" ? "未設定" : ITEM_LABEL[i.items[k]]}</span>)}
+                      {i.convertible && <span data-convertible="1" className="rounded-full bg-amethyst/25 px-1.5 text-[10px] leading-[17px] text-cream/85">自動初始位置（由 V2 換算）</span>}
                       {i.pieces && <span className={`rounded-full px-1.5 text-[10px] leading-[17px] ${i.pieces.set < i.pieces.total ? STATE_TONE.todo : STATE_TONE.done}`}>拆件：{i.pieces.total} 個部件{i.pieces.set < i.pieces.total ? `（${i.pieces.total - i.pieces.set} 個未校正）` : ""}</span>}
                     </span>
                   </span>

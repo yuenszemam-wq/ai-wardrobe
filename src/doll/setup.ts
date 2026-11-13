@@ -18,14 +18,18 @@ export interface SetupInfo {
   updated_at: string | null;
   template: Template | null;
   slot: Slot;
+  /** 自訂身體：未有自己的設定，但有 Avatar V2 設定可以換算成初始位置 */
+  convertible: boolean;
 }
 
 /** 程式判斷＋手動標記。手動標記優先。 */
 export function setupInfo(g: GarmentLite, tpls: Templates): SetupInfo {
   const raw = tpls.v2.get(g.id) ?? null;
+  const baseRaw = !raw && tpls.base ? tpls.base.get(g.id) ?? null : null;
+  const convertible = !!baseRaw && baseRaw.image_id === (g.transparent_image_id ?? null);
   const stale = !!raw && raw.image_id !== (g.transparent_image_id ?? null);
   const t = raw && !stale ? raw : null;
-  const slot: Slot = t && isSlot(t.slot) ? t.slot : slotFor(g.category, g.subcategory);
+  const slot: Slot = t && isSlot(t.slot) ? t.slot : baseRaw && isSlot(baseRaw.slot) ? baseRaw.slot : slotFor(g.category, g.subcategory);
   const d = t?.data ?? null;
   const marks: Partial<Record<SetupKey, SetupMark>> = d?.status ?? {};
   const skin = SLOT_SKIN[slot];
@@ -43,7 +47,7 @@ export function setupInfo(g: GarmentLite, tpls: Templates): SetupInfo {
   if (stale) overall = "stale";
   else if (!t) overall = "none";
   else overall = SETUP_KEYS.some((k) => !["done", "na", "optional"].includes(items[k])) || (pieces && pieces.set < pieces.total) ? "partial" : "done";
-  return { overall, items, pieces, updated_at: raw?.updated_at ?? null, template: t, slot };
+  return { overall, items, pieces, updated_at: raw?.updated_at ?? null, template: t, slot, convertible };
 }
 
 /** 套裝部件的設定狀態（部件不是新衣物；狀態存在部件自己的設定內） */

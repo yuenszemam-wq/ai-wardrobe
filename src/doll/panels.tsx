@@ -12,6 +12,8 @@ import { useTaxonomy } from "../taxonomy";
 import { RigInfo } from "../../shared/garmentMesh";
 import { Appearance, BUILTIN_THUMB, GarmentLite, Resolved, wearHairPart } from "./model";
 import { HairColorStudio } from "./HairColor";
+import type { ModelSummary } from "./models";
+import type { AvatarModel } from "../../shared/avatarModel";
 import { DRAG_MODES, DragMode, PoseControl, REGIONS, Region, adjustable, jointLabel, jointTitle, regionBones, regionOf } from "../../shared/poseControls";
 
 export const pill = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[12.5px] ${on ? "chip-on" : "chip"}`;
@@ -557,8 +559,10 @@ const AddCard = ({ label, onClick, testid }: { label: string; onClick: () => voi
     <div className="truncate pt-1 text-center text-[10.5px] text-gold-soft">{label}</div>
   </button>
 );
-export type LookTab = "hair" | "color" | "head";
-export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, onEdit, hair, selectedHair, onSelectHair, hairTool, setHairTool, onHairPatch, onSaveHair, busy, onSaveHairDefault, onAutoPlace }: { tab: LookTab; setTab: (t: LookTab) => void; value: Appearance; onChange: (v: Appearance) => void; assets: DollAsset[]; onNew: (kind: "hair" | "head", cat?: HairCat) => void; onEdit: (a: DollAsset) => void; hair: HairConfig|null; selectedHair:string|null; onSelectHair:(id:string|null)=>void; hairTool:"place"|"mesh"; setHairTool:(t:"place"|"mesh")=>void; onHairPatch:(id:string,patch:Partial<HairPart>)=>void; onSaveHair:()=>void; busy:boolean; onSaveHairDefault: (id: string) => void; onAutoPlace: (id: string) => void }) {
+export type LookTab = "hair" | "color" | "head" | "body";
+/** 外貌 › 身體：選擇身體模型（null＝不顯示，例如衣服設定模式） */
+export interface BodyChoice { models: ModelSummary[]; current: AvatarModel; onPick: (id: string) => void; onLatest: () => void; onManage: () => void }
+export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, onEdit, hair, selectedHair, onSelectHair, hairTool, setHairTool, onHairPatch, onSaveHair, busy, onSaveHairDefault, onAutoPlace, body, hairBrush, setHairBrush }: { hairBrush?: { mode: "hide" | "show"; size: number }; setHairBrush?: (b: { mode: "hide" | "show"; size: number }) => void; body?: BodyChoice | null; tab: LookTab; setTab: (t: LookTab) => void; value: Appearance; onChange: (v: Appearance) => void; assets: DollAsset[]; onNew: (kind: "hair" | "head", cat?: HairCat) => void; onEdit: (a: DollAsset) => void; hair: HairConfig|null; selectedHair:string|null; onSelectHair:(id:string|null)=>void; hairTool:"place"|"mesh"|"mask"; setHairTool:(t:"place"|"mesh"|"mask")=>void; onHairPatch:(id:string,patch:Partial<HairPart>)=>void; onSaveHair:()=>void; busy:boolean; onSaveHairDefault: (id: string) => void; onAutoPlace: (id: string) => void }) {
   const hairs = useMemo(() => [...BUILTIN_HAIRS, ...assets.filter((a) => a.kind === "hair")], [assets]);
   const heads = [...BUILTIN_HEADS, ...assets.filter((a) => a.kind === "head")];
   const [hcat, setHcat] = useState<string>("set");
@@ -581,7 +585,7 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
   return (
     <div className="flex h-full flex-col" data-testid="appearance-panel">
       <Row className="pb-2">
-        {([["hair", "髮型"], ["color", "髮色"], ["head", "頭部"]] as [LookTab, string][]).map(([t, label]) => <button key={t} type="button" data-looktab={t} onClick={() => setTab(t)} className={pill(tab === t)}>{label}</button>)}
+        {([["hair", "髮型"], ["color", "髮色"], ["head", "頭部"], ...(body ? [["body", "身體"]] : [])] as [LookTab, string][]).map(([t, label]) => <button key={t} type="button" data-looktab={t} onClick={() => setTab(t)} className={pill(tab === t)}>{label}</button>)}
       </Row>
       <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2">
         {tab === "hair" && (<>
@@ -641,8 +645,20 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
                     <span className="text-[11.5px] text-gold-soft">編輯：{hairPartName(selected)}</span>
                     <button type="button" className={pill(hairTool === "place")} onClick={() => setHairTool("place")}>位置</button>
                     <button type="button" data-testid="hair-mesh" className={pill(hairTool === "mesh")} onClick={() => setHairTool("mesh")}>變形</button>
+                    {hairBrush && <button type="button" data-testid="hair-vis" className={pill(hairTool === "mask")} onClick={() => setHairTool("mask")}>遮罩</button>}
                     <button type="button" disabled={!selected.mesh} className="chip rounded-full px-3 py-1.5 disabled:opacity-40" onClick={() => onHairPatch(selected.id, { mesh: undefined })}>重設變形</button>
                   </div>
+                  {hairTool === "mask" && hairBrush && setHairBrush && (
+                    <div className="mt-1.5 rounded-lg bg-ink/40 p-1.5" data-testid="hair-vis-tools">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button type="button" className={pill(hairBrush.mode === "hide")} onClick={() => setHairBrush({ ...hairBrush, mode: "hide" })}>隱藏</button>
+                        <button type="button" className={pill(hairBrush.mode === "show")} onClick={() => setHairBrush({ ...hairBrush, mode: "show" })}>擦走遮罩</button>
+                        <button type="button" disabled={!selected.vis} className="chip rounded-full px-3 py-1.5 disabled:opacity-40" onClick={() => onHairPatch(selected.id, { vis: undefined })}>清除遮罩</button>
+                      </div>
+                      <label className="mt-1 flex items-center gap-2 text-[11px]"><span className="shrink-0 text-mauve">筆刷</span><input type="range" min={4} max={48} value={hairBrush.size} onChange={(e) => setHairBrush({ ...hairBrush, size: Number(e.target.value) })} className="flex-1" /><span className="w-6 text-right tabular-nums">{hairBrush.size}</span></label>
+                      <p className="text-[10.5px] leading-snug text-mauve">在角色上塗抹要隱藏的頭髮（例如戴帽、穿過衣服的馬尾）。只影響這個造型的這件髮件，原圖不會被修改；染色遮罩分開保存。放大畫面可以畫得更細。</p>
+                    </div>
+                  )}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <span className="text-[11px] text-mauve">分類</span>
                     <select aria-label="髮件分類" data-testid="hair-part-cat" value={hairCatOf(selected)} onChange={(e) => onHairPatch(selected.id, { cat: e.target.value as HairCat })} className="rounded-full bg-velvet px-2 py-1 text-[12px]">{HAIR_CATS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>
@@ -669,6 +685,26 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
             <HairColorStudio key={colorPart} value={{...value,...current.find(p=>p.id===colorPart)?.color}} onChange={v => onHairPatch(colorPart,{color:{hair_color:v.hair_color,accent_color:v.accent_color,tip_color:v.tip_color}})} />
           </> : <HairColorStudio key="global" value={value} onChange={onChange} />}
         </>}
+        {tab === "body" && body && (() => {
+          const latest = body.models.find((m) => m.id === body.current.id);
+          return (
+            <div data-testid="body-panel">
+              <Row className="pb-1 pt-1">
+                {body.models.map((m) => (
+                  <button key={m.id} type="button" data-body={m.id} aria-pressed={m.id === body.current.id} onClick={() => body.onPick(m.id)} className="w-[74px] shrink-0">
+                    <div className={`arch arch-base relative aspect-[3/4] ${m.id === body.current.id ? "outline-2 outline-offset-1 outline-gold-soft" : ""}`}>
+                      {m.thumb ? <img src={m.thumb} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain px-[10%] pb-[8%] pt-[16%]" /> : <span className="absolute inset-0 grid place-items-center text-[22px] text-mauve">身</span>}
+                    </div>
+                    <div className="truncate pt-1 text-center text-[10.5px]">{m.name}</div>
+                  </button>
+                ))}
+              </Row>
+              {latest && !latest.builtin && latest.revision > body.current.revision && <button type="button" data-testid="body-latest" onClick={body.onLatest} className="chip mt-1 rounded-full px-3 py-1.5 text-[12px]">更新到最新版本（第 {latest.revision} 版）</button>}
+              <p className="pt-1 text-[11px] leading-snug text-mauve">切換身體不會脫下衣服。每件衣服使用這個身體自己的設定；未設定的會自動對位或由 Avatar V2 設定換算（只是初始位置，可到「衣服設定」為這個身體校正）。</p>
+              <button type="button" data-testid="manage-assets" onClick={body.onManage} className="chip mt-1.5 rounded-full px-3 py-1.5 text-[12px]">管理角色素材（新增身體、換部件、骨架）</button>
+            </div>
+          );
+        })()}
         {tab === "head" && (
           <Row className="pb-1 pt-1">
             <AddCard label="新增頭部" testid="add-head" onClick={() => onNew("head")} />
@@ -688,7 +724,7 @@ export const SKELETON_MODES: { id: SkeletonMode; label: string; hint: string }[]
   { id: "full", label: "完整骨架", hint: "顯示全部控制點（進階）。" },
   { id: "wire", label: "線框", hint: "暫時淡化角色及衣服，骨架更容易看清及拖動。" },
 ];
-export type PoseTab = "presets" | "joints" | "advanced";
+export type PoseTab = "presets" | "joints" | "advanced" | "mine";
 /** 姿勢小圖／可點選的骨架小人：按姿勢畫出骨架。onPick＝點選關節 */
 function Figure({ rig, pose, width, active, region, onPick }: { rig: Rig; pose: Pose; width: number; active?: string | null; region?: string[] | null; onPick?: (bone: string) => void }) {
   const j = useMemo(() => jointPositions(rig, pose), [rig, pose]);
@@ -717,7 +753,9 @@ function Figure({ rig, pose, width, active, region, onPick }: { rig: Rig; pose: 
     </svg>
   );
 }
-export function PosePanel({ rig, pose, front, onPose, onFront, skel, setSkel, drag, setDrag, region, setRegion, joint, setJoint, control, opacity, setOpacity, compact, tab, setTab, onFrame }: {
+export function PosePanel({ rig, pose, front, onPose, onFront, skel, setSkel, drag, setDrag, region, setRegion, joint, setJoint, control, opacity, setOpacity, compact, tab, setTab, onFrame, library }: {
+  /** 我的姿勢庫（另一個元件，只在打開時讀取） */
+  library?: ReactNode;
   rig: Rig; pose: Pose; front: FrontPart[]; onPose: (p: Pose, front?: FrontPart[]) => void; onFront: (f: FrontPart[]) => void;
   skel: SkeletonMode; setSkel: (m: SkeletonMode) => void; drag: DragMode; setDrag: (d: DragMode) => void; region: Region; setRegion: (r: Region) => void;
   /** 目前用滑桿調整的關節（骨骼 id） */
@@ -767,10 +805,11 @@ export function PosePanel({ rig, pose, front, onPose, onFront, skel, setSkel, dr
   return (
     <div className="flex h-full flex-col text-[12.5px]" data-testid="pose-panel">
       <Row className="pb-2">
-        {([["presets", "預設姿勢"], ["joints", "關節調整"], ["advanced", "進階設定"]] as [PoseTab, string][]).map(([t, label]) => <button key={t} type="button" data-posetab={t} aria-pressed={tab === t} onClick={() => setTab(t)} className={pill(tab === t)}>{label}</button>)}
+        {([["presets", "預設姿勢"], ...(library ? [["mine", "我的姿勢"]] : []), ["joints", "關節調整"], ["advanced", "進階設定"]] as [PoseTab, string][]).map(([t, label]) => <button key={t} type="button" data-posetab={t} aria-pressed={tab === t} onClick={() => setTab(t)} className={pill(tab === t)}>{label}</button>)}
         <button type="button" data-testid="pose-reset" onClick={() => onPose({}, [])} className="chip ml-auto shrink-0 rounded-full px-3 py-1.5">重設整個姿勢</button>
       </Row>
       <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
+        {tab === "mine" && library}
         {tab === "presets" && (
           <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-8" data-testid="pose-presets">
             {POSE_PRESETS.map((p) => (

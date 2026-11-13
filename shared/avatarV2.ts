@@ -32,6 +32,11 @@ export interface HairPart {
   file: ImageRef;
   /** 染色遮罩（R＝挑染比重、G＝是否頭髮）；沒有則自動分辨主髮色及挑染 */
   mask?: ImageRef | null;
+  /**
+   * 可見性遮罩（Phase 3.6）：低解像度 PNG（data URL），R＝隱藏（例如戴帽時藏起頭頂、穿過衣服的馬尾）。
+   * 與染色遮罩（mask）分開；座標＝髮件原圖，所以網格變形後仍然對應原圖。原圖不會被修改。
+   */
+  vis?: string;
   /** Optional per-part overrides; absent channels inherit the global palette. */
   color?: { hair_color?: string; accent_color?: string | null; tip_color?: string | null };
   layer: HairLayer;
@@ -78,6 +83,7 @@ export interface HairConfig { parts: HairPart[]; ref_luma?: { main: number; acce
 export interface HeadConfig { file: ImageRef; x: number; y: number; w: number; h: number }
 export interface DollAsset<C = HairConfig | HeadConfig> { id: string; kind: "hair" | "head" | "garment_part"; name: string; category: string | null; builtin?: boolean; config: C; thumb?: string | null; garment_id?: string | null }
 
+export const HAIR_VIS_MAX = 80_000;
 const num = (v: unknown, min: number, max: number): number | null => (typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? Math.round(v * 10) / 10 : null);
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const LAYERS: HairLayer[] = ["back", "mid", "front"];
@@ -112,6 +118,7 @@ export function normalizeHairConfig(v: unknown): HairConfig | null {
     const rotation=num(o.rotation,-180,180); if(rotation) part.rotation=rotation;
     const mesh=normalizeManualMesh(o.mesh); if(mesh) part.mesh=mesh;
     if(o.hidden===true) part.hidden=true;
+    if (typeof o.vis === "string" && o.vis.length <= HAIR_VIS_MAX && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(o.vis)) part.vis = o.vis;
     if (isCat(o.cat)) part.cat = o.cat;
     const src = text(o.src, 40); if (/^(das_[a-z0-9]+|builtin:[a-z0-9_]+)$/i.test(src)) part.src = src;
     if (o.mask != null) {
