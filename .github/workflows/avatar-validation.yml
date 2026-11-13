@@ -37,6 +37,8 @@ jobs:
         if: always()
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/shots-log.mjs shots
+        if: always()
       - uses: actions/upload-artifact@v4
         if: always()
         with:

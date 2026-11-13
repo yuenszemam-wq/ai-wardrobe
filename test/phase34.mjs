@@ -19,7 +19,6 @@ const shot = (n) => (SHOTS ? page.screenshot({ path: join(SHOTS, `p34-${n}.png`)
 const fitOf = async (k) => JSON.parse(await room("data-fits")).find((f) => f[0] === k);
 const canvas = () => page.locator('[data-testid="doll-canvas"]').evaluate((c) => c.toDataURL());
 const drag = async (from, to) => { await page.mouse.move(from[0], from[1]); await page.mouse.down(); for (let i = 1; i <= 6; i++) await page.mouse.move(from[0] + ((to[0] - from[0]) * i) / 6, from[1] + ((to[1] - from[1]) * i) / 6); await page.mouse.up(); };
-page.on("dialog", (d) => void (d.type() === "prompt" ? d.accept("奶茶啡") : d.accept()));
 
 try {
   await page.goto(R.base + "/dressing");
@@ -102,6 +101,7 @@ try {
   check("圖層：同一套裝的部件可以群組管理", (await page.locator("[data-layer-group]").count()) === 1);
   await shot("05-layers-pieces");
   await page.click('[data-layer-group] [aria-expanded]');
+  await page.waitForSelector('[data-layer^="grp:"]', { timeout: 3000 }).catch(() => undefined);
   check("收起群組：只佔一行，其他衣物仍在", (await page.locator('[data-layer^="grp:"]').count()) === 1 && (await page.locator('[data-layer="gar_shirt"]').count()) === 1);
   await page.click('[data-tab="clothes"]');
   await page.click('[data-cat="套裝部件"]');
@@ -125,6 +125,7 @@ try {
   await page.waitForTimeout(300);
   await ready();
   check("滑動色相：主髮色改變", (await room("data-hair-color")) !== "#3a6bd1", await room("data-hair-color"));
+  await page.evaluate(() => { window.prompt = () => "奶茶啡"; });
   await page.click('[data-testid="swatch-save"]');
   await page.waitForFunction(() => document.querySelectorAll("[data-swatch]").length === 1);
   const pal = JSON.parse((await env.DB.prepare("SELECT value FROM app_settings WHERE key='doll_hair_palette'").first()).value);
