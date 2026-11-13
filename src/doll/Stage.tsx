@@ -1,10 +1,10 @@
 import { PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Mat, Pose, Rig, aimBone, applyMat, boneMap, invert, moveBone, reachIK, solve } from "../../shared/avatarRig";
 import { HairConfig, RIG_V2, hairBoneId } from "../../shared/avatarV2";
-import { Content, FIT_LIMIT, Fit, hitTest } from "../../shared/doll";
-import { DollRenderer, Scene, View, toImage } from "./engine";
+import { Content, FIT_LIMIT, Fit, fitHeight, hitTest } from "../../shared/doll";
+import { DollRenderer, Scene, View } from "./engine";
 
-export interface Selection { fit: Fit; content: Content; bone: string; /** 可否旋轉（髮束、頭部只可移動及縮放） */ rotate?: boolean }
+export interface Selection { fit: Fit; content: Content; bone: string; /** 可否旋轉（髮束、頭部只可移動及縮放） */ rotate?: boolean; /** 變形後實際佔的範圍（邏輯座標）；有＝選取框跟隨實際衣物範圍 */ bounds?: [number, number, number, number] }
 export type StageMode = "dress" | "pose" | "mask";
 type HandleKind = "ik" | "aim" | "move";
 export interface PoseHandle { id: string; kind: HandleKind; bone: string; /** 靜止姿勢下的位置，以及它跟隨的骨骼 */ at: [number, number]; follow: string; upper?: string; mid?: string }
@@ -52,7 +52,8 @@ interface Props {
   showHandles?: boolean;
   activeHandle?: string | null;
   onPose?: (pose: Pose, handle: PoseHandle) => void;
-  onPaint?: (u: number, v: number, phase: "start" | "move" | "end") => void;
+  /** 塗抹（遮罩／部件）：畫面上的位置（邏輯座標，已變形）；由上層沿變形網格換算到圖片位置 */
+  onPaint?: (x: number, y: number, phase: "start" | "move" | "end") => void;
   /** 塗抹筆刷半徑（邏輯像素），顯示游標 */
   brush?: number;
   onReadyChange?: (ready: boolean) => void;
@@ -126,13 +127,19 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     if (!selection || !k) return null;
     const { fit, content, bone } = selection;
     const m = mats[bone] ?? mats.root;
-    const h = fit.w * content.ar;
+    const h = fitHeight(fit, content.ar);
     const t = (fit.rotation * Math.PI) / 180;
     const corner = (u: number, v: number): [number, number] => {
       const lx = (u - 0.5) * fit.w, ly = (v - 0.5) * h;
       const [x, y] = applyMat(m, fit.cx + lx * Math.cos(t) - ly * Math.sin(t), fit.cy + lx * Math.sin(t) + ly * Math.cos(t));
       return [x * k + ox, y * k + oy];
     };
+    if (selection.bounds) {
+      // 衣物已隨骨架變形：選取框用實際顯示的範圍
+      const [x0, y0, x1, y1] = selection.bounds;
+      const pts: [number, number][] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => [x * k + ox, y * k + oy]);
+      return { pts, resize: pts[2], rotate: [(pts[0][0] + pts[1][0]) / 2, pts[0][1] - 22] as [number, number], center: [(pts[0][0] + pts[2][0]) / 2, (pts[0][1] + pts[2][1]) / 2] as [number, number] };
+    }
     const pts = [corner(content.x0, content.y0), corner(content.x1, content.y0), corner(content.x1, content.y1), corner(content.x0, content.y1)];
     const top = corner((content.x0 + content.x1) / 2, content.y0);
     const c = applyMat(m, fit.cx, fit.cy);
@@ -159,7 +166,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
   const emitFit = (fit: Fit) => {
     const sel = latest.current.selection;
     if (!sel) return;
-    latest.current.onFit?.({ cx: clamp(fit.cx, -FIT_LIMIT.pad + 1, 1200 + FIT_LIMIT.pad - 1), cy: clamp(fit.cy, -FIT_LIMIT.pad + 1, 1800 + FIT_LIMIT.pad - 1), w: clamp(fit.w, FIT_LIMIT.minW, FIT_LIMIT.maxW), rotation: sel.rotate === false ? sel.fit.rotation : fit.rotation });
+    latest.current.onFit?.({ ...fit, cx: clamp(fit.cx, -FIT_LIMIT.pad + 1, 1200 + FIT_LIMIT.pad - 1), cy: clamp(fit.cy, -FIT_LIMIT.pad + 1, 1800 + FIT_LIMIT.pad - 1), w: clamp(fit.w, FIT_LIMIT.minW, FIT_LIMIT.maxW), rotation: sel.rotate === false ? sel.fit.rotation : fit.rotation });
   };
 
   function onDown(e: ReactPointerEvent<HTMLDivElement>) {
@@ -186,11 +193,9 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
       return;
     }
     if (mode === "mask") {
-      if (!sel) return;
-      const [x, y] = restPoint(e.clientX, e.clientY, sel.bone);
-      const [u, v] = toImage(sel.fit, sel.content.ar, x, y);
+      if (!sel || pointers.current.size > 1) return;
       gesture.current = { kind: "paint" };
-      onPaint?.(u, v, "start");
+      onPaint?.(...toLogical(e.clientX, e.clientY), "start");
       return;
     }
     if (pointers.current.size >= 2 && sel) return startPinch();
@@ -206,7 +211,8 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
         return;
       }
       const [x, y] = restPoint(e.clientX, e.clientY, sel.bone);
-      if (hitTest(sel.fit, sel.content, x, y, 20 / k)) {
+      const [lx, ly] = toLogical(e.clientX, e.clientY), bd = sel.bounds, pad = 20 / k;
+      if (bd ? lx >= bd[0] - pad && lx <= bd[2] + pad && ly >= bd[1] - pad && ly <= bd[3] + pad : hitTest(sel.fit, sel.content, x, y, pad)) {
         gesture.current = { kind: "move", sx: x, sy: y, fit: sel.fit };
         return;
       }
@@ -231,9 +237,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     }
     if (!sel) return;
     if (g.kind === "paint") {
-      const [x, y] = restPoint(e.clientX, e.clientY, sel.bone);
-      const [u, v] = toImage(sel.fit, sel.content.ar, x, y);
-      latest.current.onPaint?.(u, v, "move");
+      latest.current.onPaint?.(...toLogical(e.clientX, e.clientY), "move");
       return;
     }
     const f = g.fit;

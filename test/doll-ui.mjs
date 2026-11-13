@@ -194,7 +194,66 @@ try {
   await ready();
   check("遮罩：在角色身上塗抹，保存在這個造型（原圖不變）", (await room("data-masked")) === "1" && (await page.getAttribute('[data-testid="doll-stage"]', "data-mode")) === "mask");
   await shot("03-fit");
+
+  console.log("Phase 3.1：撤銷、部件、獨立闊高、變形後的點選及遮罩");
+  /** 畫布上某一點的顏色 */
+  const colorAt = (x, y) => page.evaluate(([x, y]) => { const s = document.querySelector('[data-testid="doll-stage"]'), c = document.querySelector('[data-testid="doll-canvas"]'); const k = Number(s.dataset.k), dpr = c.width / s.getBoundingClientRect().width; return [...c.getContext("2d").getImageData(Math.round((x * k + Number(s.dataset.ox)) * dpr), Math.round((y * k + Number(s.dataset.oy)) * dpr), 1, 1).data]; }, [x, y]);
+  const isCloth = (c) => c[3] > 200 && c[0] > 225 && c[1] > 215 && c[2] > 215 && Math.abs(c[0] - c[2]) < 22; // 測試襯衫是接近白色
+  await page.waitForTimeout(500);
+  await page.click('[data-testid="undo"]');
+  await ready();
+  check("撤銷：還原上一筆遮罩", (await room("data-masked")) === "0", await room("data-masked"));
+  await page.click('[data-testid="redo"]');
+  await ready();
+  check("重做", (await room("data-masked")) === "1");
+  await page.click('[data-testid="mask-clear"]');
+  await page.click('[data-tool="parts"]');
+  const sum0 = await page.textContent('[data-testid="rig-summary"]');
+  check("部件：自動分辨出左右袖，並說明衣身保持完整", sum0.includes("自動分辨") && sum0.includes("右袖") && sum0.includes("左袖"), sum0);
+  await page.click('[data-testid="parts-whole"]');
+  check("可以改為整件衣物（不拆袖）", (await page.textContent('[data-testid="rig-summary"]')).includes("整件衣物") && (await room("data-parts")) === "1");
+  await page.click('[data-testid="parts-auto"]');
+  await page.click('[data-part="0"]');
+  await drag(await screen(545, 520), await screen(530, 600));
+  await page.waitForTimeout(450);
+  check("用筆刷修改部件範圍（保存在這個造型）", (await room("data-parts")) === "1" && (await page.textContent('[data-testid="rig-summary"]')).includes("人工標記"), await page.textContent('[data-testid="rig-summary"]'));
+  await page.click('[data-testid="parts-auto"]');
+  await page.locator('input[data-sleeve="sleeve_l"]').fill("-20");
+  await ready();
+  check("袖子角度可以調整", (await page.textContent('[data-testid="fit-from"]')).includes("只用於這個造型"));
+  await page.click('[data-tool="place"]');
+  await page.click('[data-stretch="tall"]');
+  await page.click('[data-testid="fit-save-default"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="fit-from"]')?.textContent.includes("衣物預設"));
+  const tpl3 = JSON.parse((await env.DB.prepare("SELECT data FROM doll_fit_templates WHERE garment_id='gar_bl' AND avatar_id='avatar_v2'").first()).data);
+  check("闊度及高度可獨立微調，並連同部件及袖子角度存入這個穿法的預設", Object.values(tpl3.variants).some((v) => v.fit?.sy > 1.02 && v.opts.sleeve_l === -20 && v.parts === "auto"), tpl3.variants);
   await page.click('[data-testid="fit-done"]');
+  // 舉起左手：衣物跟隨變形後，直接點在舉起的袖子上選取，並只隱藏袖子上的一小塊
+  await page.click('[data-tab="pose"]');
+  await page.click('[data-pose="reach_out"]');
+  await page.click('[data-tab="clothes"]');
+  await ready();
+  const sleeve = await page.evaluate(() => { const s = document.querySelector('[data-testid="doll-stage"]'), c = document.querySelector('[data-testid="doll-canvas"]'); const k = Number(s.dataset.k), dpr = c.width / s.getBoundingClientRect().width, ox = Number(s.dataset.ox), oy = Number(s.dataset.oy); const d = c.getContext("2d"); let best = null; for (let y = 330; y < 470; y += 6) for (let x = 1010; x > 800; x -= 6) { const p = d.getImageData(Math.round((x * k + ox) * dpr), Math.round((y * k + oy) * dpr), 1, 1).data; if (p[3] > 200 && p[0] > 225 && p[1] > 215 && p[2] > 215 && Math.abs(p[0] - p[2]) < 22) { if (!best || x > best[0]) best = [x, y]; break; } } return best; });
+  check("舉手後袖子跟隨手臂（原本沒有布料的位置出現袖子）", !!sleeve && sleeve[0] > 850, sleeve);
+  const tapAt = [sleeve[0] - 22, sleeve[1] + 6];
+  await page.mouse.click(...(await screen(...tapAt)));
+  check("直接點變形後的袖子即可選取這件衣物", (await room("data-selected")) === "gar_bl", await room("data-selected"));
+  await page.click('[data-tool="mask"]');
+  await page.click('[data-testid="mask-hint"]');
+  const chest = [600, 470];
+  check("塗抹前：袖子及胸口都有布料", isCloth(await colorAt(...tapAt)) && isCloth(await colorAt(...chest)), [await colorAt(...tapAt), await colorAt(...chest)]);
+  await drag(await screen(tapAt[0] - 6, tapAt[1]), await screen(tapAt[0] + 6, tapAt[1]));
+  await page.waitForTimeout(500);
+  await ready();
+  check("非預設姿勢下塗抹：只隱藏手指位置的袖子，胸口不受影響", !isCloth(await colorAt(...tapAt)) && isCloth(await colorAt(...chest)), [await colorAt(...tapAt), await colorAt(...chest)]);
+  await shot("03b-posed-mask");
+  await page.click('[data-testid="undo"]');
+  await ready();
+  check("撤銷後袖子復原", isCloth(await colorAt(...tapAt)));
+  await page.click('[data-testid="fit-done"]');
+  await page.click('[data-tab="pose"]');
+  await page.click('[data-testid="pose-reset"]');
+  await page.click('[data-tab="clothes"]');
 
   console.log("姿勢：穿著衣服直接調整骨架");
   await page.click('[data-tab="pose"]');

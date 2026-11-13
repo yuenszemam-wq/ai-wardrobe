@@ -96,9 +96,18 @@ function analyzeImage(img: HTMLImageElement): Analysis {
   const factor = Math.min(1, 640 / Math.max(img.naturalWidth, img.naturalHeight));
   const w = Math.max(1, Math.round(img.naturalWidth * factor)), h = Math.max(1, Math.round(img.naturalHeight * factor));
   const px = pixelsOf(img, w, h).data;
-  const gw = Math.min(96, w), gh = Math.max(1, Math.round((gw * h) / w));
+  // 透明度格取每格的平均值（不是單點取樣）：蕾絲的小孔不會被當成空隙，袖子與衣身之間的窄縫仍然看得見
+  const gw = Math.min(192, w), gh = Math.max(1, Math.round((gw * h) / w));
   const grid = new Uint8Array(gw * gh);
-  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) grid[y * gw + x] = px[(Math.min(h - 1, Math.floor(((y + 0.5) * h) / gh)) * w + Math.min(w - 1, Math.floor(((x + 0.5) * w) / gw))) * 4 + 3];
+  for (let y = 0; y < gh; y++) {
+    const ya = Math.floor((y * h) / gh), yb = Math.max(ya + 1, Math.floor(((y + 1) * h) / gh));
+    for (let x = 0; x < gw; x++) {
+      const xa = Math.floor((x * w) / gw), xb = Math.max(xa + 1, Math.floor(((x + 1) * w) / gw));
+      let sum = 0;
+      for (let yy = ya; yy < yb; yy++) for (let xx = xa; xx < xb; xx++) sum += px[(yy * w + xx) * 4 + 3];
+      grid[y * gw + x] = Math.round(sum / ((yb - ya) * (xb - xa)));
+    }
+  }
   return { content: { ...contentFromPixels(px, w, h), ar: img.naturalHeight / img.naturalWidth }, grid: { w: gw, h: gh, data: grid }, width: img.naturalWidth, height: img.naturalHeight };
 }
 const EMPTY_GRID: AlphaGrid = { w: 1, h: 1, data: new Uint8Array([255]) };
