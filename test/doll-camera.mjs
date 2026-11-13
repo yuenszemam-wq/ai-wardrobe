@@ -154,7 +154,10 @@ try {
   console.log("部件：完整衣物＋顏色標記；衣物原圖視圖");
   await page.click('[data-tool="follow"]');
   check("新穿上的衣服預設是「固定原圖」（保持完整）", (await page.getAttribute('[data-wear-mode="fixed"]', "aria-pressed")) === "true");
+  /** Phase 3.4：袖子分區等設定收在「進階設定」內 */
+  const openAdv = async () => { if (await page.locator('[data-testid="rig-advanced"][aria-expanded="false"]').count()) await page.click('[data-testid="rig-advanced"]'); };
   await page.click('[data-wear-mode="auto"]');
+    await openAdv();
   await ready();
   const sum0 = await page.textContent('[data-testid="rig-summary"]');
   check("自動分辨左右袖", sum0.includes("自動分辨") && sum0.includes("右袖") && sum0.includes("左袖"), sum0);
@@ -335,6 +338,7 @@ try {
     await tap(await screen(fr[1], fr[2]));
     await page.click('[data-tool="follow"]');
     await page.click('[data-wear-mode="auto"]');
+    await openAdv();
     if ((await page.getAttribute('[data-testid="parts-hint"]', "aria-pressed")) === "true") await page.click('[data-testid="parts-hint"]');
     await ready();
     const info = await page.textContent('[data-testid="rig-summary"]');

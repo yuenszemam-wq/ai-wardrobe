@@ -222,7 +222,10 @@ try {
   check("重做", (await room("data-masked")) === "1");
   await page.click('[data-testid="mask-clear"]');
   await page.click('[data-tool="follow"]');
+  /** Phase 3.4：袖子分區等設定收在「進階設定」內 */
+  const openAdv = async () => { if (await page.locator('[data-testid="rig-advanced"][aria-expanded="false"]').count()) await page.click('[data-testid="rig-advanced"]'); };
   await page.click('[data-wear-mode="auto"]');
+    await openAdv();
   const sum0 = await page.textContent('[data-testid="rig-summary"]');
   check("部件：自動分辨出左右袖，並說明衣身保持完整", sum0.includes("自動分辨") && sum0.includes("右袖") && sum0.includes("左袖"), sum0);
   await page.click('[data-testid="parts-whole"]');
@@ -327,7 +330,7 @@ try {
   await ready();
   await page.waitForTimeout(400);
   check("換髮色即時更新角色", (await pixels(560, 20, 80, 60)) !== hair0);
-  check("七種髮色＋主髮色／挑染／髮尾漸層", (await page.locator("[data-color]").count()) === 7 && (await page.locator('[data-testid="color-main"], [data-testid="color-accent"], [data-testid="color-tip"]').count()) === 3);
+  check("七種髮色＋主髮色／挑染／髮尾漸層", (await page.locator("[data-color]").count()) === 7 && (await page.locator('[data-target="main"], [data-target="accent"], [data-target="tip"]').count()) === 3);
   await shot("05-color");
 
   console.log("角色素材：不改程式碼新增髮型及頭部");
