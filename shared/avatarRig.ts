@@ -27,6 +27,9 @@ export interface RigPart {
   group: "body" | "hair";
   accent_mask?: string;
   synthesized?: string;
+  /** 自訂模型：以圖片中心旋轉（度）及隱藏 */
+  rot?: number;
+  hidden?: boolean;
 }
 export interface Rig {
   version: number;

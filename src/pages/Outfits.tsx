@@ -1,7 +1,7 @@
 import { TransparentImage } from "../components/TransparentImage";
 import { useEffect, useMemo, useState } from "react";
 import { api, imageUrl } from "../api";
-import { IconHeart, IconPerson, IconPlus, IconScissors, IconSearch, IconShirt, IconSort } from "../components/icons";
+import { IconCrown, IconHeart, IconPerson, IconPlus, IconScissors, IconSearch, IconShirt, IconSort } from "../components/icons";
 import { Empty, Link, Spinner, toast } from "../components/ui";
 
 export interface OutfitSummary {
@@ -67,10 +67,11 @@ export default function Outfits() {
   return (
     <div data-testid="outfits-home">
       <h1 className="pb-3 pt-5 font-serif text-[22px] font-bold tracking-[0.12em] text-gold-soft">穿搭工作室</h1>
-      <div className="grid grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <EntryCard to="/outfits/new" testid="entry-outfit" Icon={IconShirt} title="衣服配搭" text="自由組合衣櫃單品" />
         <EntryCard to="/dressing" testid="entry-look" Icon={IconPerson} title="角色換裝" text="為角色打造新造型" hot />
         <EntryCard to="/dressing/setup" testid="entry-setup" Icon={IconScissors} title="衣服設定" text="校正每件衣服的穿著效果" />
+        <EntryCard to="/dressing/assets" testid="entry-assets" Icon={IconCrown} title="角色素材" text="身體、頭部、髮型及姿勢" />
       </div>
 
       <div className="mt-6 flex items-center justify-between">
