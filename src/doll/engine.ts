@@ -2,7 +2,7 @@
 // 衣物用連續網格跟隨骨架（shared/garmentMesh.ts）；畫面、造型縮圖及匯出圖片用同一套繪畫程式。
 import { Mat, Pose, Rig, applyMat, invert, multiply, solve } from "../../shared/avatarRig";
 import { AVATAR_V2_BASE, FrontPart, HairConfig, HairPart, HairStats, HeadConfig, RIG_V2, Rgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
-import { Content, DOLL_H, DOLL_W, Fit, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
+import { Content, DOLL_H, DOLL_W, Fit, FULL_CONTENT, defaultOpts, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
 import { GarmentRig, Mesh, PartMap, RigInfo, boneMatrices, buildRig, locate, posedBounds, skinMesh } from "../../shared/garmentMesh";
 import { AlphaGrid, Bitmap, alphaAt, loadImage, pixelsOf } from "./content";
 
@@ -45,6 +45,7 @@ export const VIEWS: Record<string, View & { label: string }> = {
   lower: { label: "下半身", x: 220, y: 900, w: 760, h: 900 },
 };
 
+const HAIR_GRID: AlphaGrid = {w:12,h:12,data:new Uint8Array(144).fill(255)};
 const MASK_STEP = 5;
 const BAKE_SCALE = 0.8;
 
@@ -176,7 +177,7 @@ export class DollRenderer {
   /** 衣物的部件、網格及骨骼權重（位置、部件或穿法改變時才重做） */
   geometry(it: SceneItem): GarmentRig {
     const parts = this.partsOf(it) ?? { map: null, key: "pending" };
-    const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key].join("|");
+    const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, JSON.stringify(it.fit.mesh ?? []), it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key].join("|");
     const hit = this.geo.get(it.key);
     if (hit?.key === key) return hit.rig;
     const rig = buildRig({ grid: it.grid, fit: it.fit, ar: it.content.ar, kind: SLOT_SKIN[it.slot], follow: it.opts.follow, bone: mainBone(it), pinned: !!it.opts.bone, parts: parts.map, sleeveRot: [it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0], loose: it.slot === "top" || it.slot === "outer" });
@@ -259,7 +260,7 @@ export class DollRenderer {
     const f = it.fit, H = fitHeight(f, it.content.ar), t = (f.rotation * Math.PI) / 180, cos = Math.cos(t), sin = Math.sin(t);
     // 圖片像素 → 靜止畫布座標
     const F: Mat = [(f.w / tw) * cos, (f.w / tw) * sin, (-H / th) * sin, (H / th) * cos, f.cx - 0.5 * f.w * cos + 0.5 * H * sin, f.cy - 0.5 * f.w * sin - 0.5 * H * cos];
-    if (mesh.bones.length === 1) {
+    if (mesh.bones.length === 1 && !f.mesh) {
       const m = multiply(pre, multiply(bm[0], F));
       c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
       c.drawImage(tex, tx.x, tx.y, tx.w, tx.h);
@@ -355,7 +356,7 @@ export class DollRenderer {
     const src = this.img(part.file);
     if (!src) return null;
     if (!scene.main && !scene.accent && !scene.tip) return src;
-    const key = [part.file, scene.main, scene.accent, scene.tip, part.y, part.h].join("|");
+    const key = [part.file, part.mask??"", scene.main, scene.accent, scene.tip, part.y, part.h, hair.parts.map(p=>[p.file,p.y,p.h]).join(";")].join("|");
     const hit = this.hairPx.get(key);
     if (hit) return hit;
     const mask = part.mask ? this.img(part.mask) : null;
@@ -432,11 +433,16 @@ export class DollRenderer {
     const hair = (layer: string) => {
       if (!scene.hair) return;
       for (const p of scene.hair.parts) {
-        if (p.layer !== layer) continue;
+        if (p.layer !== layer || p.hidden) continue;
         const img = this.hairImage(scene.hair, p, scene);
         if (!img) { complete = false; continue; }
-        set(T(hairBoneId(p)));
-        ctx.drawImage(img, p.x, p.y, p.w, p.h);
+        const bone=hairBoneId(p);
+        if(p.mesh || p.rotation) {
+          const fit:Fit={cx:p.x+p.w/2,cy:p.y+p.h/2,w:p.w,rotation:p.rotation??0,mesh:p.mesh};
+          const it:SceneItem={key:"hair:"+p.id,image:p.file,slot:"headwear",fit,content:FULL_CONTENT(p.h/p.w),grid:HAIR_GRID,opts:{...defaultOpts("headwear"),follow:"none",bone},mask:null,parts:null,hidden:false};
+          const geo=this.geometry(it),[tw,th]=dims(img); const tex={img,x:0,y:0,w:tw,h:th,tw,th};
+          for(const m of geo.layers){const bm=boneMatrices(m,mats);this.drawMesh(ctx,tex,it,m,skinMesh(m,mats,bm),bm,base);}
+        } else {set(T(bone));ctx.drawImage(img,p.x,p.y,p.w,p.h);}
       }
     };
     interface Ready { w: Worked; wkey: string; rig: GarmentRig; posed: Float32Array[]; bm: Mat[][] }

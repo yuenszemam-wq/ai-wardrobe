@@ -4,6 +4,7 @@
 import rigJson from "../public/doll/avatar_v2/rig.json";
 import posesJson from "./avatar-v2-poses.json";
 import { Bone, Pose, Rig, clampPose } from "./avatarRig";
+import { normalizeManualMesh } from "./manualMesh";
 
 export const AVATAR_V2_ID = "avatar_v2";
 export const AVATAR_V2_BASE = "/doll/avatar_v2/";
@@ -38,6 +39,9 @@ export interface HairPart {
   bone: string;
   pivot?: [number, number];
   range?: number;
+  rotation?: number;
+  mesh?: number[];
+  hidden?: boolean;
 }
 export interface HairConfig { parts: HairPart[]; ref_luma?: { main: number; accent: number } | null }
 export interface HeadConfig { file: ImageRef; x: number; y: number; w: number; h: number }
@@ -64,6 +68,9 @@ export function normalizeHairConfig(v: unknown): HairConfig | null {
     seen.add(id);
     const layer = LAYERS.includes(o.layer as HairLayer) ? (o.layer as HairLayer) : "back";
     const part: HairPart = { id, label: text(o.label, 30) || "髮束", file: o.file, layer, x, y, w, h, bone: "head" };
+    const rotation=num(o.rotation,-180,180); if(rotation) part.rotation=rotation;
+    const mesh=normalizeManualMesh(o.mesh); if(mesh) part.mesh=mesh;
+    if(o.hidden===true) part.hidden=true;
     if (o.mask != null) {
       if (!isImageRef(o.mask)) return null;
       part.mask = o.mask;

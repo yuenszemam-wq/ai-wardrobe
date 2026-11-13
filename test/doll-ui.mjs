@@ -177,7 +177,7 @@ try {
   await page.click('[data-testid="fit-save-default"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="fit-from"]')?.textContent.includes("衣物預設"));
   const tpl = await env.DB.prepare("SELECT cx, cy, data FROM doll_fit_templates WHERE garment_id='gar_bl' AND avatar_id='avatar_v2'").first();
-  check("存為衣物預設：位置及穿法設定寫入", tpl && Math.abs(tpl.cx - 640) < 12 && JSON.parse(tpl.data).opts.follow === "auto", tpl);
+  check("存為衣物預設：位置及穿法設定寫入", tpl && Math.abs(tpl.cx - 640) < 12 && JSON.parse(tpl.data).opts.follow === "none", tpl);
   await page.click('[data-tool="follow"]');
   await page.click('[data-follow="none"]');
   check("只在這個造型改變骨架跟隨方式", (await page.textContent('[data-testid="fit-from"]')).includes("只用於這個造型"));
@@ -188,6 +188,16 @@ try {
   await page.waitForSelector("[data-variant]");
   const tpl2 = JSON.parse((await env.DB.prepare("SELECT data FROM doll_fit_templates WHERE garment_id='gar_bl' AND avatar_id='avatar_v2'").first()).data);
   check("保存另一種穿法", Object.values(tpl2.variants)[0]?.name === "收入裙內", tpl2.variants);
+  await page.click('[data-tool="mesh"]');
+  const oldK=Number(await page.getAttribute('[data-testid="doll-stage"]',"data-k"));
+  await page.click('[data-testid="camera-in"]');
+  check("放大人物畫布",Number(await page.getAttribute('[data-testid="doll-stage"]',"data-k"))>oldK);
+  await page.click('[data-testid="camera-reset"]');
+  const mp=page.locator('[data-mesh-point="5"]'), mb=await page.locator('[data-testid="doll-stage"]').boundingBox();
+  const mx=mb.x+Number(await mp.getAttribute("data-x")),my=mb.y+Number(await mp.getAttribute("data-y"));
+  await drag([mx,my],[mx+8,my+7]); await page.waitForTimeout(450);
+  check("手動網格控制點可以拖動",Math.abs(Number(await mp.getAttribute("data-x"))+mb.x-mx)>2);
+  await page.click('[data-testid="mesh-reset"]');await page.waitForTimeout(450);
   await page.click('[data-tool="mask"]');
   await drag(await screen(580, 500), await screen(640, 520));
   await page.waitForTimeout(500);
@@ -207,6 +217,9 @@ try {
   await ready();
   check("重做", (await room("data-masked")) === "1");
   await page.click('[data-testid="mask-clear"]');
+  await page.click('[data-tool="parts"]');
+  await page.click('[data-tool="follow"]');
+  await page.click('[data-follow="auto"]');
   await page.click('[data-tool="parts"]');
   const sum0 = await page.textContent('[data-testid="rig-summary"]');
   check("部件：自動分辨出左右袖，並說明衣身保持完整", sum0.includes("自動分辨") && sum0.includes("右袖") && sum0.includes("左袖"), sum0);
@@ -344,6 +357,12 @@ try {
   check("圖片存入 R2 的 doll/ 路徑（已清理雜點及裁邊）", [...env.IMAGES.objects.keys()].filter((k) => k.startsWith(`doll/assets/${hairId}/`)).length === 2);
   await ready();
   check("髮型列表出現新髮型", (await page.locator(`[data-asset="${hairId}"]`).count()) === 1);
+  await page.selectOption('[data-testid="hair-source"]',hairId);
+  await page.locator("[data-add-hair-part]").first().click();
+  check("混搭髮件不移除原來後髮或瀏海",(await page.locator("[data-worn-hair]").count())===3);
+  await page.click('[data-testid="hair-mesh"]');
+  check("髮件可使用手動網格",(await page.locator("[data-mesh-point]").count())===16);
+  await page.locator('[aria-label="移除髮件"]').last().click();
   await page.click('[data-tab="pose"]');
   check("獨立髮束出現在骨架控制點", (await page.locator('[data-handle^="hp_"]').count()) === 1);
   await page.click('[data-tab="look"]');

@@ -2,7 +2,8 @@
 // 全部是純函數／常數，前端及 Worker 共用，可直接單元測試。座標＝1200×1800 邏輯畫布像素。
 // Phase 3：Avatar V2 是唯一角色；衣物分類只決定預設位置及圖層，不再限制可以怎樣疊穿。
 
-import { AVATAR_V2_ID, FrontPart, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
+import { normalizeManualMesh, manualUV } from "./manualMesh";
+import { AVATAR_V2_ID, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
 import { Pose, normalizePose, posedAnchors } from "./avatarRig";
 
 export const DOLL_W = 1200;
@@ -19,6 +20,8 @@ export interface Fit {
   rotation: number; // 度
   /** 高度的額外拉伸（1＝按圖片比例）；沒有＝1。用來獨立微調衣物的高度 */
   sy?: number;
+  /** 4×4 手動控制格：每點的圖片相對偏移 dx,dy。 */
+  mesh?: number[];
 }
 /** 衣物顯示高度（已計及獨立的高度拉伸） */
 export const fitHeight = (fit: Fit, ar: number) => fit.w * (ar > 0 ? ar : 4 / 3) * (fit.sy ?? 1);
@@ -34,6 +37,9 @@ export function fromImage(fit: Fit, ar: number, u: number, v: number): [number, 
   const lx = (u - 0.5) * fit.w, ly = (v - 0.5) * fitHeight(fit, ar);
   return [fit.cx + lx * Math.cos(t) - ly * Math.sin(t), fit.cy + lx * Math.sin(t) + ly * Math.cos(t)];
 }
+
+export { MANUAL_GRID, normalizeManualMesh, manualUV } from "./manualMesh";
+export function manualPoint(fit: Fit, ar: number, u: number, v: number): [number,number] { return fromImage(fit,ar,...manualUV(fit.mesh,u,v)); }
 
 export const ANCHORS = posedAnchors(RIG_V2, {});
 
@@ -162,10 +168,10 @@ export function normalizeFit(v: unknown): Fit | null {
     if (Number.isNaN(sy) || sy < SY_LIMIT.min - 1e-6 || sy > SY_LIMIT.max + 1e-6) return null;
     sy = Math.round(sy * 1000) / 1000;
   }
-  return { cx: round(cx), cy: round(cy), w: round(w), rotation: round(r), ...(Math.abs(sy - 1) > 0.0005 ? { sy } : {}) };
+  return { cx: round(cx), cy: round(cy), w: round(w), rotation: round(r), ...(Math.abs(sy - 1) > 0.0005 ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}) };
 }
 export const SY_LIMIT = { min: 0.5, max: 2 };
-export const sameFit = (a: Fit, b: Fit) => Math.abs(a.cx - b.cx) < 0.06 && Math.abs(a.cy - b.cy) < 0.06 && Math.abs(a.w - b.w) < 0.06 && Math.abs(a.rotation - b.rotation) < 0.06 && Math.abs((a.sy ?? 1) - (b.sy ?? 1)) < 0.0006;
+export const sameFit = (a: Fit, b: Fit) => Math.abs(a.cx - b.cx) < 0.06 && Math.abs(a.cy - b.cy) < 0.06 && Math.abs(a.w - b.w) < 0.06 && Math.abs(a.rotation - b.rotation) < 0.06 && Math.abs((a.sy ?? 1) - (b.sy ?? 1)) < 0.0006 && JSON.stringify(a.mesh ?? []) === JSON.stringify(b.mesh ?? []);
 
 /** 點（與 fit 同一座標系）是否落在衣物的實際內容範圍內（已計及旋轉）。透明留白不會擋住下面的衣物。 */
 export function hitTest(fit: Fit, content: Content, x: number, y: number, margin = 12): boolean {
@@ -222,7 +228,7 @@ export interface WearOpts {
 }
 export const SLEEVE_ROT_LIMIT = 80;
 export const SLOT_BONE: Record<Slot, string> = { top: "chest", outer: "chest", dress: "chest", set: "chest", skirt: "pelvis", petticoat: "pelvis", pants: "pelvis", socks: "pelvis", shoes: "root", headwear: "head", bag: "wrist_l", accessory: "chest" };
-export const ATTACHABLE_BONES = ["head", "neck", "chest", "torso", "pelvis", "wrist_r", "wrist_l", "elbow_r", "elbow_l", "ankle_r", "ankle_l", "root"];
+export const ATTACHABLE_BONES = ["head", "neck", "chest", "torso", "pelvis", "wrist_r", "wrist_l", "elbow_r", "elbow_l", "ankle_r", "ankle_l", "root", "world"];
 export type SkinKind = "upper" | "legs" | "rigid";
 export const SLOT_SKIN: Record<Slot, SkinKind> = { top: "upper", outer: "upper", dress: "upper", set: "upper", pants: "legs", socks: "legs", shoes: "legs", skirt: "rigid", petticoat: "rigid", headwear: "rigid", bag: "rigid", accessory: "rigid" };
 export const defaultOpts = (slot: Slot): WearOpts => ({ follow: "auto", neck: slot === "top" || slot === "dress" || slot === "outer" || slot === "set", bone: null, over_head: slot === "headwear" });
@@ -279,6 +285,7 @@ export interface TemplateData {
   parts?: PartsRef | null;
   /** 預設穿法的高度拉伸（位置的其他數值存在資料表欄位） */
   sy?: number;
+  mesh?: number[];
   /** 適合這件衣物的姿勢（可選擇套用） */
   pose: Pose | null;
   front: FrontPart[];
@@ -307,12 +314,14 @@ export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
     }
   }
   const sy = typeof o.sy === "number" && o.sy >= SY_LIMIT.min && o.sy <= SY_LIMIT.max && Math.abs(o.sy - 1) > 0.0005 ? Math.round(o.sy * 1000) / 1000 : undefined;
-  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}) };
+  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}) };
 }
 
 // ───── 造型 ─────
 /** 造型內的一件衣物。fit／opts／mask 為 null＝跟隨衣物預設；有值＝只用於這個造型。 */
 export interface LookItem {
+  /** 完整造型快照：null 遮罩／部件表示確實沒有，不再繼承預設。 */
+  snapshot?: boolean;
   garment_id: string;
   slot: Slot;
   hidden: boolean;
@@ -328,6 +337,8 @@ export interface LookState {
   v: 3;
   head: string | null;
   hair: string | null;
+  /** 已穿髮件的獨立快照；缺少時沿用原本髮型 id。 */
+  hair_config?: HairConfig | null;
   hair_color: string;
   accent_color: string | null;
   tip_color: string | null;
@@ -368,14 +379,16 @@ export function normalizeLookState(v: unknown): LookState | null {
       if (!fit) return null;
     }
     items.push({
-      garment_id: gid, slot, hidden: it.hidden === true,
+      garment_id: gid, slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
       variant: typeof it.variant === "string" && /^[a-z0-9_]{1,24}$/.test(it.variant) ? it.variant : null,
       fit, opts: it.opts ? normalizeOpts(it.opts, slot) : null, mask: isMask(it.mask) ? it.mask : null,
       ...(isParts(it.parts) ? { parts: it.parts } : {}),
     });
   }
+  const hairConfig = o.hair_config == null ? null : normalizeHairConfig(o.hair_config);
+  if(o.hair_config != null && !hairConfig) return null;
   return {
-    v: 3, head: assetId(o.head), hair: assetId(o.hair),
+    v: 3, head: assetId(o.head), hair: assetId(o.hair), ...(hairConfig ? {hair_config:hairConfig} : {}),
     hair_color: normalizeColorValue(o.hair_color) ?? "brown_pink",
     accent_color: o.accent_color === "original" ? "original" : normalizeColorValue(o.accent_color),
     tip_color: typeof o.tip_color === "string" && /^#[0-9a-f]{6}$/i.test(o.tip_color) ? o.tip_color.toLowerCase() : null,

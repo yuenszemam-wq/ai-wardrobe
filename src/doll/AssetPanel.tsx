@@ -7,7 +7,7 @@ import { pill } from "./panels";
 export interface Draft { id: string; isNew: boolean; kind: "hair" | "head"; name: string; category: string; parts: HairPart[]; sel: string | null }
 const LAYERS: HairLayer[] = ["back", "mid", "front"];
 
-export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, onDelete }: { draft: Draft; setDraft: (d: Draft) => void; busy: boolean; onFiles: (files: File[]) => void; onSave: () => void; onCancel: () => void; onDelete: () => void }) {
+export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, onDelete, hairTool, setHairTool }: { draft: Draft; setDraft: (d: Draft) => void; busy: boolean; onFiles: (files: File[]) => void; onSave: () => void; onCancel: () => void; onDelete: () => void; hairTool:"place"|"mesh"; setHairTool:(t:"place"|"mesh")=>void }) {
   const input = useRef<HTMLInputElement>(null);
   const part = draft.parts.find((p) => p.id === draft.sel) ?? null;
   const patch = (id: string, v: Partial<HairPart>) => setDraft({ ...draft, parts: draft.parts.map((p) => (p.id === id ? { ...p, ...v } : p)) });
@@ -52,6 +52,7 @@ export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, o
             </div>
             {hair && (
               <>
+                <div className="mt-2 flex gap-1"><button type="button" className={pill(hairTool==="place")} onClick={()=>setHairTool("place")}>位置</button><button type="button" className={pill(hairTool==="mesh")} onClick={()=>setHairTool("mesh")}>變形</button><button type="button" className="chip rounded-full px-3" onClick={()=>patch(part.id,{mesh:undefined})}>重設變形</button></div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="part-layer">
                   <span className="text-[11px] text-mauve">位置</span>
                   {LAYERS.map((l) => <button key={l} type="button" data-layer={l} onClick={() => patch(part.id, { layer: l })} className={pill(part.layer === l)}>{HAIR_LAYER_LABEL[l]}</button>)}

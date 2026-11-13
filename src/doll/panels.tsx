@@ -1,14 +1,14 @@
 // 換裝頁底部面板：衣服、圖層（已穿衣物）、外貌、姿勢。面板保持矮小，角色始終可見。
 import { ReactNode, useMemo, useState } from "react";
 import { Pose, Rig, boneMap, clampPose, samePose } from "../../shared/avatarRig";
-import { BONE_GROUPS, BONE_LABEL, BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, FrontPart, HAIR_COLORS, NO_HAIR_ID, POSE_PRESETS, resolveHairColors, rgbToHex } from "../../shared/avatarV2";
+import { BONE_GROUPS, BONE_LABEL, BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, FrontPart, HairConfig, HairPart, HAIR_LAYER_LABEL, HAIR_COLORS, NO_HAIR_ID, POSE_PRESETS, resolveHairColors, rgbToHex } from "../../shared/avatarV2";
 import { ATTACHABLE_BONES, FOLLOWS, Follow, SLEEVE_ROT_LIMIT, SLOT_LABEL, SLOT_SKIN, WearOpts } from "../../shared/doll";
 import { Garment, displayName, imageUrl } from "../api";
 import { IconClose, IconEye, IconEyeOff, IconGrip, IconPencil, IconPlus, IconSearch, IconTrash } from "../components/icons";
 import { SortableList } from "../components/Sortable";
 import { TransparentImage } from "../components/TransparentImage";
 import { RigInfo } from "../../shared/garmentMesh";
-import { Appearance, BUILTIN_THUMB, Resolved } from "./model";
+import { Appearance, BUILTIN_THUMB, Resolved, addHairParts, hairOf } from "./model";
 import { PoseHandle } from "./Stage";
 
 export const pill = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[12.5px] ${on ? "chip-on" : "chip"}`;
@@ -104,7 +104,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
 }
 
 // ───── 已選衣物的校正 ─────
-export type FitTool = "place" | "wear" | "parts" | "follow" | "mask";
+export type FitTool = "place" | "wear" | "parts" | "follow" | "mask" | "mesh";
 export interface MaskTool { mode: "hide" | "behind" | "restore"; size: number }
 /** 部件筆刷：0＝衣身、1＝右袖、2＝左袖 */
 export interface PartTool { label: number; size: number }
@@ -119,9 +119,10 @@ export function rigSummary(info: RigInfo | null, skin: string): string {
   if (!sides) return info.source === "whole" ? "整件衣物（不拆袖）：衣身跟隨上身彎曲，保持完整。" : info.unsure ? "未能可靠分辨袖子，現時以整件衣物顯示（保持完整）。可以用筆刷標記袖子。" : "沒有找到袖子：整件衣物跟隨上身，保持完整。";
   return `${info.source === "manual" ? "人工標記" : info.source === "zone" ? "按手臂位置估計" : "自動分辨"}：${sides}跟隨手臂${info.forearm ? "（連手肘）" : ""}，衣身保持完整。`;
 }
-export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onSleeveAuto, onPoseFix }: {
+export function FitPanel({ r, info, tool, setTool, busy, onFit, onMeshReset, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onSleeveAuto, onPoseFix }: {
   r: Resolved; info: RigInfo | null; tool: FitTool; setTool: (t: FitTool) => void; busy: boolean;
   part: PartTool; setPart: (p: PartTool) => void; hint: boolean; setHint: (v: boolean) => void; onParts: (v: string | null) => void; onSleeveAuto: () => void; onPoseFix: () => void;
+  onMeshReset: () => void;
   onFit: (f: { dx?: number; dy?: number; scale?: number; rot?: number; wide?: number; tall?: number }) => void; onOpts: (o: Partial<WearOpts>) => void; onAuto: () => void; onRestore: () => void; onSaveDefault: () => void; onRemove: () => void; onDone: () => void;
   onOrder: (to: "top" | "up" | "down" | "bottom") => void; onVariant: (id: string | null) => void; onAddVariant: (withImage: boolean) => void; onDeleteVariant: (id: string) => void; onSavePose: () => void; onApplyPose: () => void;
   mask: MaskTool; setMask: (m: MaskTool) => void; onClearMask: () => void;
@@ -142,12 +143,12 @@ export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, 
         <button type="button" data-testid="fit-done" onClick={onDone} className="btn-jewel h-8 rounded-full px-3.5 text-[12.5px]">完成</button>
       </div>
       <Row className="pb-2">
-        {([["place", "位置"], ["wear", "穿法"], ["parts", "部件"], ["follow", "骨架"], ["mask", "遮罩"]] as [FitTool, string][]).map(([t, label]) => <button key={t} type="button" data-tool={t} onClick={() => setTool(t)} className={pill(tool === t)}>{label}</button>)}
+        {([["place", "位置"], ["mesh", "變形"], ["mask", "遮罩"], ["wear", "穿法"], ["parts", "部件"], ["follow", "進階骨架"]] as [FitTool, string][]).map(([t, label]) => <button key={t} type="button" data-tool={t} onClick={() => setTool(t)} className={pill(tool === t)}>{label}</button>)}
       </Row>
       <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2 text-[12.5px]">
         {tool === "place" && (
           <>
-            <p className="mb-2 text-[11px] leading-snug text-mauve">在角色上直接拖動衣物；雙指或角位把手可縮放、旋轉。</p>
+            <p className="mb-2 text-[11px] leading-snug text-mauve">在角色上直接拖動衣物；角位把手調整衣物大小，雙指放大或平移人物畫布。</p>
             <div className="flex flex-wrap items-center gap-1.5">
               <B label="向左微調" onClick={() => onFit({ dx: -4 })}>←</B><B label="向右微調" onClick={() => onFit({ dx: 4 })}>→</B><B label="向上微調" onClick={() => onFit({ dy: -4 })}>↑</B><B label="向下微調" onClick={() => onFit({ dy: 4 })}>↓</B>
               <B label="放大" onClick={() => onFit({ scale: 1.03 })}>＋</B><B label="縮小" onClick={() => onFit({ scale: 1 / 1.03 })}>－</B>
@@ -168,6 +169,7 @@ export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, 
             </div>
           </>
         )}
+        {tool === "mesh" && <><p className="mb-2 text-[11px] text-mauve">直接拖動紫色網格控制點，整件衣服保持連續。雙指放大人物；切換位置可隱藏網格。若要調整手臂配合袖口，可先把衣物固定於畫布。</p><div className="flex flex-wrap gap-2"><button type="button" data-testid="mesh-reset" onClick={onMeshReset} className="chip h-9 rounded-full px-3">重設變形</button><button type="button" data-testid="mesh-fixed" onClick={()=>onOpts({follow:"none",bone:"world"})} className={pill(r.opts.bone==="world")}>衣物固定</button><button type="button" onClick={()=>onOpts({follow:"none",bone:null})} className={pill(r.opts.follow==="none"&&!r.opts.bone)}>跟隨身體</button></div></>}
         {tool === "wear" && (
           <>
             <p className="mb-2 text-[11px] leading-snug text-mauve">同一件衣服可以保存不同穿著方式，例如外套打開／關上、襯衫收入裙內／放出。需要另一張圖的穿法（例如打開的外套）可上傳透明圖。</p>
@@ -242,7 +244,7 @@ export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, 
             <H>整件附接的部位</H>
             <div className="flex flex-wrap gap-1.5">
               <button type="button" onClick={() => onOpts({ bone: null })} className={pill(!r.opts.bone)}>按分類</button>
-              {ATTACHABLE_BONES.map((b) => <button key={b} type="button" data-bone={b} onClick={() => onOpts({ bone: b })} className={pill(r.opts.bone === b)}>{BONE_LABEL[b] ?? b}</button>)}
+              {ATTACHABLE_BONES.map((b) => <button key={b} type="button" data-bone={b} onClick={() => onOpts({ bone: b })} className={pill(r.opts.bone === b)}>{b === "world" ? "固定在畫布" : BONE_LABEL[b] ?? b}</button>)}
             </div>
             <H>前後關係</H>
             <div className="flex flex-wrap gap-1.5">
@@ -259,7 +261,7 @@ export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, 
               <button type="button" data-testid="mask-clear" onClick={onClearMask} className="chip h-8 rounded-full px-3">還原整件（清除遮罩）</button>
               <button type="button" aria-pressed={hint} data-testid="mask-hint" onClick={() => setHint(!hint)} className={pill(hint)}>顯示已編輯位置</button>
             </div>
-            <label className="mt-2 flex items-center gap-2">筆刷<input type="range" min={10} max={90} value={mask.size} onChange={(e) => setMask({ ...mask, size: Number(e.target.value) })} className="flex-1" /></label>
+            <label className="mt-2 flex items-center gap-2">筆刷<input type="range" min={2} max={120} value={mask.size} onChange={(e) => setMask({ ...mask, size: Number(e.target.value) })} className="flex-1" /></label>
           </>
         )}
       </div>
@@ -294,13 +296,19 @@ const AddCard = ({ label, onClick, testid }: { label: string; onClick: () => voi
   </button>
 );
 export type LookTab = "hair" | "color" | "head";
-export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, onEdit }: { tab: LookTab; setTab: (t: LookTab) => void; value: Appearance; onChange: (v: Appearance) => void; assets: DollAsset[]; onNew: (kind: "hair" | "head") => void; onEdit: (a: DollAsset) => void }) {
+export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, onEdit, hair, selectedHair, onSelectHair, hairTool, setHairTool, onHairPatch, onSaveHair, busy }: { tab: LookTab; setTab: (t: LookTab) => void; value: Appearance; onChange: (v: Appearance) => void; assets: DollAsset[]; onNew: (kind: "hair" | "head") => void; onEdit: (a: DollAsset) => void; hair: HairConfig|null; selectedHair:string|null; onSelectHair:(id:string|null)=>void; hairTool:"place"|"mesh"; setHairTool:(t:"place"|"mesh")=>void; onHairPatch:(id:string,patch:Partial<HairPart>)=>void; onSaveHair:()=>void; busy:boolean }) {
   const hairs = [...BUILTIN_HAIRS, ...assets.filter((a) => a.kind === "hair")];
   const heads = [...BUILTIN_HEADS, ...assets.filter((a) => a.kind === "head")];
   const resolved = resolveHairColors(value.hair_color, value.accent_color);
   const preset = HAIR_COLORS.find((c) => c.id === value.hair_color && !value.accent_color);
   const cats = [...new Set(hairs.map((h) => h.category).filter(Boolean))] as string[];
   const [cat, setCat] = useState("");
+  const [source,setSource]=useState("");
+  const sourceHair=hairs.find(h=>h.id===source);
+  const current=hair?.parts??[];
+  const selected=current.find(p=>p.id===selectedHair);
+  const changeParts=(parts:HairPart[])=>onChange({...value,hair_config:{...hair,parts}});
+  const add=(parts:HairPart[])=>{const next=addHairParts(hair,parts);onChange({...value,hair_config:next});if(next.parts.length>current.length)onSelectHair(next.parts[next.parts.length-1].id);};
   const Swatch = ({ label, value: v, fallback, onPick, onClear, testid }: { label: string; value: string | null; fallback: string; onPick: (hex: string) => void; onClear?: () => void; testid: string }) => (
     <label className="chip relative flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2.5 py-2">
       <span className="h-7 w-7 shrink-0 rounded-lg border border-white/40" style={{ background: v ?? fallback }} />
@@ -317,13 +325,20 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
         {tab === "hair" && cats.length > 1 && ["", ...cats].map((c) => <button key={c || "all"} type="button" onClick={() => setCat(c)} className={pill(cat === c)}>{c || "全部"}</button>)}
       </Row>
       <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2">
-        {tab === "hair" && (
+        {tab === "hair" && (<>
+          <p className="py-1 text-[11px] text-mauve">單件髮型直接加入；整套髮型可快速套用。也可從素材庫逐件混搭。</p>
           <Row className="pb-1 pt-1" >
             <AddCard label="新增髮型" testid="add-hair" onClick={() => onNew("hair")} />
-            {hairs.filter((h) => !cat || h.category === cat).map((h) => <AssetCard key={h.id} a={h} on={value.hair === h.id} onPick={() => onChange({ ...value, hair: h.id })} onEdit={h.builtin ? undefined : () => onEdit(h)} />)}
-            <AssetCard a={{ id: NO_HAIR_ID, name: "不戴頭髮" }} on={value.hair === NO_HAIR_ID} onPick={() => onChange({ ...value, hair: NO_HAIR_ID })} />
+            {hairs.filter((h) => !cat || h.category === cat).map((h) => <AssetCard key={h.id} a={h} on={!value.hair_config && value.hair === h.id} onPick={() => {const parts=(h.config as HairConfig).parts; if(parts.length===1)add(parts);else {onChange({...value,hair:h.id,hair_config:null});onSelectHair(null);}}} onEdit={h.builtin ? undefined : () => onEdit(h)} />)}
+            <AssetCard a={{ id: NO_HAIR_ID, name: "不戴頭髮" }} on={!current.length} onPick={() => {onChange({ ...value, hair: NO_HAIR_ID,hair_config:null });onSelectHair(null);}} />
           </Row>
-        )}
+          <H>逐件加入髮件</H><select aria-label="選擇髮型來源" data-testid="hair-source" value={source} onChange={e=>setSource(e.target.value)} className="w-full rounded-lg bg-velvet p-2"><option value="">選擇素材</option>{hairs.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}</select>
+          {sourceHair&&<div className="mt-1 flex flex-wrap gap-1">{(sourceHair.config as HairConfig).parts.map(p=><button type="button" key={p.id} data-add-hair-part={p.id} disabled={current.length>=16} className="chip rounded-full px-3 py-1.5" onClick={()=>add([p])}>＋{p.label}</button>)}</div>}
+          <H>已使用髮件（{current.length}/16）</H>
+          <div className="space-y-1" data-testid="worn-hair-parts">{current.map((p,i)=><div key={p.id} className="flex items-center gap-1 rounded-xl bg-white/5 p-1.5"><button type="button" data-worn-hair={p.id} className={pill(selectedHair===p.id)} onClick={()=>onSelectHair(p.id)}>{p.label}</button><span className="flex-1 text-[10px] text-mauve">{HAIR_LAYER_LABEL[p.layer]}</span><button type="button" aria-label={p.hidden?"顯示髮件":"隱藏髮件"} className="chip rounded-full p-1.5" onClick={()=>onHairPatch(p.id,{hidden:!p.hidden})}>{p.hidden?<IconEyeOff/>:<IconEye/>}</button><button type="button" aria-label="髮件上移" disabled={i===0} className="chip rounded-full px-2 py-1" onClick={()=>{const a=[...current];[a[i-1],a[i]]=[a[i],a[i-1]];changeParts(a);}}>↑</button><button type="button" aria-label="髮件下移" disabled={i===current.length-1} className="chip rounded-full px-2 py-1" onClick={()=>{const a=[...current];[a[i+1],a[i]]=[a[i],a[i+1]];changeParts(a);}}>↓</button><button type="button" aria-label="移除髮件" className="chip rounded-full p-1.5" onClick={()=>{changeParts(current.filter(q=>q.id!==p.id));if(selectedHair===p.id)onSelectHair(null);}}><IconClose/></button></div>)}</div>
+          {selected&&<div className="mt-2 rounded-xl bg-white/5 p-2"><div className="flex flex-wrap gap-1"><button type="button" className={pill(hairTool==="place")} onClick={()=>setHairTool("place")}>位置</button><button type="button" data-testid="hair-mesh" className={pill(hairTool==="mesh")} onClick={()=>setHairTool("mesh")}>變形</button><button type="button" className="chip rounded-full px-3" onClick={()=>onHairPatch(selected.id,{mesh:undefined})}>重設變形</button></div><p className="py-1 text-[11px] text-mauve">在角色上拖動髮件或網格；雙指縮放人物。</p><div className="flex flex-wrap gap-1">{(["back","mid","front"] as const).map(l=><button type="button" key={l} className={pill(selected.layer===l)} onClick={()=>onHairPatch(selected.id,{layer:l})}>{HAIR_LAYER_LABEL[l]}</button>)}<button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{w:selected.w*1.03})}>加闊</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{w:selected.w/1.03})}>收窄</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{h:selected.h*1.03})}>拉長</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onHairPatch(selected.id,{h:selected.h/1.03})}>縮短</button><button type="button" className="chip rounded-full px-3 py-1" onClick={()=>onSelectHair(null)}>完成</button></div></div>}
+          {current.length>0&&<button type="button" data-testid="save-hair-combo" disabled={busy} onClick={onSaveHair} className="btn-jewel mt-2 w-full rounded-full py-2">保存目前髮件為新髮型</button>}
+        </>)}
         {tab === "color" && (
           <>
             <div className="flex items-center justify-between pb-1.5 text-[11.5px]"><span className="text-mauve">所有髮型共用；沒有染色遮罩的髮型會自動分辨挑染</span><span className="text-gold-soft">{preset?.label ?? "自訂"}</span></div>
