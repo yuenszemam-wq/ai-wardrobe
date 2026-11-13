@@ -39,7 +39,7 @@ export function loadImage(ref: ImageRef): Promise<HTMLImageElement> {
   if (hit) return hit;
   const at = epoch;
   const p = (async () => {
-    if (ref.startsWith("/") || ref.startsWith("data:")) {
+    if (ref.startsWith("/") || ref.startsWith("data:") || ref.startsWith("blob:")) {
       // 內置靜態素材及遮罩：直接由瀏覽器讀取及快取
       const img = new Image();
       img.src = ref;

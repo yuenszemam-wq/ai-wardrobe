@@ -42,6 +42,35 @@ export interface HairPart {
   rotation?: number;
   mesh?: number[];
   hidden?: boolean;
+  /** 分類（瀏海、後髮…）：選擇同一分類的新髮件時會替換舊的 */
+  cat?: HairCat;
+  /** 來自哪一個髮型素材（用來把校正後的位置存回素材預設） */
+  src?: string;
+}
+export type HairCat = "bangs" | "back" | "side_r" | "side_l" | "tail_r" | "tail_l" | "tip" | "other";
+export const HAIR_CATS: { id: HairCat; label: string }[] = [
+  { id: "bangs", label: "瀏海" }, { id: "back", label: "後髮" }, { id: "side_r", label: "右側髮" }, { id: "side_l", label: "左側髮" },
+  { id: "tail_r", label: "右馬尾" }, { id: "tail_l", label: "左馬尾" }, { id: "tip", label: "髮尾" }, { id: "other", label: "其他" },
+];
+export const HAIR_CAT_LABEL = Object.fromEntries(HAIR_CATS.map((c) => [c.id, c.label])) as Record<HairCat, string>;
+const isCat = (v: unknown): v is HairCat => HAIR_CATS.some((c) => c.id === v);
+/** 髮件的分類：有記錄就用記錄；舊資料按骨骼、圖層及名稱推斷 */
+export function hairCatOf(p: Pick<HairPart, "cat" | "bone" | "layer" | "label">): HairCat {
+  if (p.cat) return p.cat;
+  const m = /^hair_(tail|side)_([rl])$/.exec(p.bone);
+  if (m) return (m[1] + "_" + m[2]) as HairCat;
+  const l = p.label ?? "";
+  if (/瀏海|劉海|bang|fringe/i.test(l)) return "bangs";
+  if (/馬尾|tail/i.test(l)) return /左|_l|left/i.test(l) ? "tail_l" : "tail_r";
+  if (/側|side/i.test(l)) return /左|_l|left/i.test(l) ? "side_l" : "side_r";
+  if (/髮尾|tip/i.test(l)) return "tip";
+  return p.layer === "front" ? "bangs" : "back";
+}
+/** 名稱看起來是檔案識別碼（UUID、亂碼）時，改用分類名稱 */
+export function hairPartName(p: Pick<HairPart, "cat" | "bone" | "layer" | "label">): string {
+  const l = (p.label ?? "").trim();
+  const junk = !l || /^[0-9a-f]{6,}([-_][0-9a-f]{2,})*$/i.test(l) || /^(img|image|photo|file|unnamed|下載|未命名)[-_ ]?\w*$/i.test(l) || (/^[\w-]{10,}$/.test(l) && /\d/.test(l));
+  return junk ? HAIR_CAT_LABEL[hairCatOf(p)] : l;
 }
 export interface HairConfig { parts: HairPart[]; ref_luma?: { main: number; accent: number } | null }
 export interface HeadConfig { file: ImageRef; x: number; y: number; w: number; h: number }
@@ -71,6 +100,8 @@ export function normalizeHairConfig(v: unknown): HairConfig | null {
     const rotation=num(o.rotation,-180,180); if(rotation) part.rotation=rotation;
     const mesh=normalizeManualMesh(o.mesh); if(mesh) part.mesh=mesh;
     if(o.hidden===true) part.hidden=true;
+    if (isCat(o.cat)) part.cat = o.cat;
+    const src = text(o.src, 40); if (/^(das_[a-z0-9]+|builtin:[a-z0-9_]+)$/i.test(src)) part.src = src;
     if (o.mask != null) {
       if (!isImageRef(o.mask)) return null;
       part.mask = o.mask;
@@ -96,8 +127,8 @@ export function normalizeHeadConfig(v: unknown): HeadConfig | null {
 }
 
 const P = RIG_V2.parts;
-const hairPart = (id: string, label: string, layer: HairLayer): HairPart => ({
-  id, label, layer, file: AVATAR_V2_BASE + P[id].src, mask: P[id].accent_mask ? AVATAR_V2_BASE + P[id].accent_mask : null,
+const hairPart = (id: string, label: string, layer: HairLayer, cat?: HairCat): HairPart => ({
+  id, label, layer, cat, src: "builtin:" + RIG_V2.hair.style, file: AVATAR_V2_BASE + P[id].src, mask: P[id].accent_mask ? AVATAR_V2_BASE + P[id].accent_mask : null,
   x: P[id].x, y: P[id].y, w: P[id].w, h: P[id].h, bone: P[id].bone,
 });
 export const BUILTIN_HAIR_ID = "builtin:" + RIG_V2.hair.style;
@@ -108,8 +139,8 @@ export const BUILTIN_HAIRS: DollAsset<HairConfig>[] = [
     config: {
       ref_luma: RIG_V2.hair.ref_luma,
       parts: [
-        hairPart("hair_tail_r", "右馬尾", "back"), hairPart("hair_tail_l", "左馬尾", "back"), hairPart("hair_back_base", "後髮", "back"),
-        hairPart("hair_side_r", "右側髮", "front"), hairPart("hair_side_l", "左側髮", "front"), hairPart("hair_bangs", "瀏海", "front"),
+        hairPart("hair_tail_r", "右馬尾", "back", "tail_r"), hairPart("hair_tail_l", "左馬尾", "back", "tail_l"), hairPart("hair_back_base", "後髮", "back", "back"),
+        hairPart("hair_side_r", "右側髮", "front", "side_r"), hairPart("hair_side_l", "左側髮", "front", "side_l"), hairPart("hair_bangs", "瀏海", "front", "bangs"),
       ],
     },
   },
@@ -296,3 +327,24 @@ export const BONE_GROUPS: { id: string; label: string; bones: string[] }[] = [
   { id: "legs", label: "腿", bones: ["hip_r", "knee_r", "ankle_r", "hip_l", "knee_l", "ankle_l"] },
   { id: "hair", label: "頭髮", bones: ["hair_tail_r", "hair_tail_l", "hair_side_r", "hair_side_l"] },
 ];
+
+/** 每個分類在角色頭上的標準位置（取自內置髮型），新髮件按這個位置自動對位 */
+const SLOT_SRC: Record<HairCat, string> = { bangs: "hair_bangs", back: "hair_back_base", side_r: "hair_side_r", side_l: "hair_side_l", tail_r: "hair_tail_r", tail_l: "hair_tail_l", tip: "hair_back_base", other: "hair_bangs" };
+export const HAIR_CAT_BONE: Partial<Record<HairCat, string>> = { side_r: "hair_side_r", side_l: "hair_side_l", tail_r: "hair_tail_r", tail_l: "hair_tail_l" };
+export const HAIR_CAT_LAYER: Record<HairCat, HairLayer> = { bangs: "front", side_r: "front", side_l: "front", back: "back", tail_r: "back", tail_l: "back", tip: "back", other: "front" };
+/**
+ * 按分類把一張髮件圖放到角色頭上：寬度配合標準位置，髮根（圖片頂部）對齊。
+ * ar＝圖片高÷闊（已裁走透明留白）。回傳畫布位置。
+ */
+export function placeHairPart(cat: HairCat, ar: number): { x: number; y: number; w: number; h: number } {
+  const b = P[SLOT_SRC[cat]];
+  const a = ar > 0 ? ar : 1;
+  // 寬度按分類（頭部約 220 闊）；長髮可以很長，只限制不超過整個畫面
+  const W: Record<HairCat, number> = { bangs: 262, back: 330, side_r: 92, side_l: 92, tail_r: 220, tail_l: 220, tip: 300, other: 240 };
+  let w = W[cat], h = w * a;
+  if (h > 1500) { h = 1500; w = h / a; }
+  const cx = cat === "back" || cat === "bangs" || cat === "tip" || cat === "other" ? 601 : b.x + b.w / 2;
+  const y = cat === "tip" ? 420 : cat === "back" ? 8 : b.y;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  return { x: r1(cx - w / 2), y: r1(y), w: r1(w), h: r1(h) };
+}

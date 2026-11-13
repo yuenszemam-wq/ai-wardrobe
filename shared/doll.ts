@@ -277,6 +277,49 @@ export interface Variant {
   /** 這個穿法是為哪個姿勢校正的（可選）：角色擺出相近姿勢時會提示套用 */
   pose?: Pose | null;
 }
+/**
+ * 套裝拆件：從套裝原圖選出一部分（例如袖套、頸飾），可以獨立穿著。原圖不會被修改：
+ * 部件＝原圖的一個範圍（box，0–1）× 選取遮罩（mask，PNG data URL，白色＝選取），或另外上傳的透明圖（file）。
+ * rest＝「其餘部分」：原圖減去其他所有部件。部件不是新衣物，不影響衣櫃統計。
+ */
+export interface Piece {
+  id: string;
+  name: string;
+  slot: Slot;
+  box: [number, number, number, number];
+  mask?: string | null;
+  file?: string | null;
+  rest?: boolean;
+  /** 這個部件的預設位置及跟隨方式（沒有＝按套裝原本的位置） */
+  fit?: Fit | null;
+  opts?: WearOpts | null;
+}
+export const PIECE_MASK_MAX = 120_000;
+const isPieceMask = (v: unknown): v is string => typeof v === "string" && v.length <= PIECE_MASK_MAX && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(v);
+export function normalizePiece(v: unknown): Piece | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const id = typeof o.id === "string" && /^pc_[a-z0-9]{3,16}$/.test(o.id) ? o.id : null;
+  const b = Array.isArray(o.box) && o.box.length === 4 && o.box.every((x) => typeof x === "number" && Number.isFinite(x) && x >= -0.001 && x <= 1.001) ? (o.box as number[]).map((x) => Math.round(Math.min(1, Math.max(0, x)) * 10000) / 10000) : null;
+  if (!id || !b || b[2] - b[0] < 0.002 || b[3] - b[1] < 0.002) return null;
+  const slot = isSlot(o.slot) ? o.slot : "accessory";
+  const file = isImageRef(o.file) ? o.file : null;
+  const mask = isPieceMask(o.mask) ? o.mask : null;
+  return {
+    id, name: (typeof o.name === "string" ? o.name.trim().slice(0, 30) : "") || "部件", slot, box: b as Piece["box"],
+    ...(mask ? { mask } : {}), ...(file ? { file } : {}), ...(o.rest === true ? { rest: true } : {}),
+    ...(o.fit ? { fit: normalizeFit(o.fit) } : {}), ...(o.opts ? { opts: normalizeOpts(o.opts, slot) } : {}),
+  };
+}
+export const normalizePieces = (v: unknown): Piece[] => (Array.isArray(v) ? v.slice(0, 16).map(normalizePiece).filter((p): p is Piece => !!p).filter((p, i, a) => a.findIndex((q) => q.id === p.id) === i) : []);
+/** 部件在套裝放置位置下的預設位置：原圖範圍（box）對應到套裝的位置 */
+export function pieceFit(setFit: Fit, setAr: number, box: Piece["box"]): Fit {
+  const [x, y] = fromImage(setFit, setAr, (box[0] + box[2]) / 2, (box[1] + box[3]) / 2);
+  return { cx: Math.round(x * 10) / 10, cy: Math.round(y * 10) / 10, w: Math.max(FIT_LIMIT.minW, Math.round(setFit.w * (box[2] - box[0]) * 10) / 10), rotation: setFit.rotation, ...(setFit.sy ? { sy: setFit.sy } : {}) };
+}
+/** 造型內一件衣物的識別：同一套裝的不同部件可以同時穿著 */
+export const itemKey = (it: { garment_id: string; piece?: string | null }) => (it.piece ? it.garment_id + "#" + it.piece : it.garment_id);
+
 /** 每件衣物的預設穿著設定（doll_fit_templates.data）。預設穿法的位置存在資料表欄位 cx／cy／w／rotation。 */
 export interface TemplateData {
   opts: WearOpts;
@@ -293,6 +336,8 @@ export interface TemplateData {
   variants: Record<string, Variant>;
   /** 由舊角色換算而來，尚未在 V2 上校正 */
   converted?: boolean;
+  /** 套裝拆件 */
+  pieces?: Piece[];
 }
 const frontOf = (v: unknown): FrontPart[] => (Array.isArray(v) ? (["hand_r", "hand_l"] as FrontPart[]).filter((k) => v.includes(k)) : []);
 export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
@@ -314,7 +359,7 @@ export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
     }
   }
   const sy = typeof o.sy === "number" && o.sy >= SY_LIMIT.min && o.sy <= SY_LIMIT.max && Math.abs(o.sy - 1) > 0.0005 ? Math.round(o.sy * 1000) / 1000 : undefined;
-  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}) };
+  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}), ...(normalizePieces(o.pieces).length ? { pieces: normalizePieces(o.pieces) } : {}) };
 }
 
 // ───── 造型 ─────
@@ -323,6 +368,10 @@ export interface LookItem {
   /** 完整造型快照：null 遮罩／部件表示確實沒有，不再繼承預設。 */
   snapshot?: boolean;
   garment_id: string;
+  /** 套裝拆件：穿著套裝內的一個部件（null＝整件） */
+  piece?: string | null;
+  /** 保存造型時部件設定的快照：之後修改套裝拆件，不會影響已保存的造型 */
+  piece_def?: Piece | null;
   slot: Slot;
   hidden: boolean;
   /** 穿法 id；null＝預設穿法 */
@@ -370,8 +419,11 @@ export function normalizeLookState(v: unknown): LookState | null {
     const it = raw as Record<string, unknown>;
     const gid = typeof it.garment_id === "string" ? it.garment_id : "";
     if (!/^[\w-]{1,64}$/.test(gid)) return null;
-    if (seen.has(gid)) continue;
-    seen.add(gid);
+    const piece = typeof it.piece === "string" && /^pc_[a-z0-9]{3,16}$/.test(it.piece) ? it.piece : null;
+    const key = piece ? gid + "#" + piece : gid;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const pieceDef = piece && it.piece_def ? normalizePiece(it.piece_def) : null;
     const slot = isSlot(it.slot) ? it.slot : "accessory";
     let fit: Fit | null = null;
     if (it.fit != null) {
@@ -379,7 +431,7 @@ export function normalizeLookState(v: unknown): LookState | null {
       if (!fit) return null;
     }
     items.push({
-      garment_id: gid, slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
+      garment_id: gid, ...(piece ? { piece } : {}), ...(pieceDef && pieceDef.id === piece ? { piece_def: pieceDef } : {}), slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
       variant: typeof it.variant === "string" && /^[a-z0-9_]{1,24}$/.test(it.variant) ? it.variant : null,
       fit, opts: it.opts ? normalizeOpts(it.opts, slot) : null, mask: isMask(it.mask) ? it.mask : null,
       ...(isParts(it.parts) ? { parts: it.parts } : {}),

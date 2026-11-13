@@ -265,6 +265,8 @@ export interface RigInfo {
   forearm: boolean;
   legs: boolean;
   unsure: boolean;
+  /** 自動拆件的結果不完整（例如衣身缺失），已改回整件衣物 */
+  fallback?: boolean;
 }
 /** 一個部件的連續網格。部件內部不會斷開；部件之間（袖子與衣身）在袖根位置重疊並平滑接合。 */
 export interface Mesh {
@@ -510,4 +512,24 @@ export function poseDistance(a: Record<string, number> | null | undefined, b: Re
     d = Math.max(d, Math.abs((a?.[k] ?? 0) - (b?.[k] ?? 0)) * (k.includes(".") ? 0.4 : 1));
   }
   return d;
+}
+
+/**
+ * 各部件範圍合起來覆蓋原圖多少布料（以 alpha 加權，0–1）。拆件後衣身或任何部分不見了，數值會明顯低於 1。
+ * 只檢查有範圍限制（matte）的部件；沒有拆件時回傳 1。
+ */
+export function rigCoverage(rig: GarmentRig, grid: AlphaField): number {
+  const mattes = rig.layers.map((l) => l.matte);
+  if (rig.layers.length < 2 || mattes.some((m) => !m)) return 1;
+  const n = grid.w * grid.h;
+  let total = 0, kept = 0;
+  for (let i = 0; i < n; i++) {
+    const a = grid.data[i];
+    if (a < 24) continue;
+    let m = 0;
+    for (const t of mattes) if (t![i] > m) m = t![i];
+    total += a;
+    kept += (a * Math.min(255, m)) / 255;
+  }
+  return total ? kept / total : 1;
 }

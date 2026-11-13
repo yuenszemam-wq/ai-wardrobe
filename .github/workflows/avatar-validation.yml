@@ -29,3 +29,5 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
       - run: node test/mesh-integrity.mjs
+      - run: node test/doll-camera.mjs
+      - run: node test/doll-split.mjs
