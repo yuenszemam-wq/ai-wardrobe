@@ -3,6 +3,9 @@
 import { DEFAULT_AVATAR, Fit, LEGACY_AVATAR, LookState, isSlot, normalizeFit, normalizeLookState, normalizeTemplateData, slotFor } from "../shared/doll";
 import { normalizeHairConfig, normalizeHeadConfig, normalizePalette } from "../shared/avatarV2";
 import { parseImage } from "./images";
+import { checkModelRef, modelExists } from "./models";
+import { LOOSE_RIG } from "../shared/avatarModel";
+import { RIG_V2 } from "../shared/avatarV2";
 import { transparentImageSql } from "./transparent";
 import { Actor, Env, HttpError, audit, json, newId, nowIso, sha256Hex, str } from "./util";
 
@@ -19,25 +22,37 @@ const parse = (v: unknown): unknown => {
 // ───── 衣物預設穿著設定 ─────
 interface TemplateRow { garment_id: string; avatar_id: string; image_id: string | null; cx: number; cy: number; w: number; rotation: number; slot: string | null; data: string | null; version: number; updated_at: string }
 const templateOut = (r: TemplateRow) => {
-  const data = r.avatar_id === DEFAULT_AVATAR && isSlot(r.slot) ? normalizeTemplateData(parse(r.data), r.slot) : null;
+  const data = r.avatar_id !== LEGACY_AVATAR && isSlot(r.slot) ? normalizeTemplateData(parse(r.data), r.slot, r.avatar_id === DEFAULT_AVATAR ? RIG_V2 : LOOSE_RIG) : null;
   // 高度拉伸（Phase 3.1）存在 data.sy，資料表欄位不變
   return { garment_id: r.garment_id, avatar_id: r.avatar_id, image_id: r.image_id, fit: { cx: r.cx, cy: r.cy, w: r.w, rotation: r.rotation, ...(data?.sy ? { sy: data.sy } : {}), ...(data?.mesh ? { mesh: data.mesh } : {}) }, slot: r.slot, data, version: r.version, updated_at: r.updated_at };
 };
 
-/** 回傳目前角色的設定；另附舊角色（V1）的位置，前端只在該衣物未有 V2 設定時換算使用 */
-export async function listTemplates(env: Env) {
-  const { results } = await env.DB.prepare("SELECT * FROM doll_fit_templates WHERE avatar_id IN (?, ?) ORDER BY updated_at DESC LIMIT 4000").bind(DEFAULT_AVATAR, LEGACY_AVATAR).all<TemplateRow>();
+/**
+ * 回傳某個身體模型的衣物設定（預設 Avatar V2）。V2 另附舊角色（V1）的位置，前端只在該衣物未有 V2 設定時換算使用；
+ * 自訂身體另附 V2 的設定（base），只用作「按新身體比例換算」的初始建議，不會當作已校正。
+ */
+export async function listTemplates(env: Env, params?: URLSearchParams) {
+  const avatar = params?.get("avatar") || DEFAULT_AVATAR;
+  if (!(await modelExists(env, avatar))) throw new HttpError(404, "model_not_found", "找不到這個身體模型");
+  const ids = avatar === DEFAULT_AVATAR ? [DEFAULT_AVATAR, LEGACY_AVATAR] : [avatar, DEFAULT_AVATAR];
+  const { results } = await env.DB.prepare("SELECT * FROM doll_fit_templates WHERE avatar_id IN (?, ?) ORDER BY updated_at DESC LIMIT 8000").bind(...ids).all<TemplateRow>();
   return results.map(templateOut);
 }
+const avatarOf = async (env: Env, v: unknown): Promise<string> => {
+  const id = typeof v === "string" && v ? v : DEFAULT_AVATAR;
+  if (id === LEGACY_AVATAR || !(await modelExists(env, id))) throw new HttpError(400, "bad_model", "找不到這個身體模型");
+  return id;
+};
 
 export async function putTemplate(env: Env, actor: Actor, garmentId: string, input: Record<string, unknown>) {
   const fit = fitOrThrow(input.fit);
+  const avatar = await avatarOf(env, input.avatar_id);
   const g = await env.DB.prepare(`SELECT g.id, g.category, g.subcategory, ${transparentImageSql()} AS image_id FROM garments g WHERE g.id = ?`).bind(garmentId).first<{ id: string; category: string | null; subcategory: string | null; image_id: string | null }>();
   if (!g) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
   if (input.slot != null && !isSlot(input.slot)) throw new HttpError(400, "bad_slot", "圖層位置不正確");
   const slot = isSlot(input.slot) ? input.slot : slotFor(g.category, g.subcategory);
   if (Object.prototype.hasOwnProperty.call(input, "image_id") && input.image_id !== g.image_id) throw new HttpError(409, "image_changed", "衣物圖片已更新，請重新載入再校正");
-  const data = JSON.stringify(normalizeTemplateData({ ...(input.data && typeof input.data === "object" ? input.data : {}), sy: fit.sy, mesh: fit.mesh }, slot));
+  const data = JSON.stringify(normalizeTemplateData({ ...(input.data && typeof input.data === "object" ? input.data : {}), sy: fit.sy, mesh: fit.mesh }, slot, avatar === DEFAULT_AVATAR ? RIG_V2 : LOOSE_RIG));
   if (data.length > 600_000) throw new HttpError(413, "template_too_large", "穿著設定過大，請減少穿法或遮罩");
   const expected = input.expected_version;
   if (expected != null && (!Number.isSafeInteger(expected) || Number(expected) < 0)) throw new HttpError(400, "bad_version", "版本不正確");
@@ -49,15 +64,16 @@ export async function putTemplate(env: Env, actor: Actor, garmentId: string, inp
      SELECT ?,?,?,?,?,?,?,?,?,1,?,? WHERE ? = 0 OR EXISTS (SELECT 1 FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ? AND version = ?)
      ON CONFLICT(garment_id, avatar_id) DO UPDATE SET image_id = excluded.image_id, cx = excluded.cx, cy = excluded.cy, w = excluded.w,
        rotation = excluded.rotation, slot = excluded.slot, data = excluded.data, version = doll_fit_templates.version + 1, updated_at = excluded.updated_at WHERE doll_fit_templates.version = ? RETURNING *`,
-  ).bind(garmentId, DEFAULT_AVATAR, g.image_id, fit.cx, fit.cy, fit.w, fit.rotation, slot, data, now, now, version, garmentId, DEFAULT_AVATAR, version, version).all<TemplateRow>();
+  ).bind(garmentId, avatar, g.image_id, fit.cx, fit.cy, fit.w, fit.rotation, slot, data, now, now, version, garmentId, avatar, version, version).all<TemplateRow>();
   if (!saved.results.length) throw new HttpError(409, "template_conflict", "另一裝置已更新衣物設定。你的編輯仍保留；請重新載入最新預設後再保存，避免覆蓋其他部件。");
-  await audit(env, actor, "doll.template.save", garmentId);
+  await audit(env, actor, "doll.template.save", garmentId, { avatar });
   return templateOut(saved.results[0]);
 }
 
-/** 恢復分類預設：只刪除目前角色的設定；舊角色的記錄保留 */
-export async function deleteTemplate(env: Env, actor: Actor, garmentId: string) {
-  const res = await env.DB.prepare("DELETE FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ?").bind(garmentId, DEFAULT_AVATAR).run();
+/** 恢復分類預設：只刪除指定身體的設定；其他身體及舊角色的記錄保留 */
+export async function deleteTemplate(env: Env, actor: Actor, garmentId: string, params?: URLSearchParams) {
+  const avatar = await avatarOf(env, params?.get("avatar"));
+  const res = await env.DB.prepare("DELETE FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ?").bind(garmentId, avatar).run();
   if (res.meta.changes) await audit(env, actor, "doll.template.delete", garmentId);
   return { ok: true, deleted: res.meta.changes };
 }
@@ -108,9 +124,10 @@ export async function getLook(env: Env, id: string) {
   return { ...summary({ ...l, item_count: rows.length, thumb_at: thumb?.updated_at ?? null }), state, legacy, garments };
 }
 
-async function stateStatements(env: Env, lookId: string, raw: unknown): Promise<{ state: LookState; stmts: D1PreparedStatement[] }> {
+async function stateStatements(env: Env, lookId: string, raw: unknown): Promise<{ state: LookState; stmts: D1PreparedStatement[]; avatar: string }> {
   const state = normalizeLookState(raw);
   if (!state) throw new HttpError(400, "bad_state", "造型資料不正確");
+  const avatar = await checkModelRef(env, state.model);
   // 混搭造型引用既有髮件檔案；不允許儲存不存在的上傳圖片。
   const hairRefs=[...new Set([...(state.hair_config?.parts??[]).flatMap(p=>[p.file,p.mask]), state.head_config?.file, ...state.items.flatMap(i=>[i.image,i.piece_def?.file])].filter((x):x is string=>typeof x==="string"&&x.startsWith("file:")))];
   for(const ref of hairRefs){if(!await env.DB.prepare("SELECT id FROM doll_asset_files WHERE id = ?").bind(ref.slice(5)).first())throw new HttpError(400,"bad_hair","有髮件圖片不存在，請重新選擇");}
@@ -130,7 +147,7 @@ async function stateStatements(env: Env, lookId: string, raw: unknown): Promise<
     stmts.push(env.DB.prepare("INSERT INTO doll_look_items (look_id, garment_id, slot, z, ov_cx, ov_cy, ov_w, ov_rotation) VALUES (?,?,?,?,?,?,?,?)")
       .bind(lookId, it.garment_id, it.slot, i, f ? f.cx : null, f ? f.cy : null, f ? f.w : null, f ? f.rotation : null));
   });
-  return { state, stmts };
+  return { state, stmts, avatar };
 }
 /** 同步寫入 0009 的舊欄位，方便其他工具閱讀（內置髮型才有 hair_style） */
 const legacyColumns = (s: LookState) => [s.hair?.startsWith("builtin:") ? s.hair.slice(8) : null, s.hair_color, s.accent_color, JSON.stringify(s.pose), JSON.stringify(s)];
@@ -138,10 +155,10 @@ const legacyColumns = (s: LookState) => [s.hair?.startsWith("builtin:") ? s.hair
 export async function createLook(env: Env, actor: Actor, input: LookInput) {
   const id = newId("look");
   const now = nowIso();
-  const { state, stmts } = await stateStatements(env, id, input.state ?? { items: [] });
+  const { state, stmts, avatar } = await stateStatements(env, id, input.state ?? { items: [] });
   await env.DB.batch([
     env.DB.prepare("INSERT INTO doll_looks (id, name, avatar_id, notes, is_favorite, status, created_at, updated_at, hair_style, hair_color, accent_color, pose, state) VALUES (?,?,?,?,?, 'active', ?, ?,?,?,?,?,?)")
-      .bind(id, str(input.name, 120) || "新造型", DEFAULT_AVATAR, str(input.notes, 2000), input.is_favorite ? 1 : 0, now, now, ...legacyColumns(state)),
+      .bind(id, str(input.name, 120) || "新造型", avatar, str(input.notes, 2000), input.is_favorite ? 1 : 0, now, now, ...legacyColumns(state)),
     ...stmts,
   ]);
   await audit(env, actor, "doll.look.create", id);
@@ -159,7 +176,7 @@ export async function updateLook(env: Env, actor: Actor, id: string, input: Look
     const r = await stateStatements(env, id, input.state);
     stmts = r.stmts;
     sets.push("avatar_id = ?", "hair_style = ?", "hair_color = ?", "accent_color = ?", "pose = ?", "state = ?");
-    binds.push(DEFAULT_AVATAR, ...legacyColumns(r.state));
+    binds.push(r.avatar, ...legacyColumns(r.state));
   }
   if (has("name") && str(input.name, 120)) { sets.push("name = ?"); binds.push(str(input.name, 120)); }
   if (has("notes")) { sets.push("notes = ?"); binds.push(str(input.notes, 2000)); }

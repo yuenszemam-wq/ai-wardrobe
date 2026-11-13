@@ -21,7 +21,7 @@ export const DEFAULT_POSE_ID = "a_pose";
 /** 圖片來源：「file:<doll_asset_files.id>」＝使用者上傳；以 / 開頭＝內置靜態檔 */
 export type ImageRef = string;
 export const refUrl = (ref: ImageRef) => (ref.startsWith("file:") ? `/api/doll/files/${ref.slice(5)}` : ref.startsWith("img:") ? `/api/images/${ref.slice(4)}` : ref);
-const REF = /^(file:daf_[a-z2-7]{6,40}|img:img_[a-z2-7]{6,40}|\/doll\/[\w./-]{1,200})$/;
+const REF = /^(file:d[am]f_[a-z2-7]{6,40}|img:img_[a-z2-7]{6,40}|\/doll\/[\w./-]{1,200})$/;
 export const isImageRef = (v: unknown): v is ImageRef => typeof v === "string" && REF.test(v) && !v.includes("..");
 
 export type HairLayer = "back" | "mid" | "front";

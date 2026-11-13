@@ -5,6 +5,7 @@
 import { normalizeManualMesh, manualUV } from "./manualMesh";
 import { AVATAR_V2_ID, ImageRef, HeadConfig, normalizeHeadConfig, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
 import { Pose, Rig, normalizePose, posedAnchors } from "./avatarRig";
+import { LOOSE_RIG, isModelId } from "./avatarModel";
 
 export const DOLL_W = 1200;
 export const DOLL_H = 1800;
@@ -238,7 +239,8 @@ export const ATTACHABLE_BONES = ["head", "neck", "chest", "torso", "pelvis", "wr
 export type SkinKind = "upper" | "legs" | "rigid";
 export const SLOT_SKIN: Record<Slot, SkinKind> = { top: "upper", outer: "upper", dress: "upper", set: "upper", pants: "legs", socks: "legs", shoes: "legs", skirt: "rigid", petticoat: "rigid", headwear: "rigid", bag: "rigid", accessory: "rigid" };
 export const defaultOpts = (slot: Slot): WearOpts => ({ follow: "auto", neck: slot === "top" || slot === "dress" || slot === "outer" || slot === "set", bone: null, over_head: slot === "headwear" });
-export function normalizeOpts(v: unknown, slot: Slot): WearOpts {
+/** poseRig：驗證基準姿勢用的骨架（V2＝按 V2 活動範圍；自訂身體用寬鬆骨架，顯示時再按實際身體限制） */
+export function normalizeOpts(v: unknown, slot: Slot, poseRig: Rig = RIG_V2): WearOpts {
   const d = defaultOpts(slot);
   if (!v || typeof v !== "object") return d;
   const o = v as Record<string, unknown>;
@@ -248,12 +250,12 @@ export function normalizeOpts(v: unknown, slot: Slot): WearOpts {
     bone: typeof o.bone === "string" && ATTACHABLE_BONES.includes(o.bone) ? o.bone : null,
     over_head: typeof o.over_head === "boolean" ? o.over_head : d.over_head,
     ...sleeveRot(o),
-    ...bindOf(o.bind),
+    ...bindOf(o.bind, poseRig),
   };
 }
-function bindOf(v: unknown): { bind?: Pose } {
+function bindOf(v: unknown, poseRig: Rig): { bind?: Pose } {
   if (!v || typeof v !== "object") return {};
-  const p = normalizePose(RIG_V2, v);
+  const p = normalizePose(poseRig, v);
   return p && Object.keys(p).length ? { bind: p } : {};
 }
 function sleeveRot(o: Record<string, unknown>): { sleeve_r?: number; sleeve_l?: number } {
@@ -330,7 +332,7 @@ export function normalizeStatus(v: unknown): SetupStatus | undefined {
 }
 export const PIECE_MASK_MAX = 120_000;
 const isPieceMask = (v: unknown): v is string => typeof v === "string" && v.length <= PIECE_MASK_MAX && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(v);
-export function normalizePiece(v: unknown): Piece | null {
+export function normalizePiece(v: unknown, poseRig: Rig = RIG_V2): Piece | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   const id = typeof o.id === "string" && /^pc_[a-z0-9]{3,16}$/.test(o.id) ? o.id : null;
@@ -342,14 +344,14 @@ export function normalizePiece(v: unknown): Piece | null {
   return {
     id, name: (typeof o.name === "string" ? o.name.trim().slice(0, 30) : "") || "部件", slot, box: b as Piece["box"],
     ...(mask ? { mask } : {}), ...(file ? { file } : {}), ...(o.rest === true ? { rest: true } : {}),
-    ...(o.fit ? { fit: normalizeFit(o.fit) } : {}), ...(o.opts ? { opts: normalizeOpts(o.opts, slot) } : {}),
+    ...(o.fit ? { fit: normalizeFit(o.fit) } : {}), ...(o.opts ? { opts: normalizeOpts(o.opts, slot, poseRig) } : {}),
     ...(isParts(o.parts) ? { parts: o.parts } : {}),
     ...(isMask(o.wear_mask) ? { wear_mask: o.wear_mask } : {}),
-    ...(o.pose && typeof o.pose === "object" ? { pose: normalizePose(RIG_V2, o.pose) } : {}),
+    ...(o.pose && typeof o.pose === "object" ? { pose: normalizePose(poseRig, o.pose) } : {}),
     ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}),
   };
 }
-export const normalizePieces = (v: unknown): Piece[] => (Array.isArray(v) ? v.slice(0, 16).map(normalizePiece).filter((p): p is Piece => !!p).filter((p, i, a) => a.findIndex((q) => q.id === p.id) === i) : []);
+export const normalizePieces = (v: unknown, poseRig: Rig = RIG_V2): Piece[] => (Array.isArray(v) ? v.slice(0, 16).map((x) => normalizePiece(x, poseRig)).filter((p): p is Piece => !!p).filter((p, i, a) => a.findIndex((q) => q.id === p.id) === i) : []);
 /** 部件在套裝放置位置下的預設位置：原圖範圍（box）對應到套裝的位置 */
 export function pieceFit(setFit: Fit, setAr: number, box: Piece["box"]): Fit {
   const [x, y] = fromImage(setFit, setAr, (box[0] + box[2]) / 2, (box[1] + box[3]) / 2);
@@ -372,15 +374,17 @@ export interface TemplateData {
   front: FrontPart[];
   /** 其他穿法（id → 設定） */
   variants: Record<string, Variant>;
-  /** 由舊角色換算而來，尚未在 V2 上校正 */
+  /** 由舊角色或另一個身體換算而來，尚未在這個身體上校正 */
   converted?: boolean;
+  /** 換算來源的身體模型（Phase 3.6） */
+  converted_from?: string;
   /** 套裝拆件 */
   pieces?: Piece[];
   /** 各設定項目的手動狀態（已完成／不需要）；沒有標記的項目由程式按實際設定判斷 */
   status?: SetupStatus;
 }
 const frontOf = (v: unknown): FrontPart[] => (Array.isArray(v) ? (["hand_r", "hand_l"] as FrontPart[]).filter((k) => v.includes(k)) : []);
-export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
+export function normalizeTemplateData(v: unknown, slot: Slot, poseRig: Rig = RIG_V2): TemplateData {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
   const variants: Record<string, Variant> = {};
   if (o.variants && typeof o.variants === "object") {
@@ -391,15 +395,15 @@ export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
         name: (typeof r.name === "string" ? r.name.trim().slice(0, 20) : "") || "穿法",
         image: isImageRef(r.image) ? r.image : null,
         fit: normalizeFit(r.fit),
-        opts: normalizeOpts(r.opts, slot),
+        opts: normalizeOpts(r.opts, slot, poseRig),
         mask: isMask(r.mask) ? r.mask : null,
         ...(isParts(r.parts) ? { parts: r.parts } : {}),
-        ...(r.pose ? { pose: normalizePose(RIG_V2, r.pose) } : {}),
+        ...(r.pose ? { pose: normalizePose(poseRig, r.pose) } : {}),
       };
     }
   }
   const sy = typeof o.sy === "number" && o.sy >= SY_LIMIT.min && o.sy <= SY_LIMIT.max && Math.abs(o.sy - 1) > 0.0005 ? Math.round(o.sy * 1000) / 1000 : undefined;
-  return { opts: normalizeOpts(o.opts, slot), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(RIG_V2, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}), ...(normalizePieces(o.pieces).length ? { pieces: normalizePieces(o.pieces) } : {}), ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}) };
+  return { opts: normalizeOpts(o.opts, slot, poseRig), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(poseRig, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}), ...(o.converted && isModelId(o.converted_from) ? { converted_from: o.converted_from } : {}), ...(normalizePieces(o.pieces, poseRig).length ? { pieces: normalizePieces(o.pieces, poseRig) } : {}), ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}) };
 }
 
 // ───── 造型 ─────
@@ -428,6 +432,8 @@ export interface LookItem {
 /** 完整造型狀態（doll_looks.state）。items 的次序＝由內到外的圖層次序。 */
 export interface LookState {
   v: 3;
+  /** 造型所用的身體模型及不可變版本（Phase 3.6）；沒有＝Avatar V2 */
+  model?: { id: string; rev: number } | null;
   head: string | null;
   head_config?: HeadConfig | null;
   hair: string | null;
@@ -441,6 +447,11 @@ export interface LookState {
   items: LookItem[];
 }
 export const MAX_ITEMS = 40;
+const modelRef = (v: unknown): { id: string; rev: number } | null => {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  return isModelId(o.id) && Number.isSafeInteger(o.rev) && (o.rev as number) > 0 ? { id: o.id, rev: o.rev as number } : null;
+};
 const assetId = (v: unknown) => (typeof v === "string" && /^(builtin:[a-z0-9_]{1,40}|das_[a-z2-7]{6,40}|none)$/.test(v) ? v : null);
 /** 驗證造型狀態；posePass＝姿勢驗證（髮束骨骼因髮型而異，所以只檢查數值）。不合法回傳 null */
 export function normalizeLookState(v: unknown): LookState | null {
@@ -459,6 +470,8 @@ export function normalizeLookState(v: unknown): LookState | null {
   }
   const items: LookItem[] = [];
   const seen = new Set<string>();
+  const model = modelRef(o.model);
+  const poseRig = model && model.id !== AVATAR_V2_ID ? LOOSE_RIG : RIG_V2;
   for (const raw of o.items) {
     if (!raw || typeof raw !== "object") return null;
     const it = raw as Record<string, unknown>;
@@ -468,7 +481,7 @@ export function normalizeLookState(v: unknown): LookState | null {
     const key = piece ? gid + "#" + piece : gid;
     if (seen.has(key)) continue;
     seen.add(key);
-    const pieceDef = piece && it.piece_def ? normalizePiece(it.piece_def) : null;
+    const pieceDef = piece && it.piece_def ? normalizePiece(it.piece_def, poseRig) : null;
     const slot = isSlot(it.slot) ? it.slot : "accessory";
     let fit: Fit | null = null;
     if (it.fit != null) {
@@ -476,9 +489,9 @@ export function normalizeLookState(v: unknown): LookState | null {
       if (!fit) return null;
     }
     items.push({
-      garment_id: gid, ...(isImageRef(it.image) ? { image: it.image } : {}), ...(piece ? { piece } : {}), ...(pieceDef && pieceDef.id === piece ? { piece_def: pieceDef } : {}), ...(pieceDef?.rest && Array.isArray(it.piece_peers) ? {piece_peers: normalizePieces(it.piece_peers)} : {}), slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
+      garment_id: gid, ...(isImageRef(it.image) ? { image: it.image } : {}), ...(piece ? { piece } : {}), ...(pieceDef && pieceDef.id === piece ? { piece_def: pieceDef } : {}), ...(pieceDef?.rest && Array.isArray(it.piece_peers) ? {piece_peers: normalizePieces(it.piece_peers, poseRig)} : {}), slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
       variant: typeof it.variant === "string" && /^[a-z0-9_]{1,24}$/.test(it.variant) ? it.variant : null,
-      fit, opts: it.opts ? normalizeOpts(it.opts, slot) : null, mask: isMask(it.mask) ? it.mask : null,
+      fit, opts: it.opts ? normalizeOpts(it.opts, slot, poseRig) : null, mask: isMask(it.mask) ? it.mask : null,
       ...(isParts(it.parts) ? { parts: it.parts } : {}),
     });
   }
@@ -486,6 +499,7 @@ export function normalizeLookState(v: unknown): LookState | null {
   if(o.hair_config != null && !hairConfig) return null;
   return {
     ...(normalizeHeadConfig(o.head_config) ? {head_config: normalizeHeadConfig(o.head_config)} : {}),
+    ...(model ? { model } : {}),
     v: 3, head: assetId(o.head), hair: assetId(o.hair), ...(hairConfig ? {hair_config:hairConfig} : {}),
     hair_color: normalizeColorValue(o.hair_color) ?? "brown_pink",
     accent_color: o.accent_color === "original" ? "original" : normalizeColorValue(o.accent_color),

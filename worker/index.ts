@@ -11,6 +11,7 @@ import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploa
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
 import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getPalette, putPalette, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, serveAssetFile, updateAsset, updateLook } from "./doll";
+import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
 
@@ -427,7 +428,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   // ───── 角色換裝（只限 App 登入使用者寫入） ─────
   if (path === "/api/doll/templates" && method === "GET") {
     requireScope(actor, "read");
-    return json({ templates: await listTemplates(env) });
+    return json({ templates: await listTemplates(env, url.searchParams) });
   }
   m = path.match(/^\/api\/doll\/templates\/([\w-]+)$/);
   if (m) {
@@ -437,7 +438,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     }
     if (method === "DELETE") {
       requireSession(actor);
-      return json(await deleteTemplate(env, actor, m[1]));
+      return json(await deleteTemplate(env, actor, m[1], url.searchParams));
     }
   }
   if (path === "/api/doll/palette") {
@@ -514,6 +515,38 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       requireSession(actor);
       return json(await deleteAsset(env, actor, m[1]));
     }
+  }
+  // 自訂身體模型（Phase 3.6）
+  if (path === "/api/doll/models") {
+    if (method === "GET") { requireScope(actor, "read"); return json(await listModels(env, url.searchParams)); }
+    if (method === "POST") { requireSession(actor); return json(await createModel(env, actor, await readJson(req, 400_000)), 201); }
+  }
+  if (path === "/api/doll/models/default" && method === "PUT") { requireSession(actor); return json(await setDefaultModel(env, actor, (await readJson(req) as Record<string, unknown>).id)); }
+  m = path.match(/^\/api\/doll\/models\/(dm_[a-z2-7]+)\/revisions\/(\d{1,6})$/);
+  if (m && method === "GET") { requireScope(actor, "read"); return getModelRevision(env, m[1], Number(m[2])); }
+  m = path.match(/^\/api\/doll\/models\/(dm_[a-z2-7]+)(?:\/(files|thumb|def))?$/);
+  if (m) {
+    if (m[2] === "files" && method === "POST") { requireSession(actor); return addModelFile(req, env, actor, m[1], url.searchParams); }
+    if (m[2] === "thumb" && method === "GET") { requireScope(actor, "read"); return getModelThumb(env, m[1]); }
+    if (m[2] === "thumb" && method === "PUT") { requireSession(actor); return putModelThumb(req, env, m[1]); }
+    if (m[2] === "def" && method === "PUT") { requireSession(actor); return json(await saveModelDef(env, actor, m[1], await readJson(req, 400_000))); }
+    if (!m[2] && method === "GET") { requireScope(actor, "read"); return json(await getModel(env, m[1])); }
+    if (!m[2] && method === "PATCH") { requireSession(actor); return json(await updateModelMeta(env, actor, m[1], await readJson(req))); }
+    if (!m[2] && method === "DELETE") { requireSession(actor); return json(await deleteModel(env, actor, m[1])); }
+  }
+  m = path.match(/^\/api\/doll\/files\/(dmf_[a-z2-7]+)$/);
+  if (m && method === "GET") { requireScope(actor, "read"); return serveModelFile(req, env, m[1]); }
+  // 我的姿勢庫
+  if (path === "/api/doll/poses") {
+    if (method === "GET") { requireScope(actor, "read"); return json({ poses: await listPoses(env) }); }
+    if (method === "POST") { requireSession(actor); return json(await createPose(env, actor, await readJson(req)), 201); }
+  }
+  m = path.match(/^\/api\/doll\/poses\/(dps_[a-z2-7]+)(?:\/(thumb))?$/);
+  if (m) {
+    if (m[2] === "thumb" && method === "GET") { requireScope(actor, "read"); return getPoseThumb(env, m[1]); }
+    if (m[2] === "thumb" && method === "PUT") { requireSession(actor); return putPoseThumb(req, env, m[1]); }
+    if (!m[2] && method === "PATCH") { requireSession(actor); return json(await updatePose(env, actor, m[1], await readJson(req))); }
+    if (!m[2] && method === "DELETE") { requireSession(actor); return json(await deletePose(env, actor, m[1])); }
   }
   m = path.match(/^\/api\/doll\/files\/(daf_[a-z2-7]+)$/);
   if (m) {
