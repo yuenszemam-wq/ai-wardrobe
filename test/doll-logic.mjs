@@ -16,6 +16,7 @@ function check(name, cond, info) {
 const near = (a, b, e = 0.6) => Math.abs(a - b) <= e;
 const rig = V.RIG_V2;
 const M = await buildModule("shared/avatarModel.ts", "t-avatar-model");
+const PC = await buildModule("shared/poseControls.ts", "t-model-pose-controls");
 
 
 console.log("Phase 3.6 model isolation");
@@ -34,6 +35,14 @@ console.log("Phase 3.6 model isolation");
   const extra = { parts: [{ id:"custom", bone:"own", pivot:[650,200], range:20 }] };
   const r1 = V.rigFor(extra), r2 = V.rigFor(extra, shifted);
   check("自訂髮束骨架按身體分開", r1 !== r2 && r2.bones.some(b => b.id === "hp_custom") && r2.bones.find(b=>b.id==="head").pivot[0] === shifted.bones.find(b=>b.id==="head").pivot[0]);
+  const controls = PC.poseControls(shifted, null), original = PC.poseControls(rig, null);
+  check("IK 手腕、腳踝及轉動控制點採用新身體骨架", ["wrist_r","ankle_l","rot_shoulder_l","mov_root"].every(id => near(controls.find(p=>p.id===id).at[0] - original.find(p=>p.id===id).at[0], 30)));
+  const long = JSON.parse(JSON.stringify(rig));
+  for (const b of long.bones) { b.pivot[1] += 100; b.rest_position[1] += 100; }
+  const input = { grid:{w:20,h:20,data:new Uint8Array(400).fill(255)}, fit:{cx:600,cy:640,w:300,rotation:0}, ar:1, kind:"upper", follow:"auto", bone:"chest", pinned:false, parts:"whole" };
+  const g0 = G.buildRig(input).layers[0], g1 = G.buildRig({...input, bodyRig:long}).layers[0];
+  check("衣身蒙皮權重使用新模型胸腰位置", g0.weights.some((x,i)=>Math.abs(x-g1.weights[i])>0.01));
+  check("新模型仍保持完整網格及有效權重", g1.weights.every(Number.isFinite) && g1.rest.length===g0.rest.length && G.rigCoverage(G.buildRig({...input,bodyRig:long}),input.grid)>=0.97);
 }
 console.log("骨架");
 {

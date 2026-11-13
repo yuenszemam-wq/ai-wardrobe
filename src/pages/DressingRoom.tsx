@@ -1,6 +1,7 @@
 // 角色換裝工作室（Phase 3）：角色始終可見，底部短面板切換「衣服／圖層／外貌／姿勢」。
 // 穿著衣服時可直接在畫布上調整骨架；衣物自由疊穿；頭部及髮型可在這裡上傳及校正。
 import { PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_BODY_MODEL } from "../../shared/avatarModel";
 import { Pose, applyMat, boneMap, clampPose, invert, matAngle, samePose, solve } from "../../shared/avatarRig";
 import { Camera, FULL_CAMERA, Rect, Size, VIEW_PRESETS, ZOOM, boundsOf, frame, zoomAt, zoomTo } from "../../shared/camera";
 import { DragMode, Region, controlsFor, poseControls, regionBones } from "../../shared/poseControls";
@@ -54,7 +55,9 @@ function guessHairCat(name: string, ar: number, small?: boolean): HairCat {
 export interface SetupTarget { gid: string; piece?: string | null }
 export default function DressingRoom({ id, setup }: { id?: string; setup?: SetupTarget }) {
   const setupKey = setup ? setup.gid + "|" + (setup.piece ?? "") : "";
-  const renderer = useMemo(() => new DollRenderer(), []);
+  // Keep one model revision for the complete room, including renderer and controls.
+  const bodyModel = DEFAULT_BODY_MODEL;
+  const renderer = useMemo(() => new DollRenderer(bodyModel), [bodyModel]);
   const [garments, setGarments] = useState<Garment[] | null>(null);
   /** 套裝部件的圖片（由原圖製作，只在記憶體） */
   const [pieceRefs, setPieceRefs] = useState<Map<string, string>>(new Map());
@@ -260,7 +263,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const hair = useMemo(() => (draft?.kind === "hair" ? { parts: draft.parts } : hairOf(assets, look.hair,look.hair_config)), [draft?.kind === "hair" ? draft.parts : null, assets, look.hair,look.hair_config]);
   const activeHair = !draft && tab === "look" && lookTab === "hair" ? hair?.parts.find(p=>p.id===hairSelected&&!p.hidden)??null : null;
   const head = useMemo(() => { const p = draft?.kind === "head" ? draft.parts[0] : null; return p ? { file: p.file, x: p.x, y: p.y, w: p.w, h: p.h } : look.head_config ?? headOf(assets, look.head); }, [draft?.kind === "head" ? draft.parts : null, assets, look.head, look.head_config]);
-  const rig = useMemo(() => rigFor(hair), [hair]);
+  const rig = useMemo(() => rigFor(hair, bodyModel.rig), [hair, bodyModel]);
   useEffect(() => {
     if (!recoveryReady || (!dirty && !draft)) { recoveryLatest.current = null; return; }
     const value: Recovery = { snap: { worn: worn.map(w => { const r = resolved.find(r => r.key === itemKey(w)); return r ? frozenItem(r) : w; }), pose, front, look: {...look, ...(hair ? {hair_config: hair} : {})} }, name, favorite, selected, hairSelected, draft,
@@ -492,7 +495,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     const v = r.worn.variant;
     return saveTemplate(r, (d) => (v && d.variants[v] ? { data: { ...d, variants: { ...d.variants, [v]: { ...d.variants[v], fit: r.fit, opts: r.opts, mask: r.mask, parts: r.parts, pose: clampPose(rig, pose) } } }, fit: r.template!.fit } : { data: { ...d, status: savedStatus(d.status, r), opts: r.opts, mask: r.mask, parts: r.parts, pose: clampPose(rig, pose), front }, fit: r.fit }), "已存為這件衣物的預設，之後任何造型穿上都會自動套用");
   };
-  const baseRowFit = (r: Resolved) => r.template?.fit ?? (r.worn.variant ? defaultFit(r.worn.slot, r.analysis.content, r.garment.category, r.garment.subcategory, r.garment.name) : r.base);
+  const baseRowFit = (r: Resolved) => r.template?.fit ?? (r.worn.variant ? defaultFit(r.worn.slot, r.analysis.content, r.garment.category, r.garment.subcategory, r.garment.name, bodyModel.rig) : r.base);
   async function addVariant(r: Resolved, file?: File, forPose = false) {
     const label = prompt(forPose ? "這個姿勢校正的名稱（之後擺出相近姿勢時會提示套用）" : "這個穿法的名稱", forPose ? (POSE_PRESETS.find((p) => samePose(rig, p.pose, pose))?.label ?? "姿勢") + "校正" : file ? "打開" : "收入裙內");
     if (!label?.trim()) return;
@@ -1154,9 +1157,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
                   pieces={sel.piece ? null : sel.template?.data?.pieces ?? []} wornPieces={new Set(worn.filter((w) => w.garment_id === sel.garment.id && w.piece).map((w) => w.piece!))}
                   onOpenSplit={() => setSplit(sel.key)} onWearPieces={(ids, replace) => wearPieces(sel, ids, replace)} onTogglePiece={(pid) => { const k = sel.garment.id + "#" + pid; if (worn.some((w) => itemKey(w) === k)) remove(k); else wearPieces(sel, [pid], false); }} view={gview} setView={setGview} compare={compare} setCompare={setCompare} onFrame={frameTarget}
                   part={partTool} setPart={setPartTool} hint={hint} setHint={setHint} onParts={(v) => setItem(sel.key, { parts: v })} onResetSleeve={(l) => resetSleeve(sel, l)}
-                  onSleeveAuto={() => { if (!selItem) return; const [a, b] = suggestSleeveRot(renderer.geometry({ ...selItem, opts: { ...selItem.opts, sleeve_r: 0, sleeve_l: 0 } }), sel.fit, sel.analysis.content.ar); setOpts(sel, { sleeve_r: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, a)), sleeve_l: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, b)) }); }}
+                  onSleeveAuto={() => { if (!selItem) return; const [a, b] = suggestSleeveRot(renderer.geometry({ ...selItem, opts: { ...selItem.opts, sleeve_r: 0, sleeve_l: 0 } }), sel.fit, sel.analysis.content.ar, bodyModel.rig); setOpts(sel, { sleeve_r: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, a)), sleeve_l: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, b)) }); }}
                   onPoseFix={() => void addVariant(sel, undefined, true)}
-                  onAuto={() => applyFit(sel, defaultFit(sel.worn.slot, sel.analysis.content, sel.garment.category, sel.garment.subcategory, sel.garment.name))}
+                  onAuto={() => applyFit(sel, defaultFit(sel.worn.slot, sel.analysis.content, sel.garment.category, sel.garment.subcategory, sel.garment.name, bodyModel.rig))}
                   onRestore={() => setItem(sel.key, { snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} onSaveDefault={() => void saveDefault(sel)} onRemove={() => remove(sel.key)} onDone={() => setSelected(null)}
                   onOrder={(to) => order(sel.key, to)} onVariant={(v) => setItem(sel.key, { variant: v, snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null })}
                   onAddVariant={(img) => (img ? variantFile.current?.click() : void addVariant(sel))} onDeleteVariant={(v) => void deleteVariant(sel, v)}
