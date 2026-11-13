@@ -1,9 +1,9 @@
 // 角色換裝的畫布渲染器：身體部件、頭部、髮型、衣物全部畫在同一張 Canvas 上。
-// 衣物按身體區域分成柔邊區域跟隨骨架（shared/skin.ts）；畫面與造型縮圖用同一套繪畫程式。
+// 衣物用連續網格跟隨骨架（shared/garmentMesh.ts）；畫面、造型縮圖及匯出圖片用同一套繪畫程式。
 import { Mat, Pose, Rig, applyMat, invert, multiply, solve } from "../../shared/avatarRig";
 import { AVATAR_V2_BASE, FrontPart, HairConfig, HairPart, HairStats, HeadConfig, RIG_V2, Rgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
-import { Content, DOLL_H, DOLL_W, Fit, SLOT_BONE, SLOT_SKIN, Slot, WearOpts } from "../../shared/doll";
-import { armSamples, findSleeveGap, legSamples, skinMasks } from "../../shared/skin";
+import { Content, DOLL_H, DOLL_W, Fit, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
+import { GarmentRig, Mesh, PartMap, RigInfo, boneMatrices, buildRig, locate, posedBounds, skinMesh } from "../../shared/garmentMesh";
 import { AlphaGrid, Bitmap, alphaAt, loadImage, pixelsOf } from "./content";
 
 export interface SceneItem {
@@ -15,7 +15,15 @@ export interface SceneItem {
   grid: AlphaGrid;
   opts: WearOpts;
   mask: string | null;
+  /** 部件圖：null＝自動分辨；"whole"＝不拆件；data URL＝人工標記 */
+  parts: string | null;
   hidden: boolean;
+}
+/** 部件圖 PNG 的像素 → 部件編號（R 通道＝編號 × 50） */
+export function decodeParts(px: Uint8ClampedArray, w: number, h: number): PartMap {
+  const data = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) data[i] = Math.min(4, Math.round(px[i * 4] / 50));
+  return { w, h, data };
 }
 export interface Scene {
   hair: HairConfig | null;
@@ -26,6 +34,8 @@ export interface Scene {
   pose: Pose;
   front: FrontPart[];
   items: SceneItem[];
+  /** 編輯提示層：顯示這件衣物的遮罩或部件 */
+  overlay?: { key: string; mode: "mask" | "parts" } | null;
 }
 export interface View { x: number; y: number; w: number; h: number }
 export const VIEWS: Record<string, View & { label: string }> = {
@@ -38,46 +48,42 @@ export const VIEWS: Record<string, View & { label: string }> = {
 const MASK_STEP = 5;
 const BAKE_SCALE = 0.8;
 
-/** 衣物是否跟隨手腳：auto 時按圖片內容判斷（有沒有袖子、袖子是否長到前臂） */
-export function resolveFollow(item: Pick<SceneItem, "slot" | "fit" | "content" | "grid" | "opts">): "none" | "upper" | "full" {
-  const kind = SLOT_SKIN[item.slot];
-  if (kind === "rigid" || item.opts.bone) return "none";
-  if (item.opts.follow !== "auto") return item.opts.follow;
-  const covered = (pts: [number, number][]) => pts.filter(([x, y]) => { const [u, v] = toImage(item.fit, item.content.ar, x, y); return alphaAt(item.grid, u, v) > 60; }).length / pts.length;
-  if (kind === "legs") return covered(legSamples()) > 0.2 ? "full" : "none";
-  const s = armSamples();
-  const opaque = (x: number, y: number) => { const [u, v] = toImage(item.fit, item.content.ar, x, y); return alphaAt(item.grid, u, v) > 50; };
-  // 衣物輪廓有明顯的袖子（與衣身之間有空隙）：整隻袖跟隨手臂
-  const lower = covered(s.lower);
-  // 衣物輪廓有明顯的袖子：袖子沿著手臂的才連前臂一起彎曲，否則整隻袖跟隨上臂（較闊或垂直的袖）
-  if (findSleeveGap(opaque, "r") || findSleeveGap(opaque, "l")) return lower >= 0.6 ? "full" : "upper";
-  if (covered(s.upper) < 0.45) return "none";
-  if (item.slot === "top" || item.slot === "outer") return lower >= 0.6 ? "full" : "upper";
-  // 連身裙／整套：前臂位置可能是裙身而不是袖子。前臂被蓋住而外側沒有布料，才當作長袖
-  return lower >= 0.75 && covered(s.outside) < 0.4 ? "full" : "upper";
-}
-/** 靜止畫布座標 → 圖片內的位置（0–1） */
-export function toImage(fit: Fit, ar: number, x: number, y: number): [number, number] {
-  const t = (-fit.rotation * Math.PI) / 180;
-  const dx = x - fit.cx, dy = y - fit.cy;
-  const h = fit.w * (ar > 0 ? ar : 4 / 3);
-  return [(dx * Math.cos(t) - dy * Math.sin(t)) / fit.w + 0.5, (dx * Math.sin(t) + dy * Math.cos(t)) / h + 0.5];
-}
 /** 衣物整件附接的骨骼 */
 export const mainBone = (item: Pick<SceneItem, "slot" | "opts">) => item.opts.bone ?? SLOT_BONE[item.slot];
+export { toImage };
 
-interface Baked { key: string; segs: { bone: string; canvas: Bitmap; x: number; y: number; w: number; h: number }[]; behind: { canvas: Bitmap } | null }
-const keyOf = (it: SceneItem, follow: string) => [it.image, it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, follow, it.mask ? it.mask.length + ":" + it.mask.slice(-24) : "", it.opts.bone ?? ""].join("|");
+/** 字串雜湊（FNV-1a，兩組不同的種子）：遮罩／部件圖的快取以完整內容識別，不會把不同的遮罩誤認為同一個 */
+export function hashOf(s: string): string {
+  let a = 0x811c9dc5, b = 0x01000193 ^ s.length;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); a = Math.imul(a ^ c, 0x01000193); b = Math.imul(b ^ c, 0x85ebca6b) + i; }
+  return (a >>> 0).toString(36) + (b >>> 0).toString(36) + s.length.toString(36);
+}
+const dims = (b: Bitmap): [number, number] => [(b as HTMLImageElement).naturalWidth || b.width, (b as HTMLImageElement).naturalHeight || b.height];
+export interface LiveMask { w: number; h: number; data: Uint8ClampedArray }
+interface Worked { front: Bitmap; behind: Bitmap | null; /** 低解像度的「已隱藏／移到身後」格（點選用） */ gone: { w: number; h: number; data: Uint8Array } | null }
+interface Geometry { key: string; rig: GarmentRig }
+/** 一個部件的貼圖：canvas 是原圖裁出該部件範圍後的一塊，x／y＝它在原圖的位置（原圖像素） */
+interface LayerTex { img: Bitmap; x: number; y: number; w: number; h: number; tw: number; th: number }
+const gridIds = new WeakMap<object, number>();
+let gridSeq = 0;
+const gridId = (g: object) => { let id = gridIds.get(g); if (!id) { id = ++gridSeq; gridIds.set(g, id); } return id; };
+const OVERLAY_COLOR: Record<number, [number, number, number]> = { 1: [255, 79, 154], 2: [45, 190, 255], 3: [255, 79, 154], 4: [45, 190, 255] };
 
 export class DollRenderer {
   private images = new Map<string, Bitmap | "loading" | "error">();
-  private work = new Map<string, { front: Bitmap; behind: Bitmap | null }>();
-  private baked = new Map<string, Baked>();
+  private work = new Map<string, Worked>();
+  private geo = new Map<string, Geometry>();
+  private partMaps = new Map<string, PartMap>();
+  private liveMask = new Map<string, { buf: LiveMask; rev: number }>();
+  private liveParts = new Map<string, { map: PartMap; rev: number }>();
+  private overlayTex: { key: string; canvas: HTMLCanvasElement } | null = null;
+  private layerTex = new Map<string, { key: string; tex: LayerTex[] }>();
+  private matteCanvas = document.createElement("canvas");
+  private rev = 0;
   private hairPx = new Map<string, HTMLCanvasElement>();
   private hairStats = new WeakMap<HairConfig, HairStats | "pending">();
   private neckMask: HTMLCanvasElement | null = null;
   private temp = document.createElement("canvas");
-  private maskCanvas = document.createElement("canvas");
   onReady: () => void = () => undefined;
   /** 讀取失敗的圖片（顯示提示用） */
   errors = new Set<string>();
@@ -88,26 +94,42 @@ export class DollRenderer {
     if (!hit) {
       this.images.set(ref, "loading");
       loadImage(ref).then((i) => { this.images.set(ref, i); this.onReady(); }).catch(() => { this.images.set(ref, "error"); this.errors.add(ref); this.onReady(); });
+      if (ref.startsWith("data:") && this.images.size > 400) for (const k of this.images.keys()) { if (k.startsWith("data:") && k !== ref) { this.images.delete(k); if (this.images.size <= 300) break; } }
     }
     return null;
   }
   /** 讓讀取失敗的圖片可以重試 */
   retry() { for (const [k, v] of this.images) if (v === "error") this.images.delete(k); this.errors.clear(); }
 
+  // ───── 編輯中的遮罩／部件（未寫入造型前的即時預覽） ─────
+  /** 正在塗抹的遮罩：直接使用像素緩衝，不經 PNG 編碼；null＝結束編輯 */
+  setLiveMask(key: string, buf: LiveMask | null) { if (buf) this.liveMask.set(key, { buf, rev: ++this.rev }); else this.liveMask.delete(key); this.onReady(); }
+  setLiveParts(key: string, map: PartMap | null) { if (map) this.liveParts.set(key, { map, rev: ++this.rev }); else this.liveParts.delete(key); this.onReady(); }
+
   /** 套用使用者塗抹的遮罩（R＝隱藏、G＝移到身後）；原圖不變 */
-  private worked(it: SceneItem): { front: Bitmap; behind: Bitmap | null } | null {
+  private worked(it: SceneItem): Worked | null {
     const src = this.img(it.image);
     if (!src) return null;
-    if (!it.mask) return { front: src, behind: null };
-    const key = it.image + "|" + it.mask.length + it.mask.slice(-32);
+    const live = this.liveMask.get(it.key);
+    if (!live && !it.mask) return { front: src, behind: null, gone: null };
+    const key = live ? "live|" + it.key : it.image + "|" + hashOf(it.mask!);
     const hit = this.work.get(key);
-    if (hit) return hit;
-    const mask = this.img(it.mask);
-    if (!mask) return { front: src, behind: null };
-    const sw = (src as HTMLImageElement).naturalWidth || src.width, sh = (src as HTMLImageElement).naturalHeight || src.height;
+    if (hit && (!live || (hit as Worked & { rev?: number }).rev === live.rev)) return hit;
+    let maskSrc: CanvasImageSource;
+    if (live) {
+      const c = document.createElement("canvas");
+      c.width = live.buf.w; c.height = live.buf.h;
+      c.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(live.buf.data), live.buf.w, live.buf.h), 0, 0);
+      maskSrc = c;
+    } else {
+      const mask = this.img(it.mask!);
+      if (!mask) return { front: src, behind: null, gone: null };
+      maskSrc = mask;
+    }
+    const [sw, sh] = dims(src);
     const s = Math.min(1, 1200 / Math.max(sw, sh));
     const w = Math.max(1, Math.round(sw * s)), h = Math.max(1, Math.round(sh * s));
-    const m = pixelsOf(mask, w, h).data;
+    const m = pixelsOf(maskSrc, w, h).data;
     const front = pixelsOf(src, w, h), back = new ImageData(w, h);
     let any = false;
     for (let i = 0; i < m.length; i += 4) {
@@ -121,69 +143,212 @@ export class DollRenderer {
       }
       front.data[i + 3] = Math.round(a * (1 - Math.max(hide, behind)));
     }
+    const gw = 96, gh = Math.max(1, Math.round((96 * h) / w)), gone = new Uint8Array(gw * gh);
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) { const i = (Math.min(h - 1, Math.floor(((y + 0.5) * h) / gh)) * w + Math.min(w - 1, Math.floor(((x + 0.5) * w) / gw))) * 4; gone[y * gw + x] = Math.max(m[i], m[i + 1]); }
     const put = (d: ImageData) => { const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d")!.putImageData(d, 0, 0); return c; };
-    const out = { front: put(front), behind: any ? put(back) : null };
+    const out: Worked & { rev?: number } = { front: put(front), behind: any ? put(back) : null, gone: { w: gw, h: gh, data: gone }, rev: live?.rev };
+    const old = this.work.get(key);
+    if (old) for (const c of [old.front, old.behind]) if (c instanceof HTMLCanvasElement) c.width = c.height = 0;
     this.work.set(key, out);
-    if (this.work.size > 24) this.work.delete(this.work.keys().next().value!);
+    if (this.work.size > 20) { const k = this.work.keys().next().value!; const o = this.work.get(k)!; for (const c of [o.front, o.behind]) if (c instanceof HTMLCanvasElement) c.width = c.height = 0; this.work.delete(k); }
     return out;
   }
 
-  /** 把衣物按骨骼區域預先切好（位置或圖片改變時才重做） */
-  private bake(it: SceneItem): Baked | null {
-    const follow = resolveFollow(it);
-    const key = keyOf(it, follow);
-    const hit = this.baked.get(it.key);
-    if (hit?.key === key) return hit;
-    const w = this.worked(it);
-    if (!w) return null;
-    const out: Baked = { key, segs: [], behind: w.behind ? { canvas: w.behind } : null };
-    const kind = SLOT_SKIN[it.slot];
-    if (follow !== "none" && kind !== "rigid") {
-      const h = it.fit.w * it.content.ar;
-      const t = (it.fit.rotation * Math.PI) / 180, c = Math.abs(Math.cos(t)), s = Math.abs(Math.sin(t));
-      const bw = (it.fit.w * c + h * s) / 2, bh = (it.fit.w * s + h * c) / 2;
-      // 只計算衣物覆蓋的範圍；上身衣物先由輪廓找出袖子與衣身之間的空隙，按衣物實際形狀分區
-      const gx0 = Math.max(-400, it.fit.cx - bw), gy0 = Math.max(-400, it.fit.cy - bh), gx1 = Math.min(DOLL_W + 400, it.fit.cx + bw), gy1 = Math.min(DOLL_H + 400, it.fit.cy + bh);
-      const grid = { x0: gx0, y0: gy0, w: Math.max(1, Math.ceil((gx1 - gx0) / MASK_STEP)), h: Math.max(1, Math.ceil((gy1 - gy0) / MASK_STEP)), step: MASK_STEP };
-      const opaque = (x: number, y: number) => { const [u, v] = toImage(it.fit, it.content.ar, x, y); return alphaAt(it.grid, u, v) > 50; };
-      const open = it.slot === "top" || it.slot === "outer";
-      const gaps = kind === "upper" ? { r: findSleeveGap(opaque, "r", open), l: findSleeveGap(opaque, "l", open) } : undefined;
-      const mc = this.maskCanvas;
-      mc.width = grid.w; mc.height = grid.h;
-      const mctx = mc.getContext("2d")!;
-      const md = mctx.createImageData(grid.w, grid.h);
-      for (const seg of skinMasks(kind, follow === "full", grid, gaps)) {
-        let i0 = grid.w, j0 = grid.h, i1 = -1, j1 = -1;
-        for (let i = 0; i < seg.alpha.length; i++) {
-          md.data[i * 4 + 3] = seg.alpha[i];
-          if (seg.alpha[i] > 2) { const ci = i % grid.w, cj = (i - ci) / grid.w; if (ci < i0) i0 = ci; if (ci > i1) i1 = ci; if (cj < j0) j0 = cj; if (cj > j1) j1 = cj; }
-        }
-        if (i1 < 0) continue;
-        mctx.putImageData(md, 0, 0);
-        // 只保留這個區域實際佔用的範圍（節省記憶體）
-        const x0 = gx0 + Math.max(0, i0 - 1) * MASK_STEP, y0 = gy0 + Math.max(0, j0 - 1) * MASK_STEP, x1 = Math.min(gx1, gx0 + (i1 + 2) * MASK_STEP), y1 = Math.min(gy1, gy0 + (j1 + 2) * MASK_STEP);
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.ceil((x1 - x0) * BAKE_SCALE)); canvas.height = Math.max(1, Math.ceil((y1 - y0) * BAKE_SCALE));
-        const ctx = canvas.getContext("2d")!;
-        ctx.setTransform(BAKE_SCALE, 0, 0, BAKE_SCALE, -x0 * BAKE_SCALE, -y0 * BAKE_SCALE);
-        ctx.translate(it.fit.cx, it.fit.cy);
-        ctx.rotate(t);
-        ctx.drawImage(w.front, -it.fit.w / 2, -h / 2, it.fit.w, h);
-        ctx.setTransform(BAKE_SCALE, 0, 0, BAKE_SCALE, -x0 * BAKE_SCALE, -y0 * BAKE_SCALE);
-        ctx.globalCompositeOperation = "destination-in";
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(mc, gx0, gy0, grid.w * MASK_STEP, grid.h * MASK_STEP);
-        out.segs.push({ bone: seg.bone, canvas, x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
-      }
+  /** 部件圖（人工標記）：解碼成部件編號格。未讀到時回傳 undefined（暫用自動分辨） */
+  private partsOf(it: SceneItem): { map: PartMap | "whole" | null; key: string } | undefined {
+    const live = this.liveParts.get(it.key);
+    if (live) return { map: live.map, key: "live" + live.rev };
+    if (!it.parts) return { map: null, key: "" };
+    if (it.parts === "whole") return { map: "whole", key: "whole" };
+    const key = hashOf(it.parts);
+    let map = this.partMaps.get(key);
+    if (!map) {
+      const img = this.img(it.parts);
+      if (!img) return undefined;
+      const [w, h] = dims(img);
+      map = decodeParts(pixelsOf(img, w, h).data, w, h);
+      this.partMaps.set(key, map);
+      if (this.partMaps.size > 60) this.partMaps.delete(this.partMaps.keys().next().value!);
     }
-    const old = this.baked.get(it.key);
-    if (old) for (const s of old.segs) if (s.canvas instanceof HTMLCanvasElement) s.canvas.width = s.canvas.height = 0; // 即時釋放記憶體
-    this.baked.set(it.key, out);
-    return out;
+    return { map, key };
   }
+
+  /** 衣物的部件、網格及骨骼權重（位置、部件或穿法改變時才重做） */
+  geometry(it: SceneItem): GarmentRig {
+    const parts = this.partsOf(it) ?? { map: null, key: "pending" };
+    const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key].join("|");
+    const hit = this.geo.get(it.key);
+    if (hit?.key === key) return hit.rig;
+    const rig = buildRig({ grid: it.grid, fit: it.fit, ar: it.content.ar, kind: SLOT_SKIN[it.slot], follow: it.opts.follow, bone: mainBone(it), pinned: !!it.opts.bone, parts: parts.map, sleeveRot: [it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0], loose: it.slot === "top" || it.slot === "outer" });
+    this.geo.set(it.key, { key, rig });
+    return rig;
+  }
+  /** 這件衣物目前怎樣跟隨骨架（顯示說明用） */
+  info(it: SceneItem): RigInfo { return this.geometry(it).info; }
   /** 清走已脫下衣物的暫存 */
   prune(keys: Set<string>) {
-    for (const [k, b] of this.baked) if (!keys.has(k)) { for (const s of b.segs) if (s.canvas instanceof HTMLCanvasElement) s.canvas.width = s.canvas.height = 0; this.baked.delete(k); }
+    for (const k of this.geo.keys()) if (!keys.has(k)) this.geo.delete(k);
+    for (const k of this.liveMask.keys()) if (!keys.has(k)) this.liveMask.delete(k);
+    for (const k of this.liveParts.keys()) if (!keys.has(k)) this.liveParts.delete(k);
+    for (const [k, v] of this.layerTex) if (!keys.has(k.split("|")[0])) { this.freeTex(v.tex); this.layerTex.delete(k); }
+  }
+  private freeTex(tex: LayerTex[]) { for (const t of tex) if (t.img instanceof HTMLCanvasElement && (t.x || t.y || t.w !== t.tw)) t.img.width = t.img.height = 0; }
+  /** 各部件的貼圖：原圖 × 該部件的範圍（柔邊）。衣身一層伸入袖根底下，所以袖子移開時不會露出空洞 */
+  private textures(it: SceneItem, slot: string, src: Bitmap, srcKey: string, rig: GarmentRig): LayerTex[] {
+    const [tw, th] = dims(src);
+    if (rig.layers.every((l) => !l.matte)) return rig.layers.map(() => ({ img: src, x: 0, y: 0, w: tw, h: th, tw, th }));
+    const id = it.key + "|" + slot, key = srcKey + "|" + rig.matteKey + "|" + rig.layers.length;
+    const hit = this.layerTex.get(id);
+    if (hit?.key === key) return hit.tex;
+    if (hit) this.freeTex(hit.tex);
+    const g = rig.labels, mc = this.matteCanvas;
+    mc.width = g.w; mc.height = g.h;
+    const mctx = mc.getContext("2d")!, md = mctx.createImageData(g.w, g.h);
+    const tex = rig.layers.map((l): LayerTex => {
+      if (!l.matte) return { img: src, x: 0, y: 0, w: tw, h: th, tw, th };
+      let i0 = g.w, j0 = g.h, i1 = -1, j1 = -1;
+      for (let k = 0; k < l.matte.length; k++) { md.data[k * 4 + 3] = l.matte[k]; if (l.matte[k] > 0) { const i = k % g.w, j = (k - i) / g.w; if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; } }
+      mctx.putImageData(md, 0, 0);
+      const x = Math.max(0, Math.floor(((i0 - 1) / g.w) * tw)), y = Math.max(0, Math.floor(((j0 - 1) / g.h) * th));
+      const w = Math.max(1, Math.min(tw, Math.ceil(((i1 + 2) / g.w) * tw)) - x), h = Math.max(1, Math.min(th, Math.ceil(((j1 + 2) / g.h) * th)) - y);
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(src, x, y, w, h, 0, 0, w, h);
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(mc, -x, -y, tw, th);
+      return { img: c, x, y, w, h, tw, th };
+    });
+    this.layerTex.set(id, { key, tex });
+    return tex;
+  }
+  private posed(rig: GarmentRig, mats: Record<string, Mat>) { return rig.layers.map((l) => skinMesh(l, mats)); }
+  /** 畫面上的一點（邏輯座標）落在這件衣物圖片的哪個位置；已計及目前姿勢下的變形 */
+  locate(it: SceneItem, mats: Record<string, Mat>, x: number, y: number): [number, number] | null {
+    const rig = this.geometry(it);
+    return locate(rig, this.posed(rig, mats), x, y);
+  }
+  bounds(it: SceneItem, mats: Record<string, Mat>): [number, number, number, number] {
+    const rig = this.geometry(it);
+    return posedBounds(rig, this.posed(rig, mats));
+  }
+  /** 點選：由最外層開始，找出該點實際有布料（不是透明、也沒有被遮罩隱藏）的衣物 */
+  pick(scene: Scene, mats: Record<string, Mat>, x: number, y: number): string | null {
+    for (let i = scene.items.length - 1; i >= 0; i--) {
+      const it = scene.items[i];
+      if (it.hidden) continue;
+      // 手指有一定闊度：附近幾點任何一點碰到布料都算
+      for (const [dx, dy] of [[0, 0], [-9, 0], [9, 0], [0, -9], [0, 9]]) {
+        const uv = this.locate(it, mats, x + dx, y + dy);
+        if (!uv || alphaAt(it.grid, uv[0], uv[1]) < 40) continue;
+        const gone = this.worked(it)?.gone;
+        if (gone && gone.data[Math.min(gone.h - 1, Math.floor(uv[1] * gone.h)) * gone.w + Math.min(gone.w - 1, Math.floor(uv[0] * gone.w))] > 150) continue;
+        return it.key;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 用連續網格把一張圖畫到目前姿勢：整格跟隨同一節骨骼的合併成一次繪畫，
+   * 骨骼之間過渡的格逐個三角形做仿射貼圖。相鄰三角形共用頂點，所以布料不會斷開。
+   */
+  private drawMesh(c: CanvasRenderingContext2D, tx: LayerTex, it: SceneItem, mesh: Mesh, posed: Float32Array, bm: Mat[], pre: Mat) {
+    const { tw, th } = tx, tex = tx.img;
+    const f = it.fit, H = fitHeight(f, it.content.ar), t = (f.rotation * Math.PI) / 180, cos = Math.cos(t), sin = Math.sin(t);
+    // 圖片像素 → 靜止畫布座標
+    const F: Mat = [(f.w / tw) * cos, (f.w / tw) * sin, (-H / th) * sin, (H / th) * cos, f.cx - 0.5 * f.w * cos + 0.5 * H * sin, f.cy - 0.5 * f.w * sin - 0.5 * H * cos];
+    if (mesh.bones.length === 1) {
+      const m = multiply(pre, multiply(bm[0], F));
+      c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+      c.drawImage(tex, tx.x, tx.y, tx.w, tx.h);
+      return;
+    }
+    const order = mesh.order, cols = mesh.cols;
+    for (let n = 0; n < order.length; ) {
+      const b = mesh.cell[order[n]];
+      if (b >= 0) {
+        // 一批跟隨同一節骨骼的格：一個裁剪範圍、一次繪畫
+        const m = multiply(pre, multiply(bm[b], F));
+        const e = 0.7 / Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]) || 1);
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        c.save();
+        c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+        c.beginPath();
+        for (; n < order.length && mesh.cell[order[n]] === b; n++) {
+          const k = order[n], col = k % cols, row = (k - col) / cols, a = row * (cols + 1) + col, d = a + cols + 2;
+          const ax = mesh.uv[a * 2] * tw, ay = mesh.uv[a * 2 + 1] * th, dx = mesh.uv[d * 2] * tw, dy = mesh.uv[d * 2 + 1] * th;
+          c.rect(ax - e, ay - e, dx - ax + 2 * e, dy - ay + 2 * e);
+          if (ax < x0) x0 = ax; if (ay < y0) y0 = ay; if (dx > x1) x1 = dx; if (dy > y1) y1 = dy;
+        }
+        c.clip();
+        x0 = Math.max(tx.x, Math.floor(x0 - 2)); y0 = Math.max(tx.y, Math.floor(y0 - 2)); x1 = Math.min(tx.x + tx.w, Math.ceil(x1 + 2)); y1 = Math.min(tx.y + tx.h, Math.ceil(y1 + 2));
+        if (x1 > x0 && y1 > y0) c.drawImage(tex, x0 - tx.x, y0 - tx.y, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+        c.restore();
+        continue;
+      }
+      const k = order[n++], col = k % cols, row = (k - col) / cols, a = row * (cols + 1) + col;
+      this.tri(c, tx, mesh, posed, pre, a, a + 1, a + cols + 1);
+      this.tri(c, tx, mesh, posed, pre, a + 1, a + cols + 2, a + cols + 1);
+    }
+  }
+  private tri(c: CanvasRenderingContext2D, tx: LayerTex, mesh: Mesh, posed: Float32Array, pre: Mat, i0: number, i1: number, i2: number) {
+    const { tw, th } = tx;
+    const sx0 = mesh.uv[i0 * 2] * tw, sy0 = mesh.uv[i0 * 2 + 1] * th, sx1 = mesh.uv[i1 * 2] * tw, sy1 = mesh.uv[i1 * 2 + 1] * th, sx2 = mesh.uv[i2 * 2] * tw, sy2 = mesh.uv[i2 * 2 + 1] * th;
+    const [dx0, dy0] = applyMat(pre, posed[i0 * 2], posed[i0 * 2 + 1]), [dx1, dy1] = applyMat(pre, posed[i1 * 2], posed[i1 * 2 + 1]), [dx2, dy2] = applyMat(pre, posed[i2 * 2], posed[i2 * 2 + 1]);
+    const det = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0);
+    if (Math.abs(det) < 1e-6) return;
+    const a = ((dx1 - dx0) * (sy2 - sy0) - (dx2 - dx0) * (sy1 - sy0)) / det, cc = ((dx2 - dx0) * (sx1 - sx0) - (dx1 - dx0) * (sx2 - sx0)) / det;
+    const b = ((dy1 - dy0) * (sy2 - sy0) - (dy2 - dy0) * (sy1 - sy0)) / det, d = ((dy2 - dy0) * (sx1 - sx0) - (dy1 - dy0) * (sx2 - sx0)) / det;
+    const e = dx0 - a * sx0 - cc * sy0, f = dy0 - b * sx0 - d * sy0;
+    // 裁剪範圍向外擴少許，蓋住三角形之間的抗鋸齒接縫
+    const gx = (dx0 + dx1 + dx2) / 3, gy = (dy0 + dy1 + dy2) / 3;
+    const out = (x: number, y: number): [number, number] => { const l = Math.hypot(x - gx, y - gy) || 1; return [x + ((x - gx) / l) * 1.1, y + ((y - gy) / l) * 1.1]; };
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.beginPath();
+    c.moveTo(...out(dx0, dy0)); c.lineTo(...out(dx1, dy1)); c.lineTo(...out(dx2, dy2));
+    c.closePath();
+    c.clip();
+    c.setTransform(a, b, cc, d, e, f);
+    const x0 = Math.max(tx.x, Math.floor(Math.min(sx0, sx1, sx2) - 3)), y0 = Math.max(tx.y, Math.floor(Math.min(sy0, sy1, sy2) - 3)), x1 = Math.min(tx.x + tx.w, Math.ceil(Math.max(sx0, sx1, sx2) + 3)), y1 = Math.min(tx.y + tx.h, Math.ceil(Math.max(sy0, sy1, sy2) + 3));
+    if (x1 > x0 && y1 > y0) c.drawImage(tx.img, x0 - tx.x, y0 - tx.y, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+    c.restore();
+  }
+
+  /** 編輯時的提示層：遮罩（紅＝已隱藏、藍＝移到身後）或部件（粉紅＝右袖、藍＝左袖） */
+  private overlay(it: SceneItem, mode: "mask" | "parts", rig: GarmentRig): { canvas: HTMLCanvasElement; key: string } | null {
+    const src = this.img(it.image);
+    if (!src) return null;
+    const live = this.liveMask.get(it.key), lp = this.liveParts.get(it.key);
+    const key = [it.key, it.image, mode, mode === "mask" ? (live ? "live" + live.rev : it.mask ? hashOf(it.mask) : "") : (lp ? "live" + lp.rev : this.geo.get(it.key)?.key)].join("|");
+    if (this.overlayTex?.key === key) return this.overlayTex;
+    const [sw, sh] = dims(src);
+    const w = Math.min(420, sw), h = Math.max(1, Math.round((w * sh) / sw));
+    const px = pixelsOf(src, w, h);
+    if (mode === "mask") {
+      let m: Uint8ClampedArray | null = null;
+      if (live) { const c = document.createElement("canvas"); c.width = live.buf.w; c.height = live.buf.h; c.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(live.buf.data), live.buf.w, live.buf.h), 0, 0); m = pixelsOf(c, w, h).data; }
+      else if (it.mask) { const mi = this.img(it.mask); if (!mi) return null; m = pixelsOf(mi, w, h).data; }
+      for (let i = 0; i < px.data.length; i += 4) {
+        const hide = m ? m[i] : 0, behind = m ? m[i + 1] : 0, a = px.data[i + 3];
+        if (hide > 20) { px.data[i] = 255; px.data[i + 1] = 40; px.data[i + 2] = 80; px.data[i + 3] = Math.round((a * hide) / 255); }
+        else if (behind > 20) { px.data[i] = 40; px.data[i + 1] = 120; px.data[i + 2] = 255; px.data[i + 3] = Math.round((a * behind) / 255); }
+        else px.data[i + 3] = 0;
+      }
+    } else {
+      const g = rig.labels;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4, col = OVERLAY_COLOR[g.data[Math.min(g.h - 1, Math.floor(((y + 0.5) / h) * g.h)) * g.w + Math.min(g.w - 1, Math.floor(((x + 0.5) / w) * g.w))]];
+        if (col) { px.data[i] = col[0]; px.data[i + 1] = col[1]; px.data[i + 2] = col[2]; } else px.data[i + 3] = 0;
+      }
+    }
+    const canvas = this.overlayTex?.canvas ?? document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d")!.putImageData(px, 0, 0);
+    this.overlayTex = { key, canvas };
+    return this.overlayTex;
   }
 
   private hairImage(hair: HairConfig, part: HairPart, scene: Scene): Bitmap | null {
@@ -274,31 +439,25 @@ export class DollRenderer {
         ctx.drawImage(img, p.x, p.y, p.w, p.h);
       }
     };
-    const drawItem = (c: CanvasRenderingContext2D, it: SceneItem, b: Baked, pre: Mat) => {
-      const TT = (bone: string) => multiply(pre, mats[bone] ?? mats.root);
-      if (b.segs.length) {
-        for (const s of b.segs) {
-          const m = TT(s.bone);
-          c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-          c.drawImage(s.canvas, s.x, s.y, s.w, s.h);
-        }
-        return;
-      }
-      const w = this.worked(it);
-      if (!w) return;
-      this.rigid(c, w.front, it, TT(mainBone(it)));
-    };
+    interface Ready { w: Worked; wkey: string; rig: GarmentRig; posed: Float32Array[]; bm: Mat[][] }
+    const layers = (c: CanvasRenderingContext2D, it: SceneItem, r: Ready, tex: LayerTex[], pre: Mat) => r.rig.layers.forEach((l, i) => this.drawMesh(c, tex[i], it, l, r.posed[i], r.bm[i], pre));
+    const drawItem = (c: CanvasRenderingContext2D, it: SceneItem, r: Ready, pre: Mat) => layers(c, it, r, this.textures(it, "front", r.w.front, r.wkey, r.rig), pre);
 
     ctx.save();
     ctx.imageSmoothingQuality = "high";
     hair("back");
     const visible = scene.items.filter((it) => !it.hidden);
-    const bakes = new Map<string, Baked>();
+    const ready = new Map<string, Ready>();
     for (const it of visible) {
-      const b = this.bake(it);
-      if (!b) { complete = false; continue; }
-      bakes.set(it.key, b);
-      if (b.behind) this.rigid(ctx, b.behind.canvas, it, T(mainBone(it)));
+      const w = this.worked(it);
+      if (!w) { complete = false; continue; }
+      if (it.parts && it.parts !== "whole" && !this.partsOf(it)) complete = false;
+      const live = this.liveMask.get(it.key);
+      const rig = this.geometry(it), bm = rig.layers.map((l) => boneMatrices(l, mats));
+      const r: Ready = { w, wkey: it.image + "|" + (live ? "live" + live.rev : it.mask && w.gone ? hashOf(it.mask) : ""), rig, posed: rig.layers.map((l, i) => skinMesh(l, mats, bm[i])), bm };
+      ready.set(it.key, r);
+      // 「移到身後」的部分用同一組網格變形，與前面的部分保持同步
+      if (w.behind) layers(ctx, it, r, this.textures(it, "behind", w.behind, r.wkey, rig), base);
     }
     const front = new Set<string>(scene.front);
     for (const name of RIG_V2.body_parts) {
@@ -309,10 +468,10 @@ export class DollRenderer {
     const body = (over: boolean) => {
       for (const it of visible) {
         if (it.opts.over_head !== over) continue;
-        const b = bakes.get(it.key);
-        if (!b) continue;
-        drawItem(ctx, it, b, base);
-        if (it.opts.neck && !over) this.neckOver(ctx, it, b, base, mats, drawItem);
+        const r = ready.get(it.key);
+        if (!r) continue;
+        drawItem(ctx, it, r, base);
+        if (it.opts.neck && !over) this.neckOver(ctx, (c, pre) => drawItem(c, it, r, pre), base, mats);
       }
     };
     body(false);
@@ -324,20 +483,17 @@ export class DollRenderer {
     part(scene.head.file, scene.head.x, scene.head.y, scene.head.w, scene.head.h, "head");
     hair("front");
     body(true);
+    const ov = scene.overlay ? visible.find((it) => it.key === scene.overlay!.key) : null;
+    if (ov && ready.has(ov.key)) {
+      const r = ready.get(ov.key)!, o = this.overlay(ov, scene.overlay!.mode, r.rig);
+      if (o) { ctx.globalAlpha = 0.55; layers(ctx, ov, r, this.textures(ov, "overlay", o.canvas, o.key, r.rig), base); ctx.globalAlpha = 1; }
+    }
     ctx.restore();
     return complete;
   }
 
-  private rigid(ctx: CanvasRenderingContext2D, img: Bitmap, it: SceneItem, m: Mat) {
-    ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-    ctx.translate(it.fit.cx, it.fit.cy);
-    ctx.rotate((it.fit.rotation * Math.PI) / 180);
-    const h = it.fit.w * it.content.ar;
-    ctx.drawImage(img, -it.fit.w / 2, -h / 2, it.fit.w, h);
-  }
-
   /** 把頸部重畫在這件衣物之上，但只限衣物蓋住頸部的位置（後領）。之後穿上的頸飾仍會在頸部前面。 */
-  private neckOver(ctx: CanvasRenderingContext2D, it: SceneItem, b: Baked, base: Mat, mats: Record<string, Mat>, drawItem: (c: CanvasRenderingContext2D, it: SceneItem, b: Baked, pre: Mat) => void) {
+  private neckOver(ctx: CanvasRenderingContext2D, draw: (c: CanvasRenderingContext2D, pre: Mat) => void, base: Mat, mats: Record<string, Mat>) {
     const n = this.neck();
     if (!n) return;
     const p = RIG_V2.parts.neck;
@@ -353,7 +509,7 @@ export class DollRenderer {
     c.globalCompositeOperation = "source-over";
     c.clearRect(0, 0, t.width, t.height);
     const pre: Mat = [base[0], base[1], base[2], base[3], base[4] - x0, base[5] - y0];
-    drawItem(c, it, b, pre);
+    draw(c, pre);
     const nm = multiply(pre, mats.neck);
     c.setTransform(nm[0], nm[1], nm[2], nm[3], nm[4], nm[5]);
     c.globalCompositeOperation = "destination-in";

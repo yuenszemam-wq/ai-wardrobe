@@ -2,12 +2,12 @@
 import { ReactNode, useMemo, useState } from "react";
 import { Pose, Rig, boneMap, clampPose, samePose } from "../../shared/avatarRig";
 import { BONE_GROUPS, BONE_LABEL, BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, FrontPart, HAIR_COLORS, NO_HAIR_ID, POSE_PRESETS, resolveHairColors, rgbToHex } from "../../shared/avatarV2";
-import { ATTACHABLE_BONES, FOLLOWS, Follow, SLOT_LABEL, SLOT_SKIN, WearOpts } from "../../shared/doll";
+import { ATTACHABLE_BONES, FOLLOWS, Follow, SLEEVE_ROT_LIMIT, SLOT_LABEL, SLOT_SKIN, WearOpts } from "../../shared/doll";
 import { Garment, displayName, imageUrl } from "../api";
 import { IconClose, IconEye, IconEyeOff, IconGrip, IconPencil, IconPlus, IconSearch, IconTrash } from "../components/icons";
 import { SortableList } from "../components/Sortable";
 import { TransparentImage } from "../components/TransparentImage";
-import { resolveFollow } from "./engine";
+import { RigInfo } from "../../shared/garmentMesh";
 import { Appearance, BUILTIN_THUMB, Resolved } from "./model";
 import { PoseHandle } from "./Stage";
 
@@ -104,19 +104,31 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
 }
 
 // ───── 已選衣物的校正 ─────
-export type FitTool = "place" | "wear" | "follow" | "mask";
+export type FitTool = "place" | "wear" | "parts" | "follow" | "mask";
 export interface MaskTool { mode: "hide" | "behind" | "restore"; size: number }
-const FOLLOW_LABEL: Record<Follow, string> = { auto: "自動", none: "整件", upper: "袖子跟上臂", full: "袖子跟整隻手" };
-const FOLLOW_LABEL_LEG: Record<Follow, string> = { auto: "自動", none: "整件", upper: "跟隨腿部", full: "跟隨腿部" };
-export function FitPanel({ r, tool, setTool, busy, onFit, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask }: {
-  r: Resolved; tool: FitTool; setTool: (t: FitTool) => void; busy: boolean;
-  onFit: (f: { dx?: number; dy?: number; scale?: number; rot?: number }) => void; onOpts: (o: Partial<WearOpts>) => void; onAuto: () => void; onRestore: () => void; onSaveDefault: () => void; onRemove: () => void; onDone: () => void;
+/** 部件筆刷：0＝衣身、1＝右袖、2＝左袖 */
+export interface PartTool { label: number; size: number }
+const FOLLOW_LABEL: Record<Follow, string> = { auto: "自動", none: "整件不變形", upper: "袖子只跟上臂", full: "袖子跟手肘彎曲" };
+const FOLLOW_LABEL_LEG: Record<Follow, string> = { auto: "自動", none: "整件不變形", upper: "跟隨腿部", full: "跟隨腿部" };
+/** 這件衣物目前怎樣跟隨骨架（一句說明） */
+export function rigSummary(info: RigInfo | null, skin: string): string {
+  if (!info) return "";
+  if (info.mode === "rigid") return "整件一起移動，不會變形。";
+  if (skin === "legs") return info.legs ? "褲管／襪／鞋各自跟隨兩條腿，每一邊都是完整的一塊。" : "整件跟隨骨盆。";
+  const sides = [info.sleeve_r && "右袖", info.sleeve_l && "左袖"].filter(Boolean).join("、");
+  if (!sides) return info.source === "whole" ? "整件衣物（不拆袖）：衣身跟隨上身彎曲，保持完整。" : info.unsure ? "未能可靠分辨袖子，現時以整件衣物顯示（保持完整）。可以用筆刷標記袖子。" : "沒有找到袖子：整件衣物跟隨上身，保持完整。";
+  return `${info.source === "manual" ? "人工標記" : info.source === "zone" ? "按手臂位置估計" : "自動分辨"}：${sides}跟隨手臂${info.forearm ? "（連手肘）" : ""}，衣身保持完整。`;
+}
+export function FitPanel({ r, info, tool, setTool, busy, onFit, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onSleeveAuto, onPoseFix }: {
+  r: Resolved; info: RigInfo | null; tool: FitTool; setTool: (t: FitTool) => void; busy: boolean;
+  part: PartTool; setPart: (p: PartTool) => void; hint: boolean; setHint: (v: boolean) => void; onParts: (v: string | null) => void; onSleeveAuto: () => void; onPoseFix: () => void;
+  onFit: (f: { dx?: number; dy?: number; scale?: number; rot?: number; wide?: number; tall?: number }) => void; onOpts: (o: Partial<WearOpts>) => void; onAuto: () => void; onRestore: () => void; onSaveDefault: () => void; onRemove: () => void; onDone: () => void;
   onOrder: (to: "top" | "up" | "down" | "bottom") => void; onVariant: (id: string | null) => void; onAddVariant: (withImage: boolean) => void; onDeleteVariant: (id: string) => void; onSavePose: () => void; onApplyPose: () => void;
   mask: MaskTool; setMask: (m: MaskTool) => void; onClearMask: () => void;
 }) {
   const variants = Object.entries(r.template?.data?.variants ?? {});
   const skin = SLOT_SKIN[r.worn.slot];
-  const follow = resolveFollow({ slot: r.worn.slot, fit: r.fit, content: r.analysis.content, grid: r.analysis.grid, opts: r.opts });
+  const upperRig = skin === "upper" && !r.opts.bone && r.opts.follow !== "none";
   const B = ({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) => <button type="button" aria-label={label} onClick={onClick} className="chip grid h-9 min-w-9 place-items-center rounded-full px-2.5 text-[14px]">{children}</button>;
   const FROM = { default: "自動估算的位置", template: "衣物預設位置", converted: "由舊角色換算，建議校正後存為預設", override: "已調整（只用於這個造型）" }[r.from];
   return (
@@ -130,7 +142,7 @@ export function FitPanel({ r, tool, setTool, busy, onFit, onOpts, onAuto, onRest
         <button type="button" data-testid="fit-done" onClick={onDone} className="btn-jewel h-8 rounded-full px-3.5 text-[12.5px]">完成</button>
       </div>
       <Row className="pb-2">
-        {([["place", "位置"], ["wear", "穿法"], ["follow", "骨架"], ["mask", "遮罩"]] as [FitTool, string][]).map(([t, label]) => <button key={t} type="button" data-tool={t} onClick={() => setTool(t)} className={pill(tool === t)}>{label}</button>)}
+        {([["place", "位置"], ["wear", "穿法"], ["parts", "部件"], ["follow", "骨架"], ["mask", "遮罩"]] as [FitTool, string][]).map(([t, label]) => <button key={t} type="button" data-tool={t} onClick={() => setTool(t)} className={pill(tool === t)}>{label}</button>)}
       </Row>
       <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2 text-[12.5px]">
         {tool === "place" && (
@@ -141,6 +153,14 @@ export function FitPanel({ r, tool, setTool, busy, onFit, onOpts, onAuto, onRest
               <B label="放大" onClick={() => onFit({ scale: 1.03 })}>＋</B><B label="縮小" onClick={() => onFit({ scale: 1 / 1.03 })}>－</B>
               <B label="向左轉" onClick={() => onFit({ rot: -1 })}>↺</B><B label="向右轉" onClick={() => onFit({ rot: 1 })}>↻</B>
               <button type="button" onClick={onAuto} className="chip h-9 rounded-full px-3">自動對位</button>
+            </div>
+            <H>闊度及高度（獨立微調）</H>
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="fit-stretch">
+              <button type="button" data-stretch="wide" onClick={() => onFit({ wide: 1.03 })} className="chip h-9 rounded-full px-3">加闊</button>
+              <button type="button" data-stretch="narrow" onClick={() => onFit({ wide: 1 / 1.03 })} className="chip h-9 rounded-full px-3">收窄</button>
+              <button type="button" data-stretch="tall" onClick={() => onFit({ tall: 1.03 })} className="chip h-9 rounded-full px-3">拉長</button>
+              <button type="button" data-stretch="short" onClick={() => onFit({ tall: 1 / 1.03 })} className="chip h-9 rounded-full px-3">縮短</button>
+              {r.fit.sy && <button type="button" onClick={() => onFit({ tall: 1 / r.fit.sy! })} className="chip h-9 rounded-full px-3">回復原比例</button>}
             </div>
             <H>圖層</H>
             <div className="flex flex-wrap gap-1.5">
@@ -164,6 +184,9 @@ export function FitPanel({ r, tool, setTool, busy, onFit, onOpts, onAuto, onRest
               <button type="button" disabled={busy} data-testid="add-variant" onClick={() => onAddVariant(false)} className="chip flex h-9 items-center gap-1 rounded-full px-3"><IconPlus className="text-[12px]" />把目前調整存為新穿法</button>
               <button type="button" disabled={busy} onClick={() => onAddVariant(true)} className="chip flex h-9 items-center gap-1 rounded-full px-3"><IconPlus className="text-[12px]" />上傳另一張圖的穿法</button>
             </div>
+            <H>姿勢校正</H>
+            <p className="mb-2 text-[11px] leading-snug text-mauve">同一件衣服在不同姿勢下可以有各自的校正（位置、部件、遮罩）。先擺好姿勢並調整好衣服，再保存；之後擺出相近姿勢時，畫面會提示可以套用，不會自動更改。</p>
+            <button type="button" disabled={busy} data-testid="add-pose-fix" onClick={onPoseFix} className="chip flex h-9 items-center gap-1 rounded-full px-3"><IconPlus className="text-[12px]" />把目前調整存為這個姿勢的校正</button>
             <H>建議姿勢</H>
             <div className="flex flex-wrap gap-1.5">
               <button type="button" disabled={!r.template?.data?.pose} onClick={onApplyPose} className="chip h-9 rounded-full px-3 disabled:opacity-40">套用這件衣服的建議姿勢</button>
@@ -171,13 +194,46 @@ export function FitPanel({ r, tool, setTool, busy, onFit, onOpts, onAuto, onRest
             </div>
           </>
         )}
+        {tool === "parts" && (
+          <>
+            <p className="mb-2 text-[11px] leading-snug text-mauve" data-testid="rig-summary">{rigSummary(info, skin)}</p>
+            {!upperRig ? (
+              <p className="text-[11px] leading-snug text-mauve">{skin === "upper" ? "這件衣物現時設定為整件不變形。到「骨架」把跟隨方式改為「自動」，就可以標記袖子。" : "這類衣物不需要標記部件。"}</p>
+            ) : (
+              <>
+                <p className="mb-2 text-[11px] leading-snug text-mauve">自動分辨不準確時，直接在角色身上塗出袖子的範圍；任何姿勢下塗抹的都是你看到的那塊布料。每個部件都是完整的一塊，袖根與衣身保持連接。</p>
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="part-tools">
+                  {([[1, "右袖（畫面左邊）"], [2, "左袖（畫面右邊）"], [0, "衣身"]] as const).map(([l, label]) => <button key={l} type="button" data-part={l} onClick={() => setPart({ ...part, label: l })} className={pill(part.label === l)}>{label}</button>)}
+                </div>
+                <label className="mt-2 flex items-center gap-2">筆刷<input type="range" min={10} max={110} value={part.size} onChange={(e) => setPart({ ...part, size: Number(e.target.value) })} className="flex-1" /></label>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <button type="button" data-testid="parts-auto" onClick={() => onParts("auto")} className={pill(!r.parts || r.parts === "auto")}>自動分辨</button>
+                  <button type="button" data-testid="parts-whole" onClick={() => onParts("whole")} className={pill(r.parts === "whole")}>整件衣物（不拆袖）</button>
+                  <button type="button" aria-pressed={hint} onClick={() => setHint(!hint)} className={pill(hint)}>顯示部件顏色</button>
+                </div>
+                <H>袖子角度（令平放拍攝的袖子貼近手臂）</H>
+                {([["sleeve_r", "右袖"], ["sleeve_l", "左袖"]] as const).map(([k, label]) => (
+                  <label key={k} className="mt-1 grid grid-cols-[2.6rem_1fr_2.8rem] items-center gap-2">
+                    <span>{label}</span>
+                    <input type="range" data-sleeve={k} min={-SLEEVE_ROT_LIMIT} max={SLEEVE_ROT_LIMIT} step={1} value={r.opts[k] ?? 0} onChange={(e) => onOpts({ [k]: Number(e.target.value) })} className="w-full" />
+                    <span className="text-right tabular-nums">{r.opts[k] ?? 0}°</span>
+                  </label>
+                ))}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button type="button" data-testid="sleeve-auto" onClick={onSleeveAuto} className="chip h-9 rounded-full px-3">自動貼合手臂</button>
+                  <button type="button" onClick={() => onOpts({ sleeve_r: 0, sleeve_l: 0 })} className="chip h-9 rounded-full px-3">回復原本角度</button>
+                </div>
+              </>
+            )}
+          </>
+        )}
         {tool === "follow" && (
           <>
             {skin === "rigid" ? (
-              <p className="mb-2 text-[11px] leading-snug text-mauve">這類衣物整件附接在一節骨骼上，角色活動時會跟著那個部位移動。</p>
+              <p className="mb-2 text-[11px] leading-snug text-mauve">這類衣物整件附接在一節骨骼上，角色活動時會跟著那個部位移動，不會被切開。</p>
             ) : (
               <>
-                <p className="mb-2 text-[11px] leading-snug text-mauve">衣服會按身體區域跟隨骨架：{skin === "upper" ? "身體部分跟隨上身，袖子跟隨手臂。" : "褲管、襪和鞋跟隨雙腿及腳掌。"}目前：{{ none: "整件一起移動", upper: skin === "upper" ? "袖子跟隨上臂" : "跟隨腿部", full: skin === "upper" ? "袖子跟隨整隻手臂" : "跟隨腿部及腳掌" }[follow]}</p>
+                <p className="mb-2 text-[11px] leading-snug text-mauve" data-testid="rig-summary">衣服是一張連續的網格，只會彎曲、不會斷開。{rigSummary(info, skin)}</p>
                 <div className="flex flex-wrap gap-1.5" data-testid="follow">
                   {FOLLOWS.filter((f) => skin === "upper" || f !== "upper").map((f) => <button key={f} type="button" data-follow={f} onClick={() => onOpts({ follow: f, bone: null })} className={pill(r.opts.follow === f && !r.opts.bone)}>{(skin === "upper" ? FOLLOW_LABEL : FOLLOW_LABEL_LEG)[f]}</button>)}
                 </div>
@@ -197,10 +253,11 @@ export function FitPanel({ r, tool, setTool, busy, onFit, onOpts, onAuto, onRest
         )}
         {tool === "mask" && (
           <>
-            <p className="mb-2 text-[11px] leading-snug text-mauve">在角色身上塗抹這件衣服：「隱藏」令該部分不顯示（例如後領內側、露出的底層）；「移到身後」令該部分畫在身體後面（例如外套內裡、兜帽）。原圖不會被修改。建議先切回預設站姿再塗。</p>
+            <p className="mb-2 text-[11px] leading-snug text-mauve">在角色身上塗抹這件衣服：「隱藏」令該部分不顯示（例如後領內側、露出的底層）；「移到身後」令該部分畫在身體後面（例如外套內裡、兜帽）。任何姿勢下，塗抹的都是你看到的那塊布料；原圖不會被修改，每一筆都可以用左下角的撤銷還原。</p>
             <div className="flex flex-wrap items-center gap-1.5" data-testid="mask-tools">
               {([["hide", "隱藏"], ["behind", "移到身後"], ["restore", "還原"]] as const).map(([m, label]) => <button key={m} type="button" data-mask={m} onClick={() => setMask({ ...mask, mode: m })} className={pill(mask.mode === m)}>{label}</button>)}
-              <button type="button" onClick={onClearMask} className="chip h-8 rounded-full px-3">清除全部遮罩</button>
+              <button type="button" data-testid="mask-clear" onClick={onClearMask} className="chip h-8 rounded-full px-3">還原整件（清除遮罩）</button>
+              <button type="button" aria-pressed={hint} data-testid="mask-hint" onClick={() => setHint(!hint)} className={pill(hint)}>顯示已編輯位置</button>
             </div>
             <label className="mt-2 flex items-center gap-2">筆刷<input type="range" min={10} max={90} value={mask.size} onChange={(e) => setMask({ ...mask, size: Number(e.target.value) })} className="flex-1" /></label>
           </>

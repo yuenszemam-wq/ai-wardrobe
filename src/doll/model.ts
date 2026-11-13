@@ -49,6 +49,8 @@ export interface Resolved {
   fit: Fit;
   opts: WearOpts;
   mask: string | null;
+  /** 部件圖：null＝自動分辨 */
+  parts: string | null;
   analysis: Analysis;
   from: "default" | "template" | "converted" | "override";
   template: Template | null;
@@ -74,9 +76,10 @@ export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<
   const fit = w.fit ?? (w.v1fit ? convertLegacyFit(w.v1fit, content) : base);
   const opts = w.opts ?? variant?.opts ?? tpl?.data?.opts ?? defaultOpts(w.slot);
   const mask = w.mask ?? variant?.mask ?? tpl?.data?.mask ?? null;
-  return { worn: w, garment: g, image, base, fit, opts, mask, analysis, from: w.fit || w.v1fit || w.opts || w.mask ? "override" : from, template: tpl };
+  const parts = w.parts ?? (variant ? variant.parts : tpl?.data?.parts) ?? null;
+  return { worn: w, garment: g, image, base, fit, opts, mask, parts, analysis, from: w.fit || w.v1fit || w.opts || w.mask || w.parts ? "override" : from, template: tpl };
 }
-export const sceneItem = (r: Resolved): SceneItem => ({ key: r.garment.id, image: r.image!, slot: r.worn.slot, fit: r.fit, content: r.analysis.content, grid: r.analysis.grid, opts: r.opts, mask: r.mask, hidden: r.worn.hidden });
+export const sceneItem = (r: Resolved): SceneItem => ({ key: r.garment.id, image: r.image!, slot: r.worn.slot, fit: r.fit, content: r.analysis.content, grid: r.analysis.grid, opts: r.opts, mask: r.mask, parts: r.parts === "auto" ? null : r.parts, hidden: r.worn.hidden });
 
 export function wornFor(g: GarmentLite, tpls: Templates): Worn {
   const t = validTemplate(tpls.v2.get(g.id), g) ?? validTemplate(tpls.v1.get(g.id), g);
