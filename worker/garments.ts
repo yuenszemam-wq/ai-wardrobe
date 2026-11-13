@@ -411,7 +411,7 @@ export async function listGarments(env: Env, params: URLSearchParams) {
   if (priced === "1") where.push("g.price IS NOT NULL");
   else if (priced === "0") where.push("g.price IS NULL");
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const { results } = await env.DB.prepare(`${LIST_SELECT} ${whereSql} ORDER BY ${sort} LIMIT ? OFFSET ?`)
+  const { results } = await env.DB.prepare(`${LIST_SELECT} ${whereSql} ORDER BY ${sort}, g.id ASC LIMIT ? OFFSET ?`)
     .bind(...binds, limit + 1, offset)
     .all<Record<string, unknown>>();
   const hasMore = results.length > limit;

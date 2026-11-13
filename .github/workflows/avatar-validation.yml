@@ -31,6 +31,7 @@ jobs:
       - run: node test/doll-ui.mjs
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/phase35-ui.mjs
       - run: node test/mesh-integrity.mjs
       - run: node test/doll-camera.mjs
       - run: node test/doll-split.mjs

@@ -321,7 +321,7 @@ export function FitPanel({ onBind, onApplyBind, r, info, tool, setTool, compact,
   const defaults = () => (
     <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gold/20 pt-2.5">
       <button type="button" disabled={r.from !== "override"} data-testid="fit-restore" onClick={onRestore} className="chip h-9 rounded-full text-[12px] disabled:opacity-40">恢復衣物預設</button>
-      <button type="button" disabled={busy || !!r.analysis.content.approximate} data-testid="fit-save-default" onClick={onSaveDefault} className="btn-jewel h-9 rounded-full text-[12px] disabled:opacity-40">{r.worn.variant ? "存為這個穿法的預設" : "存為衣物預設"}</button>
+      <button type="button" disabled={busy || !!r.analysis.content.approximate} data-testid="fit-save-default" onClick={onSaveDefault} className="btn-jewel h-9 rounded-full text-[12px] disabled:opacity-40">{r.worn.variant ? "存為這個穿法的預設" : "保存目前穿著效果"}</button>
     </div>
   );
   const thumb = r.garment.thumb_image_id ?? r.garment.transparent_image_id;

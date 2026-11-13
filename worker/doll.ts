@@ -113,7 +113,7 @@ async function stateStatements(env: Env, lookId: string, raw: unknown): Promise<
   const state = normalizeLookState(raw);
   if (!state) throw new HttpError(400, "bad_state", "造型資料不正確");
   // 混搭造型引用既有髮件檔案；不允許儲存不存在的上傳圖片。
-  const hairRefs=[...new Set((state.hair_config?.parts??[]).flatMap(p=>[p.file,p.mask]).filter((x):x is string=>typeof x==="string"&&x.startsWith("file:")))];
+  const hairRefs=[...new Set([...(state.hair_config?.parts??[]).flatMap(p=>[p.file,p.mask]), state.head_config?.file, ...state.items.flatMap(i=>[i.image,i.piece_def?.file])].filter((x):x is string=>typeof x==="string"&&x.startsWith("file:")))];
   for(const ref of hairRefs){if(!await env.DB.prepare("SELECT id FROM doll_asset_files WHERE id = ?").bind(ref.slice(5)).first())throw new HttpError(400,"bad_hair","有髮件圖片不存在，請重新選擇");}
   const text = JSON.stringify(state);
   if (text.length > 900_000) throw new HttpError(413, "state_too_large", "造型資料過大，請減少個別遮罩");
