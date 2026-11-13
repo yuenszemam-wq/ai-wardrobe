@@ -1,7 +1,7 @@
 // 角色換裝工作室（Phase 3）：角色始終可見，底部短面板切換「衣服／圖層／外貌／姿勢」。
 // 穿著衣服時可直接在畫布上調整骨架；衣物自由疊穿；頭部及髮型可在這裡上傳及校正。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pose, applyMat, clampPose, invert, samePose, solve } from "../../shared/avatarRig";
+import { Pose, applyMat, clampPose, invert, matAngle, samePose, solve } from "../../shared/avatarRig";
 import { BUILTIN_HAIR_ID, BUILTIN_HEAD_ID, DollAsset, FrontPart, HairConfig, HairPart, refUrl, POSE_PRESETS, hairBoneId, hexToRgb, resolveHairColors, rigFor } from "../../shared/avatarV2";
 import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, fitHeight, LookState, SLEEVE_ROT_LIMIT, SY_LIMIT, insertIndex, layeringHints, normalizeFit, normalizeTemplateData, sameFit, defaultFit, Variant, WearOpts } from "../../shared/doll";
 import { poseDistance, suggestSleeveRot } from "../../shared/garmentMesh";
@@ -221,7 +221,14 @@ export default function DressingRoom({ id }: { id?: string }) {
     const sy = Math.min(SY_LIMIT.max, Math.max(SY_LIMIT.min, ((r.fit.sy ?? 1) * (f.tall ?? 1)) / (f.wide ?? 1)));
     applyFit(r, { ...r.fit, cx: r.fit.cx + (f.dx ?? 0), cy: r.fit.cy + (f.dy ?? 0), w: r.fit.w * (f.scale ?? 1) * (f.wide ?? 1), rotation: r.fit.rotation + (f.rot ?? 0), sy });
   };
-  const setOpts = (r: Resolved, o: Partial<WearOpts>) => setItem(r.garment.id, { opts: { ...r.opts, ...o } });
+  const setOpts = (r: Resolved, o: Partial<WearOpts>) => {
+    const opts={...r.opts,...o}, from=mainBone({slot:r.worn.slot,opts:r.opts}), to=mainBone({slot:r.worn.slot,opts});
+    if(from!==to && (from==="world"||to==="world")){
+      const a=mats[from], b=mats[to]; let pt:[number,number]=[r.fit.cx,r.fit.cy];
+      if(a)pt=applyMat(a,...pt); if(b)pt=applyMat(invert(b),...pt);
+      setItem(r.garment.id,{opts,fit:{...r.fit,cx:pt[0],cy:pt[1],rotation:r.fit.rotation+(a?matAngle(a):0)-(b?matAngle(b):0)}});
+    } else setItem(r.garment.id,{opts});
+  };
 
   async function saveTemplate(r: Resolved, patch: (data: ReturnType<typeof normalizeTemplateData>) => { data: ReturnType<typeof normalizeTemplateData>; fit: Fit }, done: string, after?: Partial<Worn>) {
     if (r.analysis.content.approximate) return toast("高清圖未讀取成功，暫時不能存為預設", "err");
@@ -231,7 +238,7 @@ export default function DressingRoom({ id }: { id?: string }) {
       const { data, fit } = patch({ ...cur, converted: undefined });
       const t = await api<Template>(`/api/doll/templates/${r.garment.id}`, { method: "PUT", json: { fit, slot: r.worn.slot, image_id: r.garment.transparent_image_id ?? null, data } });
       setTpls((cur) => (cur ? { v1: cur.v1, v2: new Map(cur.v2).set(r.garment.id, t) } : cur));
-      setItem(r.garment.id, { fit: null, v1fit: null, opts: null, mask: null, parts: null, ...after });
+      setItem(r.garment.id, { snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null, ...after });
       toast(done);
     } catch (e) {
       toast((e as Error).message, "err");
@@ -491,7 +498,7 @@ export default function DressingRoom({ id }: { id?: string }) {
     setBusy(true);
     const state: LookState = {
       v: 3, head: look.head, hair: look.hair, ...(look.hair_config?{hair_config:look.hair_config}:{}), hair_color: look.hair_color, accent_color: look.accent_color, tip_color: look.tip_color, pose: clampPose(rig, pose), front,
-      items: resolved.map((r) => ({ garment_id: r.garment.id, slot: r.worn.slot, hidden: r.worn.hidden, variant: r.worn.variant, fit: r.fit, opts: r.opts, mask: r.mask, ...(r.parts ? { parts: r.parts } : {}) })),
+      items: resolved.map((r) => ({ snapshot:true, garment_id: r.garment.id, slot: r.worn.slot, hidden: r.worn.hidden, variant: r.worn.variant, fit: r.fit, opts: r.opts, mask: r.mask, ...(r.parts ? { parts: r.parts } : {}) })),
     };
     const target = asNew ? undefined : id;
     try {
@@ -598,7 +605,7 @@ export default function DressingRoom({ id }: { id?: string }) {
             <button type="button" aria-label="撤銷" data-testid="undo" disabled={!canUndo} onClick={() => timeTravel("undo")} className="grid h-8 w-8 place-items-center rounded-full bg-ink/45 text-[15px] text-cream ring-1 ring-gold/40 backdrop-blur disabled:opacity-35">↶</button>
             <button type="button" aria-label="重做" data-testid="redo" disabled={!canRedo} onClick={() => timeTravel("redo")} className="grid h-8 w-8 place-items-center rounded-full bg-ink/45 text-[15px] text-cream ring-1 ring-gold/40 backdrop-blur disabled:opacity-35">↷</button>
           </div>
-          {poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-2 right-2 max-w-[62%] truncate rounded-full bg-ink/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
+          {poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-2 right-2 max-w-[62%] truncate rounded-full bg-ink/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
           {focus && <button data-stage-ui type="button" onClick={() => setFocus(false)} className="btn-dark absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full px-4 py-2 text-[12.5px]" style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 14px)" }}><IconChevronUp />顯示面板</button>}
         </Stage>
       </div>
@@ -628,8 +635,8 @@ export default function DressingRoom({ id }: { id?: string }) {
                   onSleeveAuto={() => { if (!selItem) return; const [a, b] = suggestSleeveRot(renderer.geometry({ ...selItem, opts: { ...selItem.opts, sleeve_r: 0, sleeve_l: 0 } }), sel.fit, sel.analysis.content.ar); setOpts(sel, { sleeve_r: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, a)), sleeve_l: Math.max(-SLEEVE_ROT_LIMIT, Math.min(SLEEVE_ROT_LIMIT, b)) }); }}
                   onPoseFix={() => void addVariant(sel, undefined, true)}
                   onAuto={() => applyFit(sel, defaultFit(sel.worn.slot, sel.analysis.content, sel.garment.category, sel.garment.subcategory, sel.garment.name))}
-                  onRestore={() => setItem(sel.garment.id, { fit: null, v1fit: null, opts: null, mask: null, parts: null })} onSaveDefault={() => void saveDefault(sel)} onRemove={() => remove(sel.garment.id)} onDone={() => setSelected(null)}
-                  onOrder={(to) => order(sel.garment.id, to)} onVariant={(v) => setItem(sel.garment.id, { variant: v, fit: null, v1fit: null, opts: null, mask: null, parts: null })}
+                  onRestore={() => setItem(sel.garment.id, { snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} onSaveDefault={() => void saveDefault(sel)} onRemove={() => remove(sel.garment.id)} onDone={() => setSelected(null)}
+                  onOrder={(to) => order(sel.garment.id, to)} onVariant={(v) => setItem(sel.garment.id, { variant: v, snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null })}
                   onAddVariant={(img) => (img ? variantFile.current?.click() : void addVariant(sel))} onDeleteVariant={(v) => void deleteVariant(sel, v)}
                   onSavePose={() => void saveTemplate(sel, (d) => ({ data: { ...d, pose: clampPose(rig, pose), front }, fit: baseRowFit(sel) }), "已把目前姿勢設為這件衣物的建議姿勢", { fit: sel.worn.fit, opts: sel.worn.opts, mask: sel.worn.mask, parts: sel.worn.parts ?? null })}
                   onApplyPose={() => { const d = sel.template?.data; if (d?.pose) setPose(d.pose, d.front); }}

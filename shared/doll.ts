@@ -320,6 +320,8 @@ export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
 // ───── 造型 ─────
 /** 造型內的一件衣物。fit／opts／mask 為 null＝跟隨衣物預設；有值＝只用於這個造型。 */
 export interface LookItem {
+  /** 完整造型快照：null 遮罩／部件表示確實沒有，不再繼承預設。 */
+  snapshot?: boolean;
   garment_id: string;
   slot: Slot;
   hidden: boolean;
@@ -377,7 +379,7 @@ export function normalizeLookState(v: unknown): LookState | null {
       if (!fit) return null;
     }
     items.push({
-      garment_id: gid, slot, hidden: it.hidden === true,
+      garment_id: gid, slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
       variant: typeof it.variant === "string" && /^[a-z0-9_]{1,24}$/.test(it.variant) ? it.variant : null,
       fit, opts: it.opts ? normalizeOpts(it.opts, slot) : null, mask: isMask(it.mask) ? it.mask : null,
       ...(isParts(it.parts) ? { parts: it.parts } : {}),

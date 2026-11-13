@@ -83,8 +83,8 @@ export function resolve(w: Worn, g: GarmentLite, tpls: Templates, analyses: Map<
   else { base = auto(); from = "default"; }
   const fit = w.fit ?? (w.v1fit ? convertLegacyFit(w.v1fit, content) : base);
   const opts = w.opts ?? variant?.opts ?? tpl?.data?.opts ?? defaultOpts(w.slot);
-  const mask = w.mask ?? variant?.mask ?? tpl?.data?.mask ?? null;
-  const parts = w.parts ?? (variant ? variant.parts : tpl?.data?.parts) ?? null;
+  const mask = w.snapshot ? w.mask : w.mask ?? variant?.mask ?? tpl?.data?.mask ?? null;
+  const parts = w.snapshot ? w.parts??null : w.parts ?? (variant ? variant.parts : tpl?.data?.parts) ?? null;
   return { worn: w, garment: g, image, base, fit, opts, mask, parts, analysis, from: w.fit || w.v1fit || (w.opts && (from !== "default" || JSON.stringify(w.opts) !== JSON.stringify({...defaultOpts(w.slot),follow:"none",bone:"world"}))) || w.mask || w.parts ? "override" : from, template: tpl };
 }
 export const sceneItem = (r: Resolved): SceneItem => ({ key: r.garment.id, image: r.image!, slot: r.worn.slot, fit: r.fit, content: r.analysis.content, grid: r.analysis.grid, opts: r.opts, mask: r.mask, parts: r.parts === "auto" ? null : r.parts, hidden: r.worn.hidden });
