@@ -120,6 +120,12 @@ console.log("衣物變形：連續網格（Phase 3.1）");
   check("分不清袖子與裙身時不強行拆件", !dm.sleeve_r && !dm.sleeve_l && dm.labels.every((v) => v === 0), dm.unsure);
 
   const input = (grid, extra = {}) => ({ grid, fit: FIT, ar: AR, kind: "upper", follow: "auto", bone: "chest", pinned: false, parts: null, loose: true, ...extra });
+  // Regression: manual controls must move actual render vertices, not merely the overlay.
+  const offsets=Array(32).fill(0); offsets[10]=.12; offsets[11]=.08;
+  const manualInput=input(jacket,{follow:"none",bone:"world"});
+  const warped=G.buildRig({...manualInput,fit:{...manualInput.fit,mesh:offsets}}).layers[0];
+  check("手動變形確實改變渲染頂點",warped.rest.some((v,i)=>Math.abs(v-D.fromImage(manualInput.fit,manualInput.ar,warped.uv[i-i%2],warped.uv[i-i%2+1])[i%2])>10));
+  check("手動網格每個頂點與控制格映射一致",warped.rest.every((v,i)=>Math.abs(v-D.manualPoint({...manualInput.fit,mesh:offsets},manualInput.ar,warped.uv[i-i%2],warped.uv[i-i%2+1])[i%2])<.001));
   const rig = G.buildRig(input(jacket));
   check("部件：衣身一層＋左右袖各一層（衣身先畫）", rig.layers.map((l) => l.part).join() === "0,1,2" && rig.info.mode === "parts" && rig.info.forearm, rig.info);
   const sums = rig.layers.every((l) => { const nb = l.bones.length; for (let k = 0; k < l.rest.length / 2; k++) { let t = 0; for (let b = 0; b < nb; b++) t += l.weights[k * nb + b]; if (Math.abs(t - 1) > 1e-4) return false; } return true; });

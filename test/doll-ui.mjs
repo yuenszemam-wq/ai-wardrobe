@@ -195,8 +195,11 @@ try {
   await page.click('[data-testid="camera-reset"]');
   const mp=page.locator('[data-mesh-point="5"]'), mb=await page.locator('[data-testid="doll-stage"]').boundingBox();
   const mx=mb.x+Number(await mp.getAttribute("data-x")),my=mb.y+Number(await mp.getAttribute("data-y"));
+  const canvasPixels=()=>page.locator('[data-testid="doll-canvas"]').evaluate(c=>c.toDataURL());
+  await ready(); const beforeMesh=await canvasPixels();
   await drag([mx,my],[mx+8,my+7]); await page.waitForTimeout(450);
   check("手動網格控制點可以拖動",Math.abs(Number(await mp.getAttribute("data-x"))+mb.x-mx)>2);
+  await ready(); check("手動網格改變實際衣物畫布像素",(await canvasPixels())!==beforeMesh);
   await page.click('[data-testid="mesh-reset"]');await page.waitForTimeout(450);
   await page.click('[data-tool="mask"]');
   await drag(await screen(580, 500), await screen(640, 520));
