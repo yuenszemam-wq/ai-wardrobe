@@ -11,6 +11,7 @@ import { WardrobeImage } from "../components/WardrobeImage";
 import { useTaxonomy } from "../taxonomy";
 import { RigInfo } from "../../shared/garmentMesh";
 import { Appearance, BUILTIN_THUMB, GarmentLite, Resolved, wearHairPart } from "./model";
+import { HairColorStudio } from "./HairColor";
 import { DRAG_MODES, DragMode, PoseControl, REGIONS, Region, adjustable, jointLabel, jointTitle, regionBones, regionOf } from "../../shared/poseControls";
 
 export const pill = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[12.5px] ${on ? "chip-on" : "chip"}`;
@@ -560,8 +561,6 @@ export type LookTab = "hair" | "color" | "head";
 export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, onEdit, hair, selectedHair, onSelectHair, hairTool, setHairTool, onHairPatch, onSaveHair, busy, onSaveHairDefault, onAutoPlace }: { tab: LookTab; setTab: (t: LookTab) => void; value: Appearance; onChange: (v: Appearance) => void; assets: DollAsset[]; onNew: (kind: "hair" | "head", cat?: HairCat) => void; onEdit: (a: DollAsset) => void; hair: HairConfig|null; selectedHair:string|null; onSelectHair:(id:string|null)=>void; hairTool:"place"|"mesh"; setHairTool:(t:"place"|"mesh")=>void; onHairPatch:(id:string,patch:Partial<HairPart>)=>void; onSaveHair:()=>void; busy:boolean; onSaveHairDefault: (id: string) => void; onAutoPlace: (id: string) => void }) {
   const hairs = useMemo(() => [...BUILTIN_HAIRS, ...assets.filter((a) => a.kind === "hair")], [assets]);
   const heads = [...BUILTIN_HEADS, ...assets.filter((a) => a.kind === "head")];
-  const resolved = resolveHairColors(value.hair_color, value.accent_color);
-  const preset = HAIR_COLORS.find((c) => c.id === value.hair_color && !value.accent_color);
   const [hcat, setHcat] = useState<string>("set");
   const [extra, setExtra] = useState(false);
   const current = hair?.parts ?? [];
@@ -578,14 +577,6 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
     }
     return out;
   }, [hairs]);
-  const Swatch = ({ label, value: v, fallback, onPick, onClear, testid }: { label: string; value: string | null; fallback: string; onPick: (hex: string) => void; onClear?: () => void; testid: string }) => (
-    <label className="chip relative flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2.5 py-2">
-      <span className="h-7 w-7 shrink-0 rounded-lg border border-white/40" style={{ background: v ?? fallback }} />
-      <span className="min-w-0"><span className="block text-[10.5px] text-mauve">{label}</span><span className="block truncate text-[12px]">{v ? v.toUpperCase() : "原色"}</span></span>
-      <input type="color" data-testid={testid} aria-label={label} value={v ?? fallback} onChange={(e) => onPick(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
-      {onClear && v && <button type="button" aria-label={`清除${label}`} onClick={(e) => { e.preventDefault(); onClear(); }} className="relative z-10 ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-full bg-black/25 text-[10px]"><IconClose /></button>}
-    </label>
-  );
   return (
     <div className="flex h-full flex-col" data-testid="appearance-panel">
       <Row className="pb-2">
@@ -667,26 +658,7 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
             </>
           )}
         </>)}
-        {tab === "color" && (
-          <>
-            <div className="flex items-center justify-between pb-1.5 text-[11.5px]"><span className="text-mauve">所有髮型共用；沒有染色遮罩的髮型會自動分辨挑染</span><span className="text-gold-soft">{preset?.label ?? "自訂"}</span></div>
-            <div className="flex justify-between gap-1" data-testid="hair-colors">
-              {HAIR_COLORS.map((c) => {
-                const on = preset?.id === c.id;
-                return (
-                  <button key={c.id} type="button" data-color={c.id} aria-label={c.label} aria-pressed={on} onClick={() => onChange({ ...value, hair_color: c.id, accent_color: null })} className={`relative grid aspect-square w-[12.5%] place-items-center rounded-full border ${on ? "border-gold-soft outline-2 outline-offset-1 outline-gold-soft" : "border-white/40"}`} style={{ background: `linear-gradient(135deg, ${c.swatch[0]} 58%, ${c.swatch[1]} 58%)` }}>
-                    {on && <span className="text-[13px] text-white drop-shadow">✓</span>}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="mt-2.5 flex gap-2">
-              <Swatch label="主髮色" testid="color-main" value={resolved.main ? rgbToHex(resolved.main) : null} fallback="#644950" onPick={(hex) => onChange({ ...value, hair_color: hex, accent_color: value.accent_color ?? (resolved.accent ? rgbToHex(resolved.accent) : "original") })} />
-              <Swatch label="挑染色" testid="color-accent" value={resolved.accent ? rgbToHex(resolved.accent) : null} fallback="#e0899f" onPick={(hex) => onChange({ ...value, accent_color: hex })} />
-              <Swatch label="髮尾漸層" testid="color-tip" value={value.tip_color} fallback="#f2a7c3" onPick={(hex) => onChange({ ...value, tip_color: hex })} onClear={() => onChange({ ...value, tip_color: null })} />
-            </div>
-          </>
-        )}
+        {tab === "color" && <HairColorStudio value={value} onChange={onChange} />}
         {tab === "head" && (
           <Row className="pb-1 pt-1">
             <AddCard label="新增頭部" testid="add-head" onClick={() => onNew("head")} />
