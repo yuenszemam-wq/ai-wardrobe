@@ -326,7 +326,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
    * 已穿著其他主要衣物時只提示，不會強制改變整個人物。配件、半裙、頭飾等不會改變姿勢。
    */
   function offerPose(slot: Slot, p: Pose | null, f: FrontPart[], label: string) {
-    if (!p || !MAIN_SLOTS.has(slot) || poseDistance(p, pose) < 6) return;
+    // 預設姿勢是靜止站姿（舊預設會自動記下保存時的姿勢）：不當作指定姿勢，不改變目前人物
+    if (!p || !Object.keys(p).length || !MAIN_SLOTS.has(slot) || poseDistance(p, pose) < 6) return;
     const others = worn.some((w) => !w.hidden && MAIN_SLOTS.has(w.slot));
     if (!others) { setPose(p, f); toast(`已套用「${label}」的預設姿勢（可撤銷）`); return; }
     setPosePrompt({ label, pose: p, front: f });
