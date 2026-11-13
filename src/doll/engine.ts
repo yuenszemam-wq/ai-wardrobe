@@ -1,10 +1,11 @@
 // 角色換裝的畫布渲染器：身體部件、頭部、髮型、衣物全部畫在同一張 Canvas 上。
 // 衣物用連續網格跟隨骨架（shared/garmentMesh.ts）；畫面、造型縮圖及匯出圖片用同一套繪畫程式。
 import { Mat, Pose, Rig, applyMat, invert, multiply, solve } from "../../shared/avatarRig";
-import { AVATAR_V2_BASE, FrontPart, HairConfig, HairPart, HairStats, HeadConfig, RIG_V2, Rgb, resolveHairColors, hexToRgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
+import { FrontPart, HairConfig, HairPart, HairStats, HeadConfig, Rgb, resolveHairColors, hexToRgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
 import { Content, DOLL_H, DOLL_W, Fit, FULL_CONTENT, defaultOpts, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
 import { GarmentRig, Mesh, PartMap, RigInfo, boneMatrices, buildRig, cellVerts, locate, posedBounds, rigCoverage, skinMesh } from "../../shared/garmentMesh";
 import { AlphaGrid, Bitmap, alphaAt, loadImage, pixelsOf } from "./content";
+import { AvatarModel, DEFAULT_BODY_MODEL } from "../../shared/avatarModel";
 
 export interface SceneItem {
   key: string;
@@ -86,6 +87,8 @@ const gridId = (g: object) => { let id = gridIds.get(g); if (!id) { id = ++gridS
 const OVERLAY_COLOR: Record<number, [number, number, number]> = { 1: [255, 79, 154], 2: [45, 190, 255], 3: [255, 79, 154], 4: [45, 190, 255] };
 
 export class DollRenderer {
+  // One renderer per immutable model revision: geometry and neck caches cannot cross models.
+  constructor(readonly model: AvatarModel = DEFAULT_BODY_MODEL) {}
   private images = new Map<string, Bitmap | "loading" | "error">();
   private work = new Map<string, Worked>();
   private geo = new Map<string, Geometry>();
@@ -197,7 +200,7 @@ export class DollRenderer {
     const key = [gridId(it.grid), it.fit.cx, it.fit.cy, it.fit.w, it.fit.rotation, it.fit.sy ?? 1, JSON.stringify(it.fit.mesh ?? []), it.content.ar, it.slot, it.opts.follow, it.opts.bone ?? "", it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0, parts.key, bindKey].join("|");
     const hit = this.geo.get(it.key);
     if (hit?.key === key) return hit.rig;
-    const inp = { grid: it.grid, fit: it.fit, ar: it.content.ar, kind: SLOT_SKIN[it.slot], follow: it.opts.follow, bone: mainBone(it), pinned: !!it.opts.bone, parts: parts.map, sleeveRot: [it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0] as [number, number], loose: it.slot === "top" || it.slot === "outer", bind: bindKey ? solve(RIG_V2, it.opts.bind) : null };
+    const inp = { bodyRig: this.model.rig, grid: it.grid, fit: it.fit, ar: it.content.ar, kind: SLOT_SKIN[it.slot], follow: it.opts.follow, bone: mainBone(it), pinned: !!it.opts.bone, parts: parts.map, sleeveRot: [it.opts.sleeve_r ?? 0, it.opts.sleeve_l ?? 0] as [number, number], loose: it.slot === "top" || it.slot === "outer", bind: bindKey ? solve(this.model.rig, it.opts.bind) : null };
     let rig = buildRig(inp);
     // 安全網：拆件後各部件合起來必須覆蓋差不多整件布料；否則（例如衣身被誤判而消失）改回整件衣物
     if (this.forceWhole.has(it.key + "|" + key) || (rig.layers.length > 1 && rigCoverage(rig, it.grid) < 0.97)) {
@@ -463,8 +466,8 @@ export class DollRenderer {
 
   /** 頸部（上半）的遮罩：用來把頸部顯示在衣服後領前面 */
   private neck(): { mask: HTMLCanvasElement; img: Bitmap } | null {
-    const p = RIG_V2.parts.neck;
-    const img = this.img(AVATAR_V2_BASE + p.src);
+    const p = this.model.rig.parts.neck;
+    const img = this.img(this.model.assetBase + p.src);
     if (!img) return null;
     if (!this.neckMask) {
       const c = document.createElement("canvas");
@@ -472,7 +475,7 @@ export class DollRenderer {
       const ctx = c.getContext("2d")!;
       ctx.drawImage(img, 0, 0, p.w, p.h);
       ctx.globalCompositeOperation = "destination-in";
-      const fade = RIG_V2.anchors.neck[1] - p.y; // 頸根以下屬於領口位置，不遮
+      const fade = this.model.rig.anchors.neck[1] - p.y; // 頸根以下屬於領口位置，不遮
       const g = ctx.createLinearGradient(0, fade - 22, 0, fade - 2);
       g.addColorStop(0, "#000"); g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = g;
@@ -488,7 +491,7 @@ export class DollRenderer {
   paint(ctx: CanvasRenderingContext2D, scene: Scene, base: Mat): boolean {
     if (scene.flat) { const it = scene.items.find((i) => i.key === scene.flat); if (it) return this.paintFlat(ctx, it, scene, base); }
     let complete = true;
-    const rig: Rig = rigFor(scene.hair);
+    const rig: Rig = rigFor(scene.hair, this.model.rig);
     const mats = solve(rig, scene.pose);
     const T = (bone: string) => multiply(base, mats[bone] ?? mats.root);
     const set = (m: Mat) => ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
@@ -534,10 +537,10 @@ export class DollRenderer {
       if (w.behind) layers(ctx, it, r, this.textures(it, "behind", w.behind, r.wkey, rig), base);
     }
     const front = new Set<string>(scene.front);
-    for (const name of RIG_V2.body_parts) {
+    for (const name of this.model.rig.body_parts) {
       if (name === "head" || front.has(name)) continue;
-      const p = RIG_V2.parts[name];
-      part(AVATAR_V2_BASE + p.src, p.x, p.y, p.w, p.h, p.bone);
+      const p = this.model.rig.parts[name];
+      part(this.model.assetBase + p.src, p.x, p.y, p.w, p.h, p.bone);
     }
     const body = (over: boolean) => {
       for (const it of visible) {
@@ -551,8 +554,8 @@ export class DollRenderer {
     body(false);
     hair("mid");
     for (const name of scene.front) {
-      const p = RIG_V2.parts[name];
-      if (p) part(AVATAR_V2_BASE + p.src, p.x, p.y, p.w, p.h, p.bone);
+      const p = this.model.rig.parts[name];
+      if (p) part(this.model.assetBase + p.src, p.x, p.y, p.w, p.h, p.bone);
     }
     part(scene.head.file, scene.head.x, scene.head.y, scene.head.w, scene.head.h, "head");
     hair("front");
@@ -621,7 +624,7 @@ export class DollRenderer {
   private neckOver(ctx: CanvasRenderingContext2D, draw: (c: CanvasRenderingContext2D, pre: Mat) => void, base: Mat, mats: Record<string, Mat>) {
     const n = this.neck();
     if (!n) return;
-    const p = RIG_V2.parts.neck;
+    const p = this.model.rig.parts.neck;
     const m = multiply(base, mats.neck);
     const corners = [[p.x, p.y], [p.x + p.w, p.y], [p.x, p.y + p.h], [p.x + p.w, p.y + p.h]].map(([x, y]) => applyMat(m, x, y));
     const x0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 1, y0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1;

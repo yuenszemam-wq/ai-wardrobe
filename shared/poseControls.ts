@@ -5,7 +5,7 @@
 //   move   移動位置：可以平移的節點（重心、骨盆、肩膊…），拖動＝移動該關節的位置
 // 純函數，前端及測試共用。
 import { Rig, boneMap } from "./avatarRig";
-import { HairConfig, RIG_V2, hairBoneId } from "./avatarV2";
+import { HairConfig, hairBoneId } from "./avatarV2";
 
 export type Region = "head" | "body" | "arm_r" | "arm_l" | "leg_r" | "leg_l" | "hair";
 export type DragMode = "ik" | "rotate" | "move";
@@ -70,10 +70,10 @@ export function regionBones(rig: Rig, region: Region): string[] {
 /** 可以用滑桿調整的關節（有可動範圍） */
 export const adjustable = (rig: Rig, id: string) => { const b = boneMap(rig).get(id); return !!b && (b.min_angle !== b.max_angle || !!b.max_offset); };
 
-const P = (id: string) => boneMap(RIG_V2).get(id)!.pivot as [number, number];
 /** 一節骨骼的末端（靜止姿勢）：轉動控制點放在這裡 */
-function tipOf(bone: string): [number, number] {
-  const A = RIG_V2.anchors;
+function tipOf(rig: Rig, bone: string): [number, number] {
+  const P = (id: string) => boneMap(rig).get(id)!.pivot;
+  const A = rig.anchors;
   switch (bone) {
     case "root": return P("torso");
     case "pelvis": return [P("pelvis")[0], P("pelvis")[1] + 70];
@@ -96,10 +96,11 @@ function tipOf(bone: string): [number, number] {
 export function poseControls(rig: Rig, hair: HairConfig | null): PoseControl[] {
   const out: PoseControl[] = [];
   const bones = boneMap(rig);
+  const P = (id: string) => bones.get(id)!.pivot;
   // 轉動：每一節可以轉動的身體骨骼
   for (const b of rig.bones) {
     if (isHair(b.id) || b.min_angle === b.max_angle) continue;
-    out.push({ id: "rot_" + b.id, kind: "aim", bone: b.id, at: tipOf(b.id), follow: b.id, region: regionOf(b.id), label: jointTitle(b.id), hint: `拖動＝${jointLabel(b.id)}轉動，改變${JOINT_EFFECT[b.id] ?? "這一節的方向"}。`, sliders: [b.id] });
+    out.push({ id: "rot_" + b.id, kind: "aim", bone: b.id, at: tipOf(rig, b.id), follow: b.id, region: regionOf(b.id), label: jointTitle(b.id), hint: `拖動＝${jointLabel(b.id)}轉動，改變${JOINT_EFFECT[b.id] ?? "這一節的方向"}。`, sliders: [b.id] });
   }
   // 移動：可以平移的節點
   for (const b of rig.bones) {

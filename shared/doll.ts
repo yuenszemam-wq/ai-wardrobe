@@ -4,7 +4,7 @@
 
 import { normalizeManualMesh, manualUV } from "./manualMesh";
 import { AVATAR_V2_ID, ImageRef, HeadConfig, normalizeHeadConfig, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
-import { Pose, normalizePose, posedAnchors } from "./avatarRig";
+import { Pose, Rig, normalizePose, posedAnchors } from "./avatarRig";
 
 export const DOLL_W = 1200;
 export const DOLL_H = 1800;
@@ -92,8 +92,8 @@ const clampW = (w: number) => Math.min(FIT_LIMIT.maxW, Math.max(FIT_LIMIT.minW, 
  * 自動估算穿著位置：按身體區域的錨點（肩線、腰線、膝、腳踝、頭頂…）對齊衣物的實際內容，
  * 有肩線／裙腰等輪廓線索時優先使用，否則按分類的常見長度。之後可以人工微調並存為衣物預設。
  */
-export function defaultFit(slot: Slot, content: Content, category?: string | null, subcategory?: string | null, name?: string | null): Fit {
-  const a = ANCHORS;
+export function defaultFit(slot: Slot, content: Content, category?: string | null, subcategory?: string | null, name?: string | null, bodyRig: Rig = RIG_V2): Fit {
+  const a = bodyRig === RIG_V2 ? ANCHORS : posedAnchors(bodyRig, {});
   const center = a.waist.x;
   const shoulder = Math.min(a.shoulder_l.y, a.shoulder_r.y);
   const rules: Record<Slot, Rule> = {
