@@ -180,19 +180,50 @@ export const samePose = (rig: Rig, a: Pose | null | undefined, b: Pose | null | 
 };
 
 /**
- * 拖動末端（手掌／腳掌）時的兩節 IK：調整 upper（肩／髖）及 mid（肘／膝），令 end 關節盡量貼近目標。
- * 用限制範圍內的座標下降法，不會超出關節可動範圍；回傳新的姿勢。
+ * 兩節（肩→肘→腕、髖→膝→踝）彎曲的方向：+1／−1（上臂→前臂的轉向）；彎曲少於約 17° 時回傳 0（當作伸直）。
  */
-export function reachIK(rig: Rig, pose: Pose, upper: string, mid: string, end: string, target: [number, number], iterations = 28): Pose {
+export function ikSide(rig: Rig, pose: Pose, upper: string, mid: string, end: string): number {
+  const j = jointPositions(rig, pose);
+  const s = j[upper], m = j[mid], e = j[end];
+  if (!s || !m || !e) return 0;
+  const ux = m[0] - s[0], uy = m[1] - s[1], fx = e[0] - m[0], fy = e[1] - m[1];
+  const sin = (ux * fy - uy * fx) / ((Math.hypot(ux, uy) * Math.hypot(fx, fy)) || 1);
+  return Math.abs(sin) < 0.3 ? 0 : Math.sign(sin);
+}
+const bendOf = (s: [number, number], m: [number, number], e: [number, number]) => Math.sign((m[0] - s[0]) * (e[1] - m[1]) - (m[1] - s[1]) * (e[0] - m[0])) || 1;
+/** 自然的彎曲方向：手肘／膝蓋向身體外側（畫面左邊的手腳向左、右邊的向右；手肘另外略向下） */
+function naturalSide(rig: Rig, s: [number, number], target: [number, number], l1: number, l2: number, upper: string): number {
+  const d = Math.min(l1 + l2 - 0.5, Math.max(Math.abs(l1 - l2) + 0.5, Math.hypot(target[0] - s[0], target[1] - s[1])));
+  const base = Math.atan2(target[1] - s[1], target[0] - s[0]);
+  const alpha = Math.acos(Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
+  const out: [number, number] = [s[0] < rig.canvas.w / 2 ? -1 : 1, upper.startsWith("shoulder") ? 0.45 : 0];
+  let best = 1, bestDot = -Infinity;
+  for (const sign of [1, -1]) {
+    const a1 = base + sign * alpha;
+    const m: [number, number] = [s[0] + Math.cos(a1) * l1, s[1] + Math.sin(a1) * l1];
+    const dot = (m[0] - (s[0] + target[0]) / 2) * out[0] + (m[1] - (s[1] + target[1]) / 2) * out[1];
+    if (dot > bestDot) { bestDot = dot; best = bendOf(s, m, target); }
+  }
+  return best;
+}
+/**
+ * 拖動末端（手掌／腳掌）時的兩節 IK：調整 upper（肩／髖）及 mid（肘／膝），令 end 關節盡量貼近目標。
+ * side＝彎曲方向（+1／−1，見 ikSide）。拖動期間固定同一個方向，手臂就不會在兩個解之間突然翻轉；
+ * 沒有指定時沿用目前的方向，手臂伸直時選擇自然方向（手肘、膝蓋向外）。
+ * 先用解析解，再在可動範圍內微調；不會超出關節可動範圍。回傳新的姿勢。
+ */
+export function reachIK(rig: Rig, pose: Pose, upper: string, mid: string, end: string, target: [number, number], iterations = 28, side?: number): Pose {
   const bones = boneMap(rig);
   const U = bones.get(upper), M = bones.get(mid), N = bones.get(end);
   const dist = (p: Pose) => {
     const j = jointPositions(rig, p)[end];
     return Math.hypot(j[0] - target[0], j[1] - target[1]);
   };
+  const angDist = (p: Pose) => Math.abs((p[upper] ?? 0) - (pose[upper] ?? 0)) + Math.abs((p[mid] ?? 0) - (pose[mid] ?? 0));
   let next: Pose = { ...pose };
+  let exact = false;
+  let want = side || ikSide(rig, pose, upper, mid, end) || 1;
   if (U && M && N) {
-    // 先用兩節 IK 的解析解（兩個彎曲方向都試），再在可動範圍內微調
     const mats = solve(rig, pose);
     const parent = U.parent ? mats[U.parent] ?? IDENTITY : IDENTITY;
     const [sx, sy] = applyMat(mats[upper], U.pivot[0], U.pivot[1]);
@@ -203,37 +234,51 @@ export function reachIK(rig: Rig, pose: Pose, upper: string, mid: string, end: s
     const rest1 = Math.atan2(M.pivot[1] - U.pivot[1], M.pivot[0] - U.pivot[0]), rest2 = Math.atan2(N.pivot[1] - M.pivot[1], N.pivot[0] - M.pivot[0]);
     const pa = (matAngle(parent) * Math.PI) / 180;
     const norm = (deg: number) => { while (deg > 180) deg -= 360; while (deg < -180) deg += 360; return deg; };
-    let best = next, bestD = dist(next);
+    // 解析解：兩個彎曲方向各一個，只考慮在可動範圍之內的解。
+    // 手臂差不多伸直時選擇自然方向（手肘、膝蓋向外）；已經彎曲時保持同一方向，
+    // 只有另一方向的解非常接近目前姿勢時才轉換——所以彎曲方向只會在手臂伸直附近改變，不會突然翻轉。
+    const nat = naturalSide(rig, [sx, sy], target, l1, l2, upper);
+    const cur = side || ikSide(rig, pose, upper, mid, end);
+    const cands: { p: Pose; bend: number; ang: number }[] = [];
     for (const sign of [1, -1]) {
       const a1 = base + sign * alpha;
       const ex = sx + Math.cos(a1) * l1, ey = sy + Math.sin(a1) * l1;
       const a2 = Math.atan2(target[1] - ey, target[0] - ex);
-      const up = clampAngle(U, norm(((a1 - pa - rest1) * 180) / Math.PI - U.rest_angle));
-      const cand: Pose = { ...pose, [upper]: up, [mid]: clampAngle(M, norm(((a2 - pa - rest2) * 180) / Math.PI - up - U.rest_angle - M.rest_angle)) };
-      const cd = dist(cand);
-      if (cd < bestD) { best = cand; bestD = cd; }
+      const up = norm(((a1 - pa - rest1) * 180) / Math.PI - U.rest_angle);
+      const md = norm(((a2 - pa - rest2) * 180) / Math.PI - up - U.rest_angle - M.rest_angle);
+      if (up < U.min_angle || up > U.max_angle || md < M.min_angle || md > M.max_angle) continue;
+      const cand: Pose = { ...pose, [upper]: up, [mid]: md };
+      cands.push({ p: cand, bend: bendOf([sx, sy], [ex, ey], target), ang: angDist(cand) });
     }
-    next = { ...best };
+    const pickBend = (b: number) => cands.filter((c) => c.bend === b).sort((x, y) => x.ang - y.ang)[0];
+    let chosen = cur === 0 ? pickBend(nat) ?? cands.sort((x, y) => x.ang - y.ang)[0] : pickBend(cur);
+    if (cur !== 0 && !side) { const o = pickBend(-cur); if (o && o.ang <= 35 && (!chosen || o.bend === nat)) chosen = o; }
+    if (chosen && (chosen.ang <= 150 || dist(pose) > 200)) { next = chosen.p; exact = true; want = chosen.bend; }
+    else want = cur || nat;
   }
-  let step = 8;
-  for (let i = 0; i < iterations; i++) {
-    let improved = false;
-    for (const id of [upper, mid]) {
-      const b = bones.get(id);
-      if (!b) continue;
-      const cur = next[id] ?? 0;
-      const base = dist(next);
-      let best = cur, bestD = base;
-      for (const cand of [cur - step, cur + step]) {
-        next[id] = clampAngle(b, cand);
-        const d = dist(next);
-        if (d < bestD - 1e-6) { best = next[id]; bestD = d; }
+  if (!exact) {
+    // 到不了（超出關節範圍）：由目前姿勢出發，在可動範圍內逐步靠近手指位置；不會跳到另一個解
+    let step = 8;
+    for (let i = 0; i < iterations * 2; i++) {
+      let improved = false;
+      for (const id of [upper, mid]) {
+        const b = bones.get(id);
+        if (!b) continue;
+        const cur = next[id] ?? 0;
+        const base = dist(next);
+        let best = cur, bestD = base;
+        for (const cand of [cur - step, cur + step]) {
+          next[id] = clampAngle(b, cand);
+          const s2 = ikSide(rig, next, upper, mid, end);
+          const d = s2 !== 0 && s2 !== want ? Infinity : dist(next);
+          if (d < bestD - 1e-6) { best = next[id]; bestD = d; }
+        }
+        next[id] = best;
+        if (bestD < base - 1e-6) improved = true;
       }
-      next[id] = best;
-      if (bestD < base - 1e-6) improved = true;
+      if (!improved) step /= 2;
+      if (step < 0.05) break;
     }
-    if (!improved) step /= 2;
-    if (step < 0.05) break;
   }
   return clampPose(rig, next);
 }

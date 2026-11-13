@@ -178,8 +178,9 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-testid="fit-from"]')?.textContent.includes("衣物預設"));
   const tpl = await env.DB.prepare("SELECT cx, cy, data FROM doll_fit_templates WHERE garment_id='gar_bl' AND avatar_id='avatar_v2'").first();
   check("存為衣物預設：位置及穿法設定寫入", tpl && Math.abs(tpl.cx - 640) < 12 && JSON.parse(tpl.data).opts.follow === "none", tpl);
+  check("選中衣物：清楚顯示正在編輯哪一件，預設是位置工具", (await page.textContent('[data-testid="fit-name"]')).includes("襯衫") && (await page.getAttribute('[data-testid="fit-panel"]', "data-active-tool")) === "place" && (await page.locator('[data-testid="fit-size"]').count()) === 1);
   await page.click('[data-tool="follow"]');
-  await page.click('[data-follow="none"]');
+  await page.click('[data-wear-mode="body"]');
   check("只在這個造型改變骨架跟隨方式", (await page.textContent('[data-testid="fit-from"]')).includes("只用於這個造型"));
   await page.click('[data-testid="fit-restore"]');
   check("恢復衣物預設", (await page.textContent('[data-testid="fit-from"]')).includes("衣物預設"));
@@ -190,9 +191,9 @@ try {
   check("保存另一種穿法", Object.values(tpl2.variants)[0]?.name === "收入裙內", tpl2.variants);
   await page.click('[data-tool="mesh"]');
   const oldK=Number(await page.getAttribute('[data-testid="doll-stage"]',"data-k"));
-  await page.click('[data-testid="camera-in"]');
+  await page.click('[data-testid="zoom-in"]');
   check("放大人物畫布",Number(await page.getAttribute('[data-testid="doll-stage"]',"data-k"))>oldK);
-  await page.click('[data-testid="camera-reset"]');
+  await page.click('[data-view="full"]');
   const mp=page.locator('[data-mesh-point="5"]'), mb=await page.locator('[data-testid="doll-stage"]').boundingBox();
   const mx=mb.x+Number(await mp.getAttribute("data-x")),my=mb.y+Number(await mp.getAttribute("data-y"));
   const canvasPixels=()=>page.locator('[data-testid="doll-canvas"]').evaluate(c=>c.toDataURL());
@@ -220,10 +221,8 @@ try {
   await ready();
   check("重做", (await room("data-masked")) === "1");
   await page.click('[data-testid="mask-clear"]');
-  await page.click('[data-tool="parts"]');
   await page.click('[data-tool="follow"]');
-  await page.click('[data-follow="auto"]');
-  await page.click('[data-tool="parts"]');
+  await page.click('[data-wear-mode="auto"]');
   const sum0 = await page.textContent('[data-testid="rig-summary"]');
   check("部件：自動分辨出左右袖，並說明衣身保持完整", sum0.includes("自動分辨") && sum0.includes("右袖") && sum0.includes("左袖"), sum0);
   await page.click('[data-testid="parts-whole"]');
@@ -233,6 +232,7 @@ try {
   await drag(await screen(545, 520), await screen(530, 600));
   await page.waitForTimeout(450);
   check("用筆刷修改部件範圍（保存在這個造型）", (await room("data-parts")) === "1" && (await page.textContent('[data-testid="rig-summary"]')).includes("人工標記"), await page.textContent('[data-testid="rig-summary"]'));
+  await page.click('[data-testid="part-stop"]');
   await page.click('[data-testid="parts-auto"]');
   await page.locator('input[data-sleeve="sleeve_l"]').fill("-20");
   await ready();
@@ -254,8 +254,10 @@ try {
   const tapAt = [sleeve[0] - 22, sleeve[1] + 6];
   await page.mouse.click(...(await screen(...tapAt)));
   check("直接點變形後的袖子即可選取這件衣物", (await room("data-selected")) === "gar_bl", await room("data-selected"));
+  await shot("03a-posed-selected");
   await page.click('[data-tool="mask"]');
   await page.click('[data-testid="mask-hint"]');
+  await shot("03a-posed-mask");
   const chest = [600, 470];
   check("塗抹前：袖子及胸口都有布料", isCloth(await colorAt(...tapAt)) && isCloth(await colorAt(...chest)), [await colorAt(...tapAt), await colorAt(...chest)]);
   await drag(await screen(tapAt[0] - 6, tapAt[1]), await screen(tapAt[0] + 6, tapAt[1]));
@@ -273,7 +275,10 @@ try {
 
   console.log("姿勢：穿著衣服直接調整骨架");
   await page.click('[data-tab="pose"]');
-  check("姿勢模式在同一頁，畫布顯示控制點", (await page.getAttribute('[data-testid="doll-stage"]', "data-mode")) === "pose" && (await page.locator("[data-handle]").count()) >= 18, await page.locator("[data-handle]").count());
+  await page.click('[data-posetab="joints"]');
+  await page.click('[data-skel="full"]');
+  check("姿勢模式在同一頁，完整骨架顯示控制點", (await page.getAttribute('[data-testid="doll-stage"]', "data-mode")) === "pose" && (await page.locator("[data-handle]").count()) >= 10, await page.locator("[data-handle]").count());
+  await page.click('[data-posetab="presets"]');
   const arm0 = await pixels(860, 300, 200, 200);
   await page.click('[data-pose="reach_out"]');
   await ready();
@@ -291,22 +296,25 @@ try {
   await drag([sb.x + hx, sb.y + hy], [sb.x + hx + 34, sb.y + hy - 46]);
   const pose2 = JSON.parse(await room("data-pose"));
   check("拖動手腕控制點（IK）", Math.abs(pose2.shoulder_l ?? 0) + Math.abs(pose2.elbow_l ?? 0) > 5, pose2);
-  const hh = page.locator('[data-handle="head"]');
+  const hh = page.locator('[data-handle="rot_head"]');
   await drag([sb.x + Number(await hh.getAttribute("data-x")), sb.y + Number(await hh.getAttribute("data-y"))], [sb.x + Number(await hh.getAttribute("data-x")) + 14, sb.y + Number(await hh.getAttribute("data-y")) + 2]);
   check("拖動頭頂控制點轉動頭部", Math.abs(JSON.parse(await room("data-pose")).head ?? 0) > 2);
-  await page.selectOption('[data-testid="bone-select"]', "chest");
+  await page.click('[data-posetab="joints"]');
+  await page.click('[data-region="body"]');
+  await page.click('[data-joint="chest"]');
   await page.locator('input[data-bone="chest"]').fill("6");
   check("新增節點：上胸", JSON.parse(await room("data-pose")).chest === 6);
-  await page.selectOption('[data-testid="bone-select"]', "root");
+  await page.click('[data-joint="root"]');
   await page.locator('input[data-bone="root.x"]').fill("30");
   check("新增節點：整體重心平移", JSON.parse(await room("data-pose"))["root.x"] === 30);
   await page.click('[data-testid="bone-reset"]');
   check("重設單個關節", !("root.x" in JSON.parse(await room("data-pose"))) && JSON.parse(await room("data-pose")).chest === 6);
-  await page.click('[data-reset="arms"]');
+  await page.click('[data-region="arm_l"]');
+  await page.click('[data-testid="region-reset"]');
   check("重設某個身體區域", !("shoulder_l" in JSON.parse(await room("data-pose"))) && JSON.parse(await room("data-pose")).chest === 6);
-  await page.click('[data-testid="toggle-skeleton"]');
-  check("可以隱藏骨架控制點", (await page.locator("[data-handle]").count()) === 0);
-  await page.click('[data-testid="toggle-skeleton"]');
+  await page.click('[data-skel="clean"]');
+  check("乾淨預覽：畫布上沒有骨架控制點", (await page.locator("[data-handle]").count()) === 0 && (await page.locator("[data-bone-line]").count()) === 0);
+  await page.click('[data-skel="full"]');
 
   console.log("外貌：角色保持可見");
   await page.click('[data-tab="look"]');

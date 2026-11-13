@@ -6,7 +6,7 @@ import { api } from "../api";
 import { Analysis } from "./content";
 import { SceneItem } from "./engine";
 
-export interface GarmentLite { id: string; name: string; display_no?: number | null; category: string | null; subcategory: string | null; transparent_image_id?: string | null }
+export interface GarmentLite { id: string; name: string; display_no?: number | null; category: string | null; subcategory: string | null; transparent_image_id?: string | null; thumb_image_id?: string | null }
 export interface Template { garment_id: string; avatar_id: string; image_id: string | null; fit: Fit; slot: string | null; data: TemplateData | null; version: number }
 /** 已穿上的衣物。v1fit＝舊角色上的個別位置，待讀到圖片後換算（只存在於前端） */
 export interface Worn extends LookItem { v1fit?: Fit | null }
