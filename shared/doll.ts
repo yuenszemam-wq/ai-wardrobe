@@ -3,7 +3,7 @@
 // Phase 3：Avatar V2 是唯一角色；衣物分類只決定預設位置及圖層，不再限制可以怎樣疊穿。
 
 import { normalizeManualMesh, manualUV } from "./manualMesh";
-import { AVATAR_V2_ID, ImageRef, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
+import { AVATAR_V2_ID, ImageRef, HeadConfig, normalizeHeadConfig, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
 import { Pose, normalizePose, posedAnchors } from "./avatarRig";
 
 export const DOLL_W = 1200;
@@ -427,6 +427,7 @@ export interface LookItem {
 export interface LookState {
   v: 3;
   head: string | null;
+  head_config?: HeadConfig | null;
   hair: string | null;
   /** 已穿髮件的獨立快照；缺少時沿用原本髮型 id。 */
   hair_config?: HairConfig | null;
@@ -482,6 +483,7 @@ export function normalizeLookState(v: unknown): LookState | null {
   const hairConfig = o.hair_config == null ? null : normalizeHairConfig(o.hair_config);
   if(o.hair_config != null && !hairConfig) return null;
   return {
+    ...(normalizeHeadConfig(o.head_config) ? {head_config: normalizeHeadConfig(o.head_config)} : {}),
     v: 3, head: assetId(o.head), hair: assetId(o.hair), ...(hairConfig ? {hair_config:hairConfig} : {}),
     hair_color: normalizeColorValue(o.hair_color) ?? "brown_pink",
     accent_color: o.accent_color === "original" ? "original" : normalizeColorValue(o.accent_color),

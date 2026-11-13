@@ -115,6 +115,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
 
   const recoveryKey = "room:" + (setup ? "setup:" + setupKey : id ?? "new");
   const [recoveryReady, setRecoveryReady] = useState(false);
+  const touchedRig = useRef(new Set<string>());
   const recoveryVersions = useRef<Map<string, number> | null>(null);
   const recoveryLatest = useRef<Recovery | null>(null);
   const recoveryWrite = useRef<Promise<unknown>>(Promise.resolve());
@@ -196,15 +197,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     return () => { off = true; };
     // Once per editor identity, after setup initialization; later template saves must not prompt again.
   }, [loaded, !!garments, recoveryKey]);
-  useEffect(() => {
-    if (!recoveryReady || (!dirty && !draft)) { recoveryLatest.current = null; return; }
-    const value: Recovery = { snap: { worn, pose, front, look }, name, favorite, selected, hairSelected, draft,
-      versions: [...(recoveryVersions.current ?? new Map([...(tpls?.v2 ?? [])].map(([k,t]) => [k,t.version])))],
-      images: worn.map(w => [w.garment_id, garments?.find(g => g.id === w.garment_id)?.transparent_image_id]) };
-    recoveryLatest.current = value;
-    const timer = window.setTimeout(() => queueDraft(recoveryKey, value), 700);
-    return () => clearTimeout(timer);
-  }, [recoveryReady, dirty, worn, pose, front, look, name, favorite, selected, hairSelected, draft, tpls]);
+
   useEffect(() => {
     const flush = () => { if (recoveryLatest.current) queueDraft(recoveryKey, recoveryLatest.current); };
     const hidden = () => { if (document.visibilityState === "hidden") flush(); };
@@ -256,12 +249,27 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const pending = useMemo(() => { const ok = new Set(resolved.map((r) => r.key)); return new Set(worn.filter((w) => !ok.has(itemKey(w))).map((w) => w.garment_id)); }, [worn, resolved]);
   const sel = resolved.find((r) => r.key === selected) ?? null;
 
+  function frozenItem(r: Resolved): Worn {
+    return { snapshot: true, image: r.piece ? (r.worn.image ?? (r.garment.transparent_image_id ? "img:" + r.garment.transparent_image_id : undefined)) : r.image ?? undefined,
+      garment_id: r.garment.id, ...(r.piece ? {piece: r.piece.id, piece_def: r.piece} : {}), slot: r.worn.slot, hidden: r.worn.hidden,
+      variant: r.worn.variant, fit: r.fit, opts: r.opts, mask: r.mask, parts: r.parts };
+  }
+
   // ───── 場景 ─────
   const draftPart = draft?.parts.find((p) => p.id === draft.sel) ?? null;
   const hair = useMemo(() => (draft?.kind === "hair" ? { parts: draft.parts } : hairOf(assets, look.hair,look.hair_config)), [draft?.kind === "hair" ? draft.parts : null, assets, look.hair,look.hair_config]);
   const activeHair = !draft && tab === "look" && lookTab === "hair" ? hair?.parts.find(p=>p.id===hairSelected&&!p.hidden)??null : null;
-  const head = useMemo(() => { const p = draft?.kind === "head" ? draft.parts[0] : null; return p ? { file: p.file, x: p.x, y: p.y, w: p.w, h: p.h } : headOf(assets, look.head); }, [draft?.kind === "head" ? draft.parts : null, assets, look.head]);
+  const head = useMemo(() => { const p = draft?.kind === "head" ? draft.parts[0] : null; return p ? { file: p.file, x: p.x, y: p.y, w: p.w, h: p.h } : look.head_config ?? headOf(assets, look.head); }, [draft?.kind === "head" ? draft.parts : null, assets, look.head, look.head_config]);
   const rig = useMemo(() => rigFor(hair), [hair]);
+  useEffect(() => {
+    if (!recoveryReady || (!dirty && !draft)) { recoveryLatest.current = null; return; }
+    const value: Recovery = { snap: { worn: worn.map(w => { const r = resolved.find(r => r.key === itemKey(w)); return r ? frozenItem(r) : w; }), pose, front, look: {...look, ...(hair ? {hair_config: hair} : {})} }, name, favorite, selected, hairSelected, draft,
+      versions: [...(recoveryVersions.current ?? new Map([...(tpls?.v2 ?? [])].map(([k,t]) => [k,t.version])))],
+      images: worn.map(w => [w.garment_id, garments?.find(g => g.id === w.garment_id)?.transparent_image_id]) };
+    recoveryLatest.current = value;
+    const timer = window.setTimeout(() => queueDraft(recoveryKey, value), 700);
+    return () => clearTimeout(timer);
+  }, [recoveryReady, dirty, worn, pose, front, look, name, favorite, selected, hairSelected, draft, tpls, resolved, hair]);
   const colors = useMemo(() => (draft?.kind === "hair" ? { main: null, accent: null, tip: null } : { ...resolveHairColors(look.hair_color, look.accent_color), tip: look.tip_color ? hexToRgb(look.tip_color) : null }), [look.hair_color, look.accent_color, look.tip_color, draft?.kind]);
   const advanced = !!sel && !draft;
   const autoParts = !!sel && SLOT_SKIN[sel.worn.slot] === "upper" && wearMode(sel.opts) === "auto";
@@ -404,6 +412,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     applyFit(r, { ...r.fit, cx: r.fit.cx + (f.dx ?? 0), cy: r.fit.cy + (f.dy ?? 0), w: (f.w ?? r.fit.w) * (f.scale ?? 1) * (f.wide ?? 1), rotation: (f.rotation ?? r.fit.rotation) + (f.rot ?? 0), sy });
   };
   const setOpts = (r: Resolved, o: Partial<WearOpts>) => {
+    touchedRig.current.add(r.key);
     const opts={...r.opts,...o}, from=mainBone({slot:r.worn.slot,opts:r.opts}), to=mainBone({slot:r.worn.slot,opts});
     if(from!==to && (from==="world"||to==="world")){
       const a=mats[from], b=mats[to]; let pt:[number,number]=[r.fit.cx,r.fit.cy];
@@ -446,11 +455,12 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   };
   async function saveTemplate(r: Resolved, patch: (data: ReturnType<typeof normalizeTemplateData>) => { data: ReturnType<typeof normalizeTemplateData>; fit: Fit }, done: string, after?: Partial<Worn>): Promise<boolean> {
     if (r.analysis.content.approximate) { toast("高清圖未讀取成功，暫時不能存為預設", "err"); return false; }
+    if (r.worn.snapshot && r.worn.image?.startsWith("img:") && r.worn.image !== "img:" + r.garment.transparent_image_id) { toast("這份編輯使用舊圖片。請保留為造型，或重新開啟最新衣物再校正預設。", "err"); return false; }
     setBusy(true);
     try {
       const cur = r.template?.data ?? normalizeTemplateData(null, r.worn.slot);
       const { data, fit } = patch({ ...cur, converted: undefined });
-      const t = await api<Template>(`/api/doll/templates/${r.garment.id}`, { method: "PUT", json: { fit, slot: r.worn.slot, image_id: r.garment.transparent_image_id ?? null, expected_version: recoveryVersions.current?.get(r.garment.id) ?? r.template?.version ?? tpls?.v2.get(r.garment.id)?.version ?? 0, data } });
+      const t = await api<Template>(`/api/doll/templates/${r.garment.id}`, { method: "PUT", json: { fit, slot: r.piece ? r.template?.slot ?? r.worn.slot : r.worn.slot, image_id: r.garment.transparent_image_id ?? null, expected_version: recoveryVersions.current?.get(r.garment.id) ?? r.template?.version ?? tpls?.v2.get(r.garment.id)?.version ?? 0, data } });
       recoveryVersions.current?.set(r.garment.id, t.version);
       setTpls((cur) => (cur ? { v1: cur.v1, v2: new Map(cur.v2).set(r.garment.id, t) } : cur));
       setItem(r.key, { snapshot:false, fit: null, v1fit: null, opts: null, mask: null, parts: null, ...after });
@@ -469,7 +479,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     ...(r.fit.mesh ? { mesh: "done" as const } : {}),
     ...(r.mask ? { mask: "done" as const } : {}),
     // A full save records an explicit following choice, without inventing a "not needed" mark.
-    rig: "done",
+    ...(touchedRig.current.has(r.key) ? { rig: "done" as const } : {}),
   });
   const saveDefault = (r: Resolved) => {
     if (r.piece) {
@@ -761,7 +771,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           const r = wearHairPart(hairOf(assets, look.hair, look.hair_config), { ...parts[0], src: draft.id });
           editLook({ ...look, hair_config: r.config });
         } else editLook({ ...look, hair: draft.id, hair_config: null });
-      } else editLook({ ...look, head: draft.id });
+      } else editLook({ ...look, head: draft.id, head_config: null });
       setDraft(null);
       toast(draft.kind === "hair" ? "已儲存髮型，並套用到角色" : "已儲存頭部，並套用到角色");
     } catch (e) { toast((e as Error).message, "err"); } finally { setBusy(false); }
@@ -841,8 +851,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     if (draft) return toast("請先儲存或取消正在編輯的素材", "err");
     setBusy(true);
     const state: LookState = {
-      v: 3, head: look.head, hair: look.hair, ...(hair?{hair_config:hair}:{}), hair_color: look.hair_color, accent_color: look.accent_color, tip_color: look.tip_color, pose: clampPose(rig, pose), front,
-      items: resolved.map((r) => ({ snapshot:true, image: r.piece ? (r.worn.image ?? (r.garment.transparent_image_id ? "img:" + r.garment.transparent_image_id : undefined)) : r.image ?? undefined, garment_id: r.garment.id, ...(r.piece ? { piece: r.piece.id, piece_def: r.piece } : {}), slot: r.worn.slot, hidden: r.worn.hidden, variant: r.worn.variant, fit: r.fit, opts: r.opts, mask: r.mask, ...(r.parts ? { parts: r.parts } : {}) })),
+      v: 3, head: look.head, head_config: head, hair: look.hair, ...(hair?{hair_config:hair}:{}), hair_color: look.hair_color, accent_color: look.accent_color, tip_color: look.tip_color, pose: clampPose(rig, pose), front,
+      items: resolved.map(frozenItem),
     };
     const target = asNew ? undefined : id;
     try {
@@ -1154,7 +1164,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
               ) : tab === "clothes" ? <ClothesPanel garments={garments} wornIds={wornIds} wornKeys={wornKeys} pending={pending} onToggle={toggle} pieces={pieceEntries} onPiece={togglePiece} />
               : tab === "layers" ? <LayersPanel items={resolved} selected={selected} onSelect={(g) => { setSelected(g); setTool("place"); }} onReorder={(ids) => change((cur) => { const next = ids.map((i) => cur.find((w) => itemKey(w) === i)!).filter(Boolean); return next.length === cur.length ? next : cur; })} onHide={(g) => setItem(g, { hidden: !worn.find((w) => itemKey(w) === g)?.hidden })} onRemove={remove} onClear={() => { if (confirm("脫下全部衣物？")) { change(() => []); setSelected(null); } }} hints={hints}
                   onHideGroup={(gid, hide) => change((cur) => cur.map((w) => (w.garment_id === gid && w.piece ? { ...w, hidden: hide } : w)))} onRemoveGroup={(gid) => { change((cur) => cur.filter((w) => !(w.garment_id === gid && w.piece))); if (selected?.startsWith(gid + "#")) setSelected(null); }} />
-              : tab === "look" ? <AppearancePanel tab={lookTab} setTab={t=>{setLookTab(t);selectHair(null);}} value={look} onChange={editLook} assets={assets} onNew={(k, c) => void newAsset(k, c)} onEdit={editAsset} hair={hair} selectedHair={hairSelected} onSelectHair={selectHair} hairTool={hairTool} setHairTool={setHairTool} onHairPatch={patchHair} onSaveHair={()=>void saveHairCombo()} busy={busy} onSaveHairDefault={(i) => void saveHairDefault(i)} onAutoPlace={autoPlaceHair} />
+              : tab === "look" ? <AppearancePanel tab={lookTab} setTab={t=>{setLookTab(t);selectHair(null);}} value={look} onChange={v => editLook(v.head !== look.head ? {...v, head_config: null} : v)} assets={assets} onNew={(k, c) => void newAsset(k, c)} onEdit={editAsset} hair={hair} selectedHair={hairSelected} onSelectHair={selectHair} hairTool={hairTool} setHairTool={setHairTool} onHairPatch={patchHair} onSaveHair={()=>void saveHairCombo()} busy={busy} onSaveHairDefault={(i) => void saveHairDefault(i)} onAutoPlace={autoPlaceHair} />
               : <PosePanel rig={rig} pose={pose} front={front} onPose={setPose} onFront={(f) => { setFront(f); setDirty(true); }} skel={skel} setSkel={(m) => { setSkel(m); setControlId(null); }} drag={dragMode} setDrag={(d) => { setDragMode(d); setControlId(null); }}
                   region={region} setRegion={(r) => { setRegion(r); setControlId(null); }} joint={joint} setJoint={(j) => { setJoint(j); setControlId(null); }} control={control} opacity={skelOpacity} setOpacity={setSkelOpacity} compact={compact} tab={poseTab} setTab={setPoseTab} onFrame={frameTarget} />}
           </div>

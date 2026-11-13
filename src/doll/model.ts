@@ -26,7 +26,7 @@ export interface GarmentLite { id: string; name: string; display_no?: number | n
 export interface Template { garment_id: string; avatar_id: string; image_id: string | null; fit: Fit; slot: string | null; data: TemplateData | null; version: number; updated_at?: string }
 /** 已穿上的衣物。v1fit＝舊角色上的個別位置，待讀到圖片後換算（只存在於前端） */
 export interface Worn extends LookItem { v1fit?: Fit | null }
-export interface Appearance { head: string; hair: string; hair_config?: HairConfig | null; hair_color: string; accent_color: string | null; tip_color: string | null }
+export interface Appearance { head: string; head_config?: HeadConfig | null; hair: string; hair_config?: HairConfig | null; hair_color: string; accent_color: string | null; tip_color: string | null }
 export const DEFAULT_APPEARANCE: Appearance = { head: BUILTIN_HEAD_ID, hair: BUILTIN_HAIR_ID, hair_color: "brown_pink", accent_color: null, tip_color: null };
 
 export interface LookDetail { id: string; name: string; is_favorite: boolean; thumb_at: string | null; state: LookState | null; legacy: LegacyLook | null; garments: GarmentLite[] }
@@ -178,7 +178,7 @@ export function fromLegacy(l: LegacyLook): { worn: Worn[]; appearance: Appearanc
 export async function fetchLook(id: string) {
   const l = await api<LookDetail>(`/api/doll/looks/${id}`);
   const legacy = l.legacy;
-  if (l.state) return { look: l, worn: l.state.items as Worn[], appearance: { head: l.state.head ?? BUILTIN_HEAD_ID, hair: l.state.hair ?? BUILTIN_HAIR_ID, hair_config:l.state.hair_config ?? null, hair_color: l.state.hair_color, accent_color: l.state.accent_color, tip_color: l.state.tip_color }, pose: l.state.pose, front: l.state.front as FrontPart[], converted: false, old: false };
+  if (l.state) return { look: l, worn: l.state.items as Worn[], appearance: { head: l.state.head ?? BUILTIN_HEAD_ID, head_config: l.state.head_config ?? null, hair: l.state.hair ?? BUILTIN_HAIR_ID, hair_config:l.state.hair_config ?? null, hair_color: l.state.hair_color, accent_color: l.state.accent_color, tip_color: l.state.tip_color }, pose: l.state.pose, front: l.state.front as FrontPart[], converted: false, old: false };
   const c = fromLegacy(legacy ?? { avatar_id: "avatar_v2", hair_color: null, accent_color: null, pose: {}, items: [] });
   return { look: l, ...c, front: [] as FrontPart[], old: true };
 }

@@ -21,6 +21,7 @@ jobs:
       - run: npm run typecheck
       - run: npm install --no-save --package-lock=false esbuild sharp playwright
       - run: node test/doll-logic.mjs
+      - run: node test/phase35.mjs
       - run: node test/doll-api.mjs
       - run: node test/e2e.mjs
       - run: node test/taxonomy.mjs
