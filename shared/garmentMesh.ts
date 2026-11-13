@@ -308,7 +308,7 @@ function meshFor(inp: RigInput, part: number, matte: Uint8Array | null, bones: M
   for (let r = 0; r <= rows; r++) for (let c = 0; c <= cols; c++) {
     const k = r * (cols + 1) + c, u = u0 + ((u1 - u0) * c) / cols, v = v0 + ((v1 - v0) * r) / rows;
     uv[k * 2] = u; uv[k * 2 + 1] = v;
-    const [x, y] = fromImage(fit, ar, u, v);
+    const [x, y] = manualPoint(fit, ar, u, v);
     rest[k * 2] = x; rest[k * 2 + 1] = y;
     if (nb === 1) weights[k] = 1; else weigh(x, y, weights, k * nb);
   }
