@@ -28,6 +28,19 @@ jobs:
       - run: node test/organize.mjs
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
       - run: node test/mesh-integrity.mjs
       - run: node test/doll-camera.mjs
       - run: node test/doll-split.mjs
+      - run: node test/phase34.mjs
+        if: always()
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: doll-screenshots
+          path: shots
+          if-no-files-found: ignore
+          retention-days: 7
