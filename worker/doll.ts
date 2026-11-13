@@ -48,12 +48,11 @@ export async function putTemplate(env: Env, actor: Actor, garmentId: string, inp
     `INSERT INTO doll_fit_templates (garment_id, avatar_id, image_id, cx, cy, w, rotation, slot, data, version, created_at, updated_at)
      SELECT ?,?,?,?,?,?,?,?,?,1,?,? WHERE ? = 0 OR EXISTS (SELECT 1 FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ? AND version = ?)
      ON CONFLICT(garment_id, avatar_id) DO UPDATE SET image_id = excluded.image_id, cx = excluded.cx, cy = excluded.cy, w = excluded.w,
-       rotation = excluded.rotation, slot = excluded.slot, data = excluded.data, version = doll_fit_templates.version + 1, updated_at = excluded.updated_at WHERE doll_fit_templates.version = ?`,
-  ).bind(garmentId, DEFAULT_AVATAR, g.image_id, fit.cx, fit.cy, fit.w, fit.rotation, slot, data, now, now, version, garmentId, DEFAULT_AVATAR, version, version).run();
-  if (!saved.meta.changes) throw new HttpError(409, "template_conflict", "另一裝置已更新衣物設定。你的編輯仍保留；請重新載入最新預設後再保存，避免覆蓋其他部件。");
+       rotation = excluded.rotation, slot = excluded.slot, data = excluded.data, version = doll_fit_templates.version + 1, updated_at = excluded.updated_at WHERE doll_fit_templates.version = ? RETURNING *`,
+  ).bind(garmentId, DEFAULT_AVATAR, g.image_id, fit.cx, fit.cy, fit.w, fit.rotation, slot, data, now, now, version, garmentId, DEFAULT_AVATAR, version, version).all<TemplateRow>();
+  if (!saved.results.length) throw new HttpError(409, "template_conflict", "另一裝置已更新衣物設定。你的編輯仍保留；請重新載入最新預設後再保存，避免覆蓋其他部件。");
   await audit(env, actor, "doll.template.save", garmentId);
-  const row = await env.DB.prepare("SELECT * FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ?").bind(garmentId, DEFAULT_AVATAR).first<TemplateRow>();
-  return templateOut(row!);
+  return templateOut(saved.results[0]);
 }
 
 /** 恢復分類預設：只刪除目前角色的設定；舊角色的記錄保留 */
