@@ -321,7 +321,7 @@ export function FitPanel({ onBind, onApplyBind, r, info, tool, setTool, compact,
   const defaults = () => (
     <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gold/20 pt-2.5">
       <button type="button" disabled={r.from !== "override"} data-testid="fit-restore" onClick={onRestore} className="chip h-9 rounded-full text-[12px] disabled:opacity-40">恢復衣物預設</button>
-      <button type="button" disabled={busy || !!r.analysis.content.approximate} data-testid="fit-save-default" onClick={onSaveDefault} className="btn-jewel h-9 rounded-full text-[12px] disabled:opacity-40">{r.worn.variant ? "存為這個穿法的預設" : "存為衣物預設"}</button>
+      <button type="button" disabled={busy || !!r.analysis.content.approximate} data-testid="fit-save-default" onClick={onSaveDefault} className="btn-jewel h-9 rounded-full text-[12px] disabled:opacity-40">{r.worn.variant ? "存為這個穿法的預設" : "保存目前穿著效果"}</button>
     </div>
   );
   const thumb = r.garment.thumb_image_id ?? r.garment.transparent_image_id;
@@ -563,6 +563,7 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
   const heads = [...BUILTIN_HEADS, ...assets.filter((a) => a.kind === "head")];
   const [hcat, setHcat] = useState<string>("set");
   const [extra, setExtra] = useState(false);
+  const [colorPart, setColorPart] = useState("");
   const current = hair?.parts ?? [];
   const selected = current.find((p) => p.id === selectedHair);
   const changeParts = (parts: HairPart[]) => onChange({ ...value, hair_config: { parts, ref_luma: hair?.ref_luma ?? null } });
@@ -658,7 +659,16 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
             </>
           )}
         </>)}
-        {tab === "color" && <HairColorStudio value={value} onChange={onChange} />}
+        {tab === "color" && <>
+          <select aria-label="染色對象" data-testid="hair-color-target" value={colorPart} onChange={e => setColorPart(e.target.value)} className="mb-2 w-full rounded-xl bg-ink p-2 text-cream">
+            <option value="">全部頭髮</option>{current.map(p => <option key={p.id} value={p.id}>{hairPartName(p)}{p.color ? " · 獨立染色" : " · 繼承全局"}</option>)}
+          </select>
+          {colorPart && current.some(p => p.id === colorPart) ? <>
+            <Row><button type="button" className={pill(false)} onClick={() => onHairPatch(colorPart, {color: undefined})}>恢復繼承全局</button>
+            <button type="button" className={pill(false)} onClick={() => { const c = current.find(p=>p.id===colorPart)?.color; if(c) changeParts(current.map(p=>({...p,color:{...c}}))); }}>配色套用全部髮件</button></Row>
+            <HairColorStudio key={colorPart} value={{...value,...current.find(p=>p.id===colorPart)?.color}} onChange={v => onHairPatch(colorPart,{color:{hair_color:v.hair_color,accent_color:v.accent_color,tip_color:v.tip_color}})} />
+          </> : <HairColorStudio key="global" value={value} onChange={onChange} />}
+        </>}
         {tab === "head" && (
           <Row className="pb-1 pt-1">
             <AddCard label="新增頭部" testid="add-head" onClick={() => onNew("head")} />

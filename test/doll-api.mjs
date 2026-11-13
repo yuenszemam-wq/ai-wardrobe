@@ -69,8 +69,16 @@ console.log("衣物預設穿著設定");
 {
   let r = await call("PUT", "/api/doll/templates/gar_d", { fit, slot: "outer", image_id: "img_daaaaaaa", data: { opts: { follow: "upper", neck: true }, pose: { shoulder_r: 18 }, front: ["hand_r"], variants: { open: { name: "打開", fit: { cx: 600, cy: 690, w: 560, rotation: 0 } } } } });
   check("保存衣物預設（位置＋骨架跟隨＋建議姿勢＋穿法）", r.status === 200 && r.data.avatar_id === "avatar_v2" && r.data.data.opts.follow === "upper" && r.data.data.pose.shoulder_r === 18 && r.data.data.variants.open.name === "打開" && r.data.version === 1, r.data);
-  r = await call("PUT", "/api/doll/templates/gar_d", { fit: { ...fit, w: 540 }, slot: "outer", image_id: "img_daaaaaaa", data: r.data.data });
+  r = await call("PUT", "/api/doll/templates/gar_d", { expected_version: r.data.version, fit: { ...fit, w: 540 }, slot: "outer", image_id: "img_daaaaaaa", data: r.data.data });
   check("再保存：版本遞增、穿法保留", r.data.version === 2 && r.data.fit.w === 540 && r.data.data.variants.open.fit.w === 560);
+  const stale = await call("PUT", "/api/doll/templates/gar_d", { expected_version: 1, fit, slot: "outer", data: {} });
+  check("舊裝置版本不能覆蓋新設定", stale.status === 409 && stale.data.error.code === "template_conflict");
+  const unversioned = await call("PUT", "/api/doll/templates/gar_d", { fit, data: {} });
+  check("舊前端未帶版本不能覆蓋已有預設", unversioned.status === 409);
+  const writes = await Promise.all([1,2].map(i => call("PUT", "/api/doll/templates/gar_d", { expected_version: 2, fit: {...fit,w:540+i}, slot: "outer", data:r.data.data })));
+  check("同版本同時保存只允許一個成功", writes.filter(r=>r.status===200).length===1 && writes.filter(r=>r.status===409).length===1);
+  const unchanged = await call("GET", "/api/doll/templates");
+  check("衝突不清除既有穿法或誤增版本", unchanged.data.templates.find(t=>t.garment_id==='gar_d')?.version===3 && unchanged.data.templates.find(t=>t.garment_id==='gar_d')?.data.variants.open);
   r = await call("PUT", "/api/doll/templates/gar_d", { fit, image_id: "img_other" });
   check("衣物圖片已更換時拒絕（409）", r.status === 409);
   r = await call("PUT", "/api/doll/templates/gar_d", { fit: { cx: "x" } });
@@ -185,7 +193,7 @@ console.log("角色素材（頭部／髮型）");
   r = await call("DELETE", "/api/doll/files/" + f2.data.id);
   check("刪除單一圖片", r.status === 200 && [...env.IMAGES.objects.keys()].filter((k) => k.startsWith(`doll/assets/${hairId}/`)).length === 1);
   r = await call("DELETE", `/api/doll/assets/${hairId}`);
-  check("刪除素材：連同 doll/ 內的檔案", r.status === 200 && [...env.IMAGES.objects.keys()].filter((k) => k.startsWith(`doll/assets/${hairId}/`)).length === 0);
+  check("歷史造型使用中的素材禁止刪除", r.status === 409 && [...env.IMAGES.objects.keys()].filter((k) => k.startsWith(`doll/assets/${hairId}/`)).length === 1);
   check("衣物及衣物圖片完全沒有被改動", (await garmentSnap()).replace(/,\{[^{}]*"id":"gar_c"[^{}]*\}/, "") !== "" && [...env.IMAGES.objects.keys()].filter((k) => k.startsWith("garments/")).length === 4);
 }
 

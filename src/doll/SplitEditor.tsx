@@ -11,6 +11,8 @@ import { loadImage } from "./content";
 import { MaskBuf, alphaOf, emptyMask, findComponents, guessPiece, maskBox, maskFromDataURL, maskToDataURL, newPieceId } from "./pieces";
 import { pill } from "./panels";
 
+import { readDraft, writeDraft, clearDraft } from "./drafts";
+
 type Tool = "pick" | "brush" | "erase" | "rect" | "lasso";
 /** keep＝部件的穿著設定（位置、網格、穿著遮罩、骨架、基準姿勢、狀態）：拆件編輯不會改動，保存時原樣保留 */
 interface Edit { id: string; name: string; slot: Slot; mask: MaskBuf | null; file: string | null; rest: boolean; keep: Omit<Piece, "id" | "name" | "slot" | "box" | "mask" | "file" | "rest"> }
@@ -24,7 +26,7 @@ const hex = (c: string) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5),
 
 export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onUpload }: {
   name: string; imageRef: string; pieces: Piece[]; busy: boolean;
-  onSave: (pieces: Piece[]) => void; onClose: () => void;
+  onSave: (pieces: Piece[]) => Promise<boolean>; onClose: () => void;
   /** 為部件上傳補完的透明圖，回傳圖片參照 */
   onUpload: (file: File, label: string) => Promise<string | null>;
 }) {
@@ -45,6 +47,18 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
   const [box, setBox] = useState({ w: 0, h: 0 });
   const undo = useRef<{ id: string; data: Uint8Array | null }[]>([]);
 
+  const recoveryKey = "split:" + imageRef;
+  const [recoveryReady, setRecoveryReady] = useState(false);
+  const initial = useRef<Edit[] | null>(null);
+  const pendingWrite = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    if (!recoveryReady || list === initial.current && rev === 0) return;
+    const timer = window.setTimeout(() => {
+      pendingWrite.current = pendingWrite.current.catch(() => undefined).then(() => writeDraft(recoveryKey, { list, cur })).catch(() => toast("拆件草稿未能保存，請手動保存", "err"));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [list, cur, rev, recoveryReady, recoveryKey]);
+
   // 讀取原圖及已保存的部件
   useEffect(() => {
     let off = false;
@@ -55,7 +69,13 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
         const edits: Edit[] = [];
         for (const p of pieces) edits.push({ id: p.id, name: p.name, slot: p.slot, mask: p.mask ? await maskFromDataURL(p.mask, a.alpha.w, a.alpha.h) : null, file: p.file ?? null, rest: !!p.rest, keep: keepOf(p) });
         if (off) return;
-        setImg(a.img); setAlpha(a.alpha); setList(edits); setCur(edits.find((e) => !e.rest)?.id ?? null);
+        const saved = await readDraft<{ list: Edit[]; cur: string | null }>(recoveryKey).catch(() => null);
+        if (off) return;
+        const restore = saved && confirm("發現未保存的套裝拆件，是否繼續？");
+        if (saved && !restore) await clearDraft(recoveryKey);
+        const loaded = restore ? saved.list : edits;
+        initial.current = restore ? null : loaded;
+        setImg(a.img); setAlpha(a.alpha); setList(loaded); setCur(restore ? saved.cur : edits.find((e) => !e.rest)?.id ?? null); setRecoveryReady(true);
       } catch (e) { toast((e as Error).message, "err"); }
     })();
     return () => { off = true; };
@@ -312,7 +332,7 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
     g.current = null;
   }
 
-  function save() {
+  async function save() {
     const out: Piece[] = [];
     for (const e of list) {
       if (e.file) { out.push({ id: e.id, name: e.name, slot: e.slot, box: [0, 0, 1, 1], file: e.file, ...e.keep }); continue; }
@@ -322,7 +342,7 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
       out.push({ id: e.id, name: e.name, slot: e.slot, box: b, mask: maskToDataURL(e.mask!), ...e.keep });
     }
     if (out.length > 16) return toast("最多 16 個部件", "err");
-    onSave(out);
+    if (await onSave(out)) { await pendingWrite.current; await clearDraft(recoveryKey).catch(() => undefined); }
   }
   const patch = (v: Partial<Edit>) => current && setList((l) => l.map((e) => (e.id === current.id ? { ...e, ...v } : e)));
 

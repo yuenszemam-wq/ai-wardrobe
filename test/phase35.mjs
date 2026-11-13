@@ -1,0 +1,48 @@
+// Phase 3.5 regression: pagination, honest calibration states, independent colors and immutable sources.
+import assert from 'node:assert/strict';
+import { buildModule } from './doll-build.mjs';
+const M = await buildModule('src/doll/model.ts','p35-model');
+const D = await buildModule('shared/doll.ts','p35-doll');
+const V = await buildModule('shared/avatarV2.ts','p35-avatar');
+const S = await buildModule('src/doll/setup.ts','p35-setup');
+let n=0;
+const check=(name,fn)=>{fn();n++;console.log('✓',name);};
+const originalFetch=globalThis.fetch;
+let offsets=[];
+globalThis.fetch=async path=>{
+  const offset=Number(new URL(path,'https://test').searchParams.get('offset'));offsets.push(offset);
+  return new Response(JSON.stringify({garments:Array.from({length:offset===400?7:200},(_,i)=>({id:'gar_'+(offset+i),name:'衣物'+(offset+i)})),next_offset:offset===400?null:offset+200}));
+};
+const garments=await M.fetchStudioGarments();
+check('407 garments across three pages, no image fetches',()=>{assert.equal(garments.length,407);assert.deepEqual(offsets,[0,200,400]);assert.equal(garments.at(-1).id,'gar_406');});
+globalThis.fetch=originalFetch;
+const g={id:'gar_a',name:'OP',category:'連身裙',subcategory:'OP',transparent_image_id:'img_aaaaaaa'};
+const fit={cx:600,cy:800,w:500,rotation:0};
+const data=D.normalizeTemplateData({opts:{follow:'none',bone:'world'},pieces:[{id:'pc_abc',name:'袖套',slot:'accessory',box:[0,0,1,1],fit}]},'dress');
+const t={garment_id:g.id,avatar_id:'avatar_v2',image_id:g.transparent_image_id,fit,slot:'dress',data,version:1};
+const tpls={v2:new Map([[g.id,t]]),v1:new Map()};
+check('auto placement is not calibrated',()=>assert.equal(S.setupInfo(g,{v2:new Map(),v1:new Map()}).items.place,'auto'));
+check('legacy preset and fixed shape require confirmation',()=>{const i=S.setupInfo(g,tpls);assert.equal(i.items.place,'review');assert.equal(i.items.rig,'review');assert.equal(i.overall,'partial');assert.equal(i.pieces.set,0);});
+check('explicit status is preserved and respected',()=>{t.data={...data,status:{place:'done',rig:'na'}};const i=S.setupInfo(g,tpls);assert.equal(i.items.place,'done');assert.equal(i.items.rig,'na');});
+check('updated image is stale, old calibration retained',()=>{assert.equal(S.setupInfo({...g,transparent_image_id:'img_new'},tpls).overall,'stale');assert.equal(tpls.v2.get(g.id).fit.w,500);});
+const pc=D.normalizePiece({...data.pieces[0],parts:'whole',wear_mask:'data:image/png;base64,AAAA',status:{place:'done'},opts:{follow:'none',bone:'elbow_l'}});
+check('piece sleeve segmentation, attachment and status round trip',()=>{assert.equal(pc.parts,'whole');assert.equal(pc.opts.bone,'elbow_l');assert.equal(pc.status.place,'done');});
+const hair=structuredClone(V.BUILTIN_HAIRS[0].config);
+hair.parts[0].color={hair_color:'#ff88aa',accent_color:'original',tip_color:'#8866ff'};
+hair.parts[1].color={hair_color:'#110011'};
+const normalized=V.normalizeHairConfig(hair);
+check('different per-part colors survive normalization without changing dye mask',()=>{assert.equal(normalized.parts[0].color.hair_color,'#ff88aa');assert.equal(normalized.parts[1].color.hair_color,'#110011');assert.equal(normalized.parts[0].mask,hair.parts[0].mask);assert.equal(V.normalizeHairConfig(V.BUILTIN_HAIRS[0].config).parts[0].color,undefined);});
+const look=D.normalizeLookState({items:[{garment_id:g.id,slot:'dress',snapshot:true,image:'img:img_oldaaaa',fit,mask:null,opts:{follow:'none',bone:'world'}}],hair_config:hair,head_config:V.BUILTIN_HEADS[0].config,pose:{shoulder_l:15}});
+check('look snapshots retain image, head, hair colors, mesh and null masks',()=>{assert.equal(look.items[0].image,'img:img_oldaaaa');assert.deepEqual(look.head_config,V.BUILTIN_HEADS[0].config);assert.deepEqual(look.hair_config.parts[0].color,normalized.parts[0].color);assert.equal(look.items[0].mask,null);});
+check('snapshot source wins over new garment image and changed variant defaults',()=>assert.equal(M.imageOf(look.items[0],{...g,transparent_image_id:'img_new'},t),'img:img_oldaaaa'));
+
+
+check('rest-piece snapshots freeze peer subtraction masks',()=>{
+  const piece={id:'pc_rest',name:'其餘',slot:'dress',box:[0,0,1,1],rest:true};
+  const peer={id:'pc_arm',name:'袖套',slot:'accessory',box:[0,0,1,1],mask:'data:image/png;base64,AAAA'};
+  const saved=D.normalizeLookState({items:[{garment_id:g.id,slot:'dress',snapshot:true,piece:piece.id,piece_def:piece,piece_peers:[piece,peer]}]});
+  peer.mask='data:image/png;base64,BBBB';
+  assert.equal(saved.items[0].piece_peers[1].mask,'data:image/png;base64,AAAA');
+});
+
+console.log(`${n} regression checks passed`);

@@ -6,7 +6,7 @@ import { api, displayName, Garment, imageUrl } from "../api";
 import { IconChevronLeft, IconChevronRight, IconSearch, IconSort } from "../components/icons";
 import { TransparentImage } from "../components/TransparentImage";
 import { Spinner, toast } from "../components/ui";
-import { Templates, fetchTemplates } from "../doll/model";
+import { Templates, fetchStudioGarments, fetchTemplates } from "../doll/model";
 import { ITEM_LABEL, ItemState, OVERALL_LABEL, Overall, SetupInfo, setupInfo } from "../doll/setup";
 import { navigate } from "../router";
 import { useTaxonomy } from "../taxonomy";
@@ -19,7 +19,7 @@ const VIEW_KEY = "aw:setup:view";
 /** 編輯器的「上一件／下一件」用目前列表的次序 */
 export const SETUP_LIST_KEY = "aw:setup:list";
 
-const STATE_TONE: Record<ItemState, string> = { done: "bg-[#6fbf8f]/25 text-[#bfeccf]", na: "bg-white/10 text-cream/60", todo: "bg-[#a12c4b]/35 text-[#ffc6d6]", optional: "bg-white/5 text-mauve" };
+const STATE_TONE: Record<ItemState, string> = { auto: "bg-white/5 text-mauve", review: "bg-gold/20 text-gold-soft", done: "bg-[#6fbf8f]/25 text-[#bfeccf]", na: "bg-white/10 text-cream/60", todo: "bg-[#a12c4b]/35 text-[#ffc6d6]", optional: "bg-white/5 text-mauve" };
 const OVERALL_TONE: Record<Overall, string> = { done: "bg-[#6fbf8f]/30 text-[#d6f5e1]", partial: "bg-gold/25 text-gold-soft", none: "bg-white/10 text-cream/70", stale: "bg-[#a12c4b]/45 text-white" };
 
 function loadView(): { filter: Filter; sort: Sort; cat: string; sub: string } {
@@ -44,8 +44,8 @@ export default function GarmentSetup() {
   const tax = useTaxonomy();
 
   useEffect(() => {
-    Promise.all([api<{ garments: Garment[] }>("/api/garments?limit=200&status=active&transparent=1"), fetchTemplates()])
-      .then(([g, t]) => { setGarments(g.garments); setTpls(t); })
+    Promise.all([fetchStudioGarments(), fetchTemplates()])
+      .then(([g, t]) => { setGarments(g); setTpls(t); })
       .catch((e) => toast((e as Error).message, "err"));
   }, []);
   useEffect(() => { try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ filter, sort, cat, sub })); } catch { /* 私密瀏覽 */ } }, [filter, sort, cat, sub]);

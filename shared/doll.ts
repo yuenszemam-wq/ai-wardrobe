@@ -3,7 +3,7 @@
 // Phase 3：Avatar V2 是唯一角色；衣物分類只決定預設位置及圖層，不再限制可以怎樣疊穿。
 
 import { normalizeManualMesh, manualUV } from "./manualMesh";
-import { AVATAR_V2_ID, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
+import { AVATAR_V2_ID, ImageRef, HeadConfig, normalizeHeadConfig, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
 import { Pose, normalizePose, posedAnchors } from "./avatarRig";
 
 export const DOLL_W = 1200;
@@ -310,6 +310,7 @@ export interface Piece {
    * 與 mask（拆件選取遮罩：決定從原圖提取哪些像素）是兩件不同的事。
    */
   wear_mask?: string | null;
+  parts?: PartsRef | null;
   /** 適合這個部件的角色姿勢（可選擇套用） */
   pose?: Pose | null;
   /** 部件設定狀態（手動標記「已完成／不需要」） */
@@ -342,6 +343,7 @@ export function normalizePiece(v: unknown): Piece | null {
     id, name: (typeof o.name === "string" ? o.name.trim().slice(0, 30) : "") || "部件", slot, box: b as Piece["box"],
     ...(mask ? { mask } : {}), ...(file ? { file } : {}), ...(o.rest === true ? { rest: true } : {}),
     ...(o.fit ? { fit: normalizeFit(o.fit) } : {}), ...(o.opts ? { opts: normalizeOpts(o.opts, slot) } : {}),
+    ...(isParts(o.parts) ? { parts: o.parts } : {}),
     ...(isMask(o.wear_mask) ? { wear_mask: o.wear_mask } : {}),
     ...(o.pose && typeof o.pose === "object" ? { pose: normalizePose(RIG_V2, o.pose) } : {}),
     ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}),
@@ -405,11 +407,15 @@ export function normalizeTemplateData(v: unknown, slot: Slot): TemplateData {
 export interface LookItem {
   /** 完整造型快照：null 遮罩／部件表示確實沒有，不再繼承預設。 */
   snapshot?: boolean;
+  /** Frozen source image; piece snapshots reference the original set image. */
+  image?: ImageRef | null;
   garment_id: string;
   /** 套裝拆件：穿著套裝內的一個部件（null＝整件） */
   piece?: string | null;
   /** 保存造型時部件設定的快照：之後修改套裝拆件，不會影響已保存的造型 */
   piece_def?: Piece | null;
+  /** Rest pieces subtract peer selection masks: preserve those masks in historical looks. */
+  piece_peers?: Piece[];
   slot: Slot;
   hidden: boolean;
   /** 穿法 id；null＝預設穿法 */
@@ -423,6 +429,7 @@ export interface LookItem {
 export interface LookState {
   v: 3;
   head: string | null;
+  head_config?: HeadConfig | null;
   hair: string | null;
   /** 已穿髮件的獨立快照；缺少時沿用原本髮型 id。 */
   hair_config?: HairConfig | null;
@@ -469,7 +476,7 @@ export function normalizeLookState(v: unknown): LookState | null {
       if (!fit) return null;
     }
     items.push({
-      garment_id: gid, ...(piece ? { piece } : {}), ...(pieceDef && pieceDef.id === piece ? { piece_def: pieceDef } : {}), slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
+      garment_id: gid, ...(isImageRef(it.image) ? { image: it.image } : {}), ...(piece ? { piece } : {}), ...(pieceDef && pieceDef.id === piece ? { piece_def: pieceDef } : {}), ...(pieceDef?.rest && Array.isArray(it.piece_peers) ? {piece_peers: normalizePieces(it.piece_peers)} : {}), slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
       variant: typeof it.variant === "string" && /^[a-z0-9_]{1,24}$/.test(it.variant) ? it.variant : null,
       fit, opts: it.opts ? normalizeOpts(it.opts, slot) : null, mask: isMask(it.mask) ? it.mask : null,
       ...(isParts(it.parts) ? { parts: it.parts } : {}),
@@ -478,6 +485,7 @@ export function normalizeLookState(v: unknown): LookState | null {
   const hairConfig = o.hair_config == null ? null : normalizeHairConfig(o.hair_config);
   if(o.hair_config != null && !hairConfig) return null;
   return {
+    ...(normalizeHeadConfig(o.head_config) ? {head_config: normalizeHeadConfig(o.head_config)} : {}),
     v: 3, head: assetId(o.head), hair: assetId(o.hair), ...(hairConfig ? {hair_config:hairConfig} : {}),
     hair_color: normalizeColorValue(o.hair_color) ?? "brown_pink",
     accent_color: o.accent_color === "original" ? "original" : normalizeColorValue(o.accent_color),

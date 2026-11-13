@@ -413,6 +413,7 @@ export async function serveImage(req: Request, env: Env, imageId: string): Promi
 }
 
 export async function deleteImage(env: Env, actor: Actor, imageId: string): Promise<Response> {
+  if (await env.DB.prepare("SELECT id FROM doll_looks WHERE state LIKE ? LIMIT 1").bind('%img:' + imageId + '%').first()) throw new HttpError(409, "image_in_use", "這張圖片仍被已保存造型引用，請保留此版本");
   for (const { table, fk } of [tableFor("garment"), tableFor("outfit")]) {
     const row = await env.DB.prepare(`SELECT id, r2_key, ${fk} AS owner_id, is_primary FROM ${table} WHERE id = ?`)
       .bind(imageId)
