@@ -406,7 +406,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
         const r = remembered.find((x) => itemKey(x) === itemKey(w));
         if (r) return { ...r, hidden: w.hidden, slot: w.slot, variant: w.variant };
         const pieceDef = w.piece && w.piece_def && !has(w.garment_id, w.piece) ? { ...w.piece_def, fit: null, opts: null, wear_mask: null, pose: null } : undefined;
-        return { garment_id: w.garment_id, ...(w.piece ? { piece: w.piece } : {}), ...(pieceDef ? { piece_def: pieceDef } : {}), slot: w.slot, hidden: w.hidden, variant: w.variant, fit: null, opts: null, mask: null };
+        // 與新穿上時相同的預設：沒有衣物預設的衣物固定原圖（不自動變形）
+        const g = gmap.get(w.garment_id), fresh = g && !w.piece ? wornFor(g, t) : null;
+        return { garment_id: w.garment_id, ...(w.piece ? { piece: w.piece } : {}), ...(pieceDef ? { piece_def: pieceDef } : {}), slot: w.slot, hidden: w.hidden, variant: w.variant, fit: null, opts: fresh?.opts ?? null, mask: null };
       });
       const clamped = clampPose(m.rig, pose);
       const h = hist.current;
