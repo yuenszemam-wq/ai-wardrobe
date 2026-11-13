@@ -88,7 +88,15 @@ try {
   await page.click('[data-body="avatar_v2"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="dressing-room"]').dataset.model === "avatar_v2");
   await page.click('[data-tab="clothes"]'); await ready();
-  check("切換回 Avatar V2：畫面與原本相同", (await canvas()) === onV2);
+  const diff = await page.evaluate(async ([a, b]) => {
+    const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+    const [x, y] = await Promise.all([load(a), load(b)]);
+    const px = (i) => { const c = document.createElement("canvas"); c.width = i.width; c.height = i.height; const g = c.getContext("2d"); g.drawImage(i, 0, 0); return g.getImageData(0, 0, c.width, c.height).data; };
+    const p = px(x), q = px(y); let n = 0;
+    for (let i = 0; i < p.length; i += 4) if (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2]) + Math.abs(p[i + 3] - q[i + 3]) > 40) n++;
+    return n / (p.length / 4);
+  }, [await canvas(), onV2]);
+  check("切換回 Avatar V2：畫面與原本相同（容許抗鋸齒差異）", diff < 0.01, diff);
 
   // ───── 姿勢庫 ─────
   await page.click('[data-tab="pose"]');
