@@ -67,7 +67,7 @@ export default function DressingRoom({ id }: { id?: string }) {
   const generation = useRef(0);
   const autoView = useRef(false);
   const edit = useRef<EditBuf | null>(null);
-  const hist = useRef<{ past: Snap[]; future: Snap[]; base: Snap | null; timer: number; skip: boolean }>({ past: [], future: [], base: null, timer: 0, skip: false });
+  const hist = useRef<{ past: Snap[]; future: Snap[]; base: Snap | null; prev: Snap | null; timer: number; start: number; skip: boolean }>({ past: [], future: [], base: null, prev: null, timer: 0, start: 0, skip: false });
   const variantFile = useRef<HTMLInputElement>(null);
   const hairFrame = useRef<{ id: string; y0: number } | null>(null);
 
@@ -146,13 +146,26 @@ export default function DressingRoom({ id }: { id?: string }) {
     if (!loaded) { clearTimeout(h.timer); h.past = []; h.future = []; h.base = null; return; }
     if (h.base === null || h.skip) { h.base = snap; h.skip = false; setHistN((n) => n + 1); return; }
     if (h.base === snap) return;
-    // 連續的調整（拖動、滑桿）合併成一步
+    // 連續的調整（拖動、滑桿）合併成一步；但連續超過一秒就分成另一步，不會把一連串不同的操作併成一步
+    const now = Date.now();
+    if (h.timer && now - h.start > 1000) { clearTimeout(h.timer); h.timer = 0; commitHist(h.prev ?? snap); }
+    if (!h.timer) h.start = now;
+    h.prev = snap;
     clearTimeout(h.timer);
-    h.timer = window.setTimeout(() => { h.timer = 0; h.past.push(h.base!); if (h.past.length > 60) h.past.shift(); h.future = []; h.base = snapRef.current; setHistN((n) => n + 1); }, 380);
+    h.timer = window.setTimeout(() => { h.timer = 0; commitHist(snapRef.current); }, 380);
   }, [snap, loaded]);
+  /** 把目前累積的改動記為一步 */
+  function commitHist(next: Snap) {
+    const h = hist.current;
+    if (h.base && h.base !== next) { h.past.push(h.base); if (h.past.length > 60) h.past.shift(); h.future = []; }
+    h.base = next;
+    setHistN((n) => n + 1);
+  }
+  /** 開始一個獨立的操作（例如一筆遮罩）之前：先把之前未記錄的改動記為一步 */
+  function flushHist() { const h = hist.current; if (h.timer) { clearTimeout(h.timer); h.timer = 0; commitHist(snapRef.current); } }
   function timeTravel(dir: "undo" | "redo") {
     const h = hist.current;
-    if (h.timer) { clearTimeout(h.timer); h.timer = 0; if (h.base && h.base !== snapRef.current) { h.past.push(h.base); h.future = []; } }
+    flushHist();
     const from = dir === "undo" ? h.past : h.future, to = dir === "undo" ? h.future : h.past;
     const target = from.pop();
     if (!target) return;
@@ -306,6 +319,7 @@ export default function DressingRoom({ id }: { id?: string }) {
       c.getContext("2d")!.putImageData(new ImageData(e.data.slice(), e.w, e.h), 0, 0);
       const url = c.toDataURL("image/png");
       e.committed = url;
+      flushHist();
       setItem(r.garment.id, e.kind === "mask" ? { mask: url } : { parts: url });
       return;
     }
