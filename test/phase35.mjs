@@ -35,4 +35,14 @@ check('different per-part colors survive normalization without changing dye mask
 const look=D.normalizeLookState({items:[{garment_id:g.id,slot:'dress',snapshot:true,image:'img:img_oldaaaa',fit,mask:null,opts:{follow:'none',bone:'world'}}],hair_config:hair,head_config:V.BUILTIN_HEADS[0].config,pose:{shoulder_l:15}});
 check('look snapshots retain image, head, hair colors, mesh and null masks',()=>{assert.equal(look.items[0].image,'img:img_oldaaaa');assert.deepEqual(look.head_config,V.BUILTIN_HEADS[0].config);assert.deepEqual(look.hair_config.parts[0].color,normalized.parts[0].color);assert.equal(look.items[0].mask,null);});
 check('snapshot source wins over new garment image and changed variant defaults',()=>assert.equal(M.imageOf(look.items[0],{...g,transparent_image_id:'img_new'},t),'img:img_oldaaaa'));
+
+
+check('rest-piece snapshots freeze peer subtraction masks',()=>{
+  const piece={id:'pc_rest',name:'其餘',slot:'dress',box:[0,0,1,1],rest:true};
+  const peer={id:'pc_arm',name:'袖套',slot:'accessory',box:[0,0,1,1],mask:'data:image/png;base64,AAAA'};
+  const saved=D.normalizeLookState({items:[{garment_id:g.id,slot:'dress',snapshot:true,piece:piece.id,piece_def:piece,piece_peers:[piece,peer]}]});
+  peer.mask='data:image/png;base64,BBBB';
+  assert.equal(saved.items[0].piece_peers[1].mask,'data:image/png;base64,AAAA');
+});
+
 console.log(`${n} regression checks passed`);

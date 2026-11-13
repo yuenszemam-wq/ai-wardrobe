@@ -225,10 +225,10 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
         const piece = pieceOf(w, valid), full = w.snapshot && w.image ? w.image : g.transparent_image_id ? "img:" + g.transparent_image_id : null, key = itemKey(w);
         if (!piece || !full) continue;
         if (!requested.current.has(full)) { requested.current.add(full); void analyze(full).then((a) => setAnalyses((m) => new Map(m).set(full, a))); }
-        const pk = pieceKey(full, piece, valid?.data?.pieces ?? [piece]);
+        const pk = pieceKey(full, piece, w.snapshot && w.piece_peers ? w.piece_peers : valid?.data?.pieces ?? [piece]);
         if (requested.current.has(pk)) continue;
         requested.current.add(pk);
-        void pieceImage(full, piece, valid?.data?.pieces ?? [piece]).then(async (ref) => {
+        void pieceImage(full, piece, w.snapshot && w.piece_peers ? w.piece_peers : valid?.data?.pieces ?? [piece]).then(async (ref) => {
           const a = await analyze(ref);
           setAnalyses((m) => new Map(m).set(ref, a));
           setPieceRefs((m) => new Map(m).set(key, ref));
@@ -251,7 +251,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
 
   function frozenItem(r: Resolved): Worn {
     return { snapshot: true, image: r.piece ? (r.worn.image ?? (r.garment.transparent_image_id ? "img:" + r.garment.transparent_image_id : undefined)) : r.image ?? undefined,
-      garment_id: r.garment.id, ...(r.piece ? {piece: r.piece.id, piece_def: r.piece} : {}), slot: r.worn.slot, hidden: r.worn.hidden,
+      garment_id: r.garment.id, ...(r.piece ? {piece: r.piece.id, piece_def: r.piece, ...(r.piece.rest ? {piece_peers: r.worn.piece_peers ?? r.template?.data?.pieces ?? [r.piece]} : {})} : {}), slot: r.worn.slot, hidden: r.worn.hidden,
       variant: r.worn.variant, fit: r.fit, opts: r.opts, mask: r.mask, parts: r.parts };
   }
 
@@ -542,6 +542,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       return replace ? next.filter((w) => itemKey(w) !== r.key) : next;
     });
     if (replace) setSelected(null);
+    const main = r.template?.data?.pieces?.find(p => ids.includes(p.id) && MAIN_SLOTS.has(p.slot));
+    if (main) offerPose(main.slot, main.pose ?? null, [], main.name);
   }
   async function deleteVariant(r: Resolved, vid: string) {
     const v = r.template?.data?.variants[vid];

@@ -414,6 +414,8 @@ export interface LookItem {
   piece?: string | null;
   /** 保存造型時部件設定的快照：之後修改套裝拆件，不會影響已保存的造型 */
   piece_def?: Piece | null;
+  /** Rest pieces subtract peer selection masks: preserve those masks in historical looks. */
+  piece_peers?: Piece[];
   slot: Slot;
   hidden: boolean;
   /** 穿法 id；null＝預設穿法 */
@@ -474,7 +476,7 @@ export function normalizeLookState(v: unknown): LookState | null {
       if (!fit) return null;
     }
     items.push({
-      garment_id: gid, ...(isImageRef(it.image) ? { image: it.image } : {}), ...(piece ? { piece } : {}), ...(pieceDef && pieceDef.id === piece ? { piece_def: pieceDef } : {}), slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
+      garment_id: gid, ...(isImageRef(it.image) ? { image: it.image } : {}), ...(piece ? { piece } : {}), ...(pieceDef && pieceDef.id === piece ? { piece_def: pieceDef } : {}), ...(pieceDef?.rest && Array.isArray(it.piece_peers) ? {piece_peers: normalizePieces(it.piece_peers)} : {}), slot, hidden: it.hidden === true, ...(it.snapshot===true?{snapshot:true}:{}),
       variant: typeof it.variant === "string" && /^[a-z0-9_]{1,24}$/.test(it.variant) ? it.variant : null,
       fit, opts: it.opts ? normalizeOpts(it.opts, slot) : null, mask: isMask(it.mask) ? it.mask : null,
       ...(isParts(it.parts) ? { parts: it.parts } : {}),
