@@ -66,7 +66,7 @@ type Gesture =
   | { kind: "resize"; d0: number; fit: Fit }
   | { kind: "rotate"; a0: number; fit: Fit }
   | { kind: "pose"; handle: PoseHandle; dx: number; dy: number }
-  | { kind: "paint" };
+  | { kind: "paint"; started:boolean; x:number; y:number };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 /** 角色舞台：Canvas 繪畫角色及衣物，上面一層 SVG 顯示選取框及骨架控制點；所有手勢在這裡處理。 */
@@ -166,7 +166,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     const [a, b] = [...pointers.current.values()];
     const cx=(a.x+b.x)/2, cy=(a.y+b.y)/2;
     const [wx,wy]=toLogical(cx,cy);
-    if (gesture.current?.kind === "paint") latest.current.onPaint?.(0,0,"end");
+    if (gesture.current?.kind === "paint" && gesture.current.started) latest.current.onPaint?.(0,0,"end");
     gesture.current = { kind: "pinch", d0: Math.hypot(a.x-b.x,a.y-b.y)||1, z0:camera.zoom, x0:cx, y0:cy, wx,wy };
   };
   const emitFit = (fit: Fit) => {
@@ -208,8 +208,8 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     }
     if (mode === "mask") {
       if (!sel || pointers.current.size > 1) return;
-      gesture.current = { kind: "paint" };
-      onPaint?.(...toLogical(e.clientX, e.clientY), "start");
+      const [x,y]=toLogical(e.clientX,e.clientY);
+      gesture.current = { kind: "paint", started:false,x,y };
       return;
     }
     if (sel && frame) {
@@ -255,6 +255,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     }
     if (!sel) return;
     if (g.kind === "paint") {
+      if(!g.started){g.started=true;latest.current.onPaint?.(g.x,g.y,"start");}
       latest.current.onPaint?.(...toLogical(e.clientX, e.clientY), "move");
       return;
     }
@@ -274,7 +275,7 @@ export function Stage({ renderer, scene, rig, view, mode, selection, onPick, onF
     pointers.current.delete(e.pointerId);
     const g = gesture.current;
     if (!g) return;
-    if (g.kind === "paint") latest.current.onPaint?.(0, 0, "end");
+    if (g.kind === "paint") { if(!g.started && e.type!=="pointercancel"){latest.current.onPaint?.(g.x,g.y,"start");g.started=true;} if(g.started)latest.current.onPaint?.(0,0,"end"); }
     const rest = [...pointers.current.values()];
     if (g.kind === "pinch" || !rest.length) gesture.current = null;
   }
