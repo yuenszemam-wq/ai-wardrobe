@@ -2,7 +2,7 @@
 import { ReactNode, useMemo, useState } from "react";
 import { Pose, Rig, applyMat, boneMap, clampPose, jointPositions, samePose, solve } from "../../shared/avatarRig";
 import { BONE_LABEL, BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, FrontPart, HairCat, HairConfig, HairPart, HAIR_CATS, HAIR_CAT_LABEL, HAIR_COLORS, NO_HAIR_ID, POSE_PRESETS, hairCatOf, hairPartName, refUrl, resolveHairColors, rgbToHex } from "../../shared/avatarV2";
-import { ATTACHABLE_BONES, FOLLOWS, Follow, SLEEVE_ROT_LIMIT, SLOT_LABEL, SLOT_SKIN, WearOpts } from "../../shared/doll";
+import { ATTACHABLE_BONES, FOLLOWS, Follow, Piece, SLEEVE_ROT_LIMIT, SLOT_LABEL, SLOT_SKIN, WearOpts } from "../../shared/doll";
 import { Garment, displayName, imageUrl } from "../api";
 import { IconClose, IconEye, IconEyeOff, IconGrip, IconPencil, IconPlus, IconSearch, IconTrash } from "../components/icons";
 import { SortableList } from "../components/Sortable";
@@ -68,7 +68,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
   items: Resolved[]; selected: string | null; onSelect: (id: string | null) => void; onReorder: (ids: string[]) => void; onHide: (id: string) => void; onRemove: (id: string) => void; onClear: () => void; hints: string[];
 }) {
   // 清單由上到下＝由外到內（與 Photoshop 圖層相同）
-  const rows = useMemo(() => [...items].reverse().map((r) => ({ id: r.garment.id, r })), [items]);
+  const rows = useMemo(() => [...items].reverse().map((r) => ({ id: r.key, r })), [items]);
   if (!items.length) return <p className="py-8 text-center text-[12px] leading-relaxed text-mauve">角色仍未穿上衣物。<br />到「衣服」點選衣物，可以自由疊穿多件。</p>;
   return (
     <div className="scrollbar-none -mx-3 h-full overflow-y-auto overscroll-contain px-3 pb-2">
@@ -82,19 +82,19 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
         onReorder={(ids) => onReorder([...ids].reverse())}
         className="space-y-1.5"
         render={({ r }, handle, dragging) => {
-          const on = r.garment.id === selected;
+          const on = r.key === selected;
           return (
-            <div data-layer={r.garment.id} className={`flex items-center gap-2 rounded-2xl py-1 pl-1.5 pr-1.5 ${on ? "chip-on" : "chip"} ${dragging ? "opacity-70" : ""} ${r.worn.hidden ? "opacity-60" : ""}`}>
+            <div data-layer={r.key} className={`flex items-center gap-2 rounded-2xl py-1 pl-1.5 pr-1.5 ${on ? "chip-on" : "chip"} ${dragging ? "opacity-70" : ""} ${r.worn.hidden ? "opacity-60" : ""}`}>
               <button type="button" {...handle} className="grid h-9 w-7 shrink-0 place-items-center text-[16px] opacity-80"><IconGrip /></button>
-              <button type="button" onClick={() => onSelect(on ? null : r.garment.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+              <button type="button" onClick={() => onSelect(on ? null : r.key)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 <span className="relative h-10 w-8 shrink-0 overflow-hidden rounded-lg bg-white/85"><TransparentImage src={imageUrl(r.garment.transparent_image_id)} alt="" className="absolute inset-0 h-full w-full object-contain" /></span>
                 <span className="min-w-0">
                   <span className="block truncate text-[13px]">{displayName(r.garment as Garment)}</span>
                   <span className="block text-[10.5px] opacity-75">{SLOT_LABEL[r.worn.slot]}{r.worn.variant && r.template?.data?.variants[r.worn.variant] ? `｜${r.template.data.variants[r.worn.variant].name}` : ""}{r.from === "override" ? "｜已個別調整" : ""}</span>
                 </span>
               </button>
-              <button type="button" aria-label={r.worn.hidden ? "顯示" : "暫時隱藏"} aria-pressed={r.worn.hidden} onClick={() => onHide(r.garment.id)} className="grid h-9 w-8 shrink-0 place-items-center text-[17px]">{r.worn.hidden ? <IconEyeOff /> : <IconEye />}</button>
-              <button type="button" aria-label="脫下" onClick={() => onRemove(r.garment.id)} className="grid h-9 w-8 shrink-0 place-items-center text-[15px]"><IconClose /></button>
+              <button type="button" aria-label={r.worn.hidden ? "顯示" : "暫時隱藏"} aria-pressed={r.worn.hidden} onClick={() => onHide(r.key)} className="grid h-9 w-8 shrink-0 place-items-center text-[17px]">{r.worn.hidden ? <IconEyeOff /> : <IconEye />}</button>
+              <button type="button" aria-label="脫下" onClick={() => onRemove(r.key)} className="grid h-9 w-8 shrink-0 place-items-center text-[15px]"><IconClose /></button>
             </div>
           );
         }}
@@ -135,7 +135,8 @@ const MODE_INFO: { id: WearMode; label: string; hint: string }[] = [
   { id: "body", label: "整件跟隨身體", hint: "整件衣物跟隨上身或骨盆移動，不拆袖，衣物保持完整。" },
   { id: "auto", label: "自動跟隨手臂", hint: "自動分辨袖子，令袖子跟隨手臂。分辨失敗時會自動保持完整衣物。" },
 ];
-export function FitPanel({ r, info, tool, setTool, compact, view, setView, compare, setCompare, busy, onFit, onMeshReset, onMode, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onResetSleeve, onSleeveAuto, onPoseFix, onFrame, onWhole }: {
+export function FitPanel({ r, info, tool, setTool, compact, view, setView, compare, setCompare, busy, onFit, onMeshReset, onMode, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onResetSleeve, onSleeveAuto, onPoseFix, onFrame, onWhole, pieces, wornPieces, onOpenSplit, onWearPieces, onTogglePiece }: {
+  pieces: Piece[] | null; wornPieces: Set<string>; onOpenSplit: () => void; onWearPieces: (ids: string[], replace: boolean) => void; onTogglePiece: (id: string) => void;
   r: Resolved; info: RigInfo | null; tool: FitTool; setTool: (t: FitTool) => void; busy: boolean;
   compact?: boolean; view: GarmentView; setView: (v: GarmentView) => void; compare: boolean; setCompare: (v: boolean) => void; onFrame: () => void;
   part: PartTool; setPart: (p: PartTool) => void; hint: boolean; setHint: (v: boolean) => void; onParts: (v: string | null) => void; onResetSleeve: (label: 1 | 2) => void; onSleeveAuto: () => void; onPoseFix: () => void;
@@ -316,7 +317,21 @@ export function FitPanel({ r, info, tool, setTool, compact, view, setView, compa
               </div>
             </>
           )}
-          {tool === "wear" && (
+          {tool === "wear" && r.piece && (
+            <p className="mb-2 rounded-xl bg-white/5 p-2 text-[11px] leading-snug text-mauve" data-testid="piece-info">這是「{displayName(r.garment as Garment)}」拆出來的部件「{r.piece.name}」，不是另一件衣物。按「存為衣物預設」會保存這個部件的預設位置。</p>
+          )}
+          {tool === "wear" && pieces && (
+            <div className="mb-3 rounded-xl bg-white/5 p-2" data-testid="set-pieces">
+              <div className="flex items-center justify-between"><span className="text-[11.5px] text-gold-soft">套裝拆件</span><button type="button" data-testid="open-split" onClick={onOpenSplit} className="chip rounded-full px-3 py-1 text-[12px]">{pieces.length ? "編輯拆件" : "拆件編輯器"}</button></div>
+              {pieces.length ? (
+                <>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">{pieces.map((p) => <button key={p.id} type="button" data-wear-piece={p.id} aria-pressed={wornPieces.has(p.id)} onClick={() => onTogglePiece(p.id)} className={pill(wornPieces.has(p.id))}>{wornPieces.has(p.id) ? "✓ " : "＋ "}{p.name}</button>)}</div>
+                  <button type="button" data-testid="wear-all-pieces" onClick={() => onWearPieces(pieces.map((p) => p.id), true)} className="btn-jewel mt-2 h-8 w-full rounded-full text-[12px]">改為穿上全部部件（代替整件套裝）</button>
+                </>
+              ) : <p className="mt-1 text-[11px] leading-snug text-mauve">把套裝原圖拆成可以獨立穿著的部件（袖套、頸飾、頭飾…），原圖不會被修改。</p>}
+            </div>
+          )}
+          {tool === "wear" && !r.piece && (
             <>
               <p className="mb-2 text-[11px] leading-snug text-mauve">同一件衣服可以保存不同穿著方式，例如外套打開／關上、襯衫收入裙內／放出。需要另一張圖的穿法可上傳透明圖。</p>
               <div className="flex flex-wrap gap-1.5" data-testid="variants">

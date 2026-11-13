@@ -112,13 +112,17 @@ async function stateStatements(env: Env, lookId: string, raw: unknown): Promise<
   for(const ref of hairRefs){if(!await env.DB.prepare("SELECT id FROM doll_asset_files WHERE id = ?").bind(ref.slice(5)).first())throw new HttpError(400,"bad_hair","有髮件圖片不存在，請重新選擇");}
   const text = JSON.stringify(state);
   if (text.length > 900_000) throw new HttpError(413, "state_too_large", "造型資料過大，請減少個別遮罩");
-  for (const it of state.items) {
-    const g = await env.DB.prepare("SELECT id FROM garments WHERE id = ?").bind(it.garment_id).first();
+  for (const gid of new Set(state.items.map((it) => it.garment_id))) {
+    const g = await env.DB.prepare("SELECT id FROM garments WHERE id = ?").bind(gid).first();
     if (!g) throw new HttpError(400, "bad_garment", "有衣物不存在，未能儲存造型");
   }
   const stmts = [env.DB.prepare("DELETE FROM doll_look_items WHERE look_id = ?").bind(lookId)];
+  // doll_look_items 只是索引（每件衣物一行）：同一套裝穿了多個部件時只記一次；完整內容在 state
+  const indexed = new Set<string>();
   state.items.forEach((it, i) => {
-    const f = it.fit;
+    if (indexed.has(it.garment_id)) return;
+    indexed.add(it.garment_id);
+    const f = it.piece ? null : it.fit;
     stmts.push(env.DB.prepare("INSERT INTO doll_look_items (look_id, garment_id, slot, z, ov_cx, ov_cy, ov_w, ov_rotation) VALUES (?,?,?,?,?,?,?,?)")
       .bind(lookId, it.garment_id, it.slot, i, f ? f.cx : null, f ? f.cy : null, f ? f.w : null, f ? f.rotation : null));
   });
