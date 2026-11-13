@@ -7,7 +7,7 @@ const canvas=()=>page.locator('[data-testid="doll-canvas"]').evaluate(c=>c.toDat
 try {
   // All cards point to D1 thumbnails; list loading must not preload HD garment pixels.
   for(let i=0;i<206;i++) {
-    const id='gar_many_'+i, image='img_many_'+i;
+    const id='gar_many_'+i, image='img_'+i.toString(32).replace(/[0-9a-v]/g,c=>'abcdefghijklmnopqrstuvwxyz234567'[parseInt(c,32)]).padStart(8,'z');
     await env.DB.prepare("INSERT INTO garments (id,name,category,subcategory,status,created_at,updated_at) VALUES (?,?, '上衣', '第206件', 'active','t','t')").bind(id,`衣物${String(i).padStart(3,'0')}`).run();
     await env.DB.prepare("INSERT INTO garment_images (id,garment_id,image_type,r2_key,mime_type,width,height,file_size,sha256,has_alpha,is_primary,created_at) SELECT ?,?,'processed',r2_key,mime_type,width,height,file_size,sha256,1,1,'t' FROM garment_images WHERE garment_id='gar_seed'").bind(image,id).run();
   }
@@ -23,7 +23,7 @@ try {
   await page.fill('[data-testid="look-name"]','未保存恢復測試');
   await page.waitForTimeout(1100);
   const before=await canvas();
-  await page.reload();await ready();
+  await page.reload();await page.waitForFunction(()=>document.querySelector('[data-testid="dressing-room"]')?.dataset.worn==='gar_seed');await ready();
   check('draft restores unsaved clothes and name',await room('data-worn')==='gar_seed' && await page.inputValue('[data-testid="look-name"]')==='未保存恢復測試');
   check('restored canvas pixels equal pre-reload canvas',await canvas()===before);
   check('draft never creates a formal look',(await env.DB.prepare('SELECT COUNT(*) AS n FROM doll_looks').first()).n===0);

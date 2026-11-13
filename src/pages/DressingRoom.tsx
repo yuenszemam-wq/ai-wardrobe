@@ -264,7 +264,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   useEffect(() => {
     if (!recoveryReady || (!dirty && !draft)) { recoveryLatest.current = null; return; }
     const value: Recovery = { snap: { worn: worn.map(w => { const r = resolved.find(r => r.key === itemKey(w)); return r ? frozenItem(r) : w; }), pose, front, look: {...look, ...(hair ? {hair_config: hair} : {})} }, name, favorite, selected, hairSelected, draft,
-      versions: [...(recoveryVersions.current ?? new Map([...(tpls?.v2 ?? [])].map(([k,t]) => [k,t.version])))],
+      versions: worn.map(w => [w.garment_id, recoveryVersions.current?.get(w.garment_id) ?? tpls?.v2.get(w.garment_id)?.version ?? 0]),
       images: worn.map(w => [w.garment_id, garments?.find(g => g.id === w.garment_id)?.transparent_image_id]) };
     recoveryLatest.current = value;
     const timer = window.setTimeout(() => queueDraft(recoveryKey, value), 700);

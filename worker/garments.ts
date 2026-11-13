@@ -422,6 +422,7 @@ export async function listGarments(env: Env, params: URLSearchParams) {
 }
 
 export async function deleteGarment(env: Env, actor: Actor, id: string) {
+  if (await env.DB.prepare("SELECT look_id FROM doll_look_items WHERE garment_id = ? LIMIT 1").bind(id).first()) throw new HttpError(409, "garment_in_use", "已保存造型仍在使用這件衣物，請改為封存以保留歷史造型");
   const { results } = await env.DB.prepare("SELECT r2_key FROM garment_images WHERE garment_id = ?").bind(id).all<{ r2_key: string }>();
   const res = await env.DB.prepare("DELETE FROM garments WHERE id = ?").bind(id).run();
   if (!res.meta.changes) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
@@ -601,6 +602,7 @@ export async function mergeGarments(env: Env, actor: Actor, targetId: string, so
     [targetId, sourceId].map((id) => env.DB.prepare("SELECT * FROM garments WHERE id = ?").bind(id).first<Record<string, unknown>>()),
   );
   if (!t || !s) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
+  if (await env.DB.prepare("SELECT look_id FROM doll_look_items WHERE garment_id = ? LIMIT 1").bind(sourceId).first()) throw new HttpError(409, "garment_in_use", "來源衣物仍被已保存造型引用，請保留此衣物及圖片版本");
   if (t.status === "archived" || s.status === "archived") throw new HttpError(409, "garment_archived", "已封存的衣物不能合併");
 
   const { results: tImgs } = await env.DB.prepare("SELECT id, image_type, sha256 FROM garment_images WHERE garment_id = ?").bind(targetId).all<{ id: string; image_type: string; sha256: string }>();
