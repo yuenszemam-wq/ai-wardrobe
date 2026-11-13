@@ -23,15 +23,19 @@ export function checker() {
 }
 
 /** 加入一件測試衣物（SVG → 透明 PNG），回傳 garment id */
-export async function addGarment(env, { id, name, category, subcategory, svg, w = 900, h = 1200, price = null, favorite = 0, created = now() }) {
-  const png = new Uint8Array(await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">${svg}</svg>`)).png().toBuffer());
+export async function addGarment(env, { id, name, category, subcategory, svg, w = 900, h = 1200, price = null, favorite = 0, created = now(), opaque = false }) {
+  // opaque：白色背景的原相（未去背），用來測試手動去背
+  // 圖形以 900×1200 座標繪畫，按 w×h 輸出
+  const body = opaque ? `<rect width="900" height="1200" fill="#ffffff"/>${svg}` : svg;
+  const png = new Uint8Array(await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 900 1200" preserveAspectRatio="none">${body}</svg>`)).png().toBuffer());
   const thumb = new Uint8Array(await sharp(Buffer.from(png)).resize(Math.round(w / 4), Math.round(h / 4)).webp({ quality: 80 }).toBuffer());
   const sha = await hex(png);
-  const iid = "img_" + id.replace(/[^a-z0-9]/g, "").slice(0, 20);
+  // 圖片 id 必須是 base32（a–z、2–7）：數字 0、1、8、9 改為字母
+  const iid = "img_" + id.replace(/[^a-z0-9]/g, "").replace(/[0189]/g, (d) => "wxyz"["0189".indexOf(d)]).slice(0, 20);
   await env.IMAGES.put(`garments/${id}/p.png`, png);
   await env.DB.prepare("INSERT INTO garments (id,name,category,subcategory,status,price,is_favorite,created_at,updated_at) VALUES (?,?,?,?, 'active', ?, ?, ?, ?)").bind(id, name, category, subcategory, price, favorite, created, created).run();
-  await env.DB.prepare("INSERT INTO garment_images (id,garment_id,image_type,r2_key,mime_type,width,height,file_size,sha256,has_alpha,is_primary,created_at) VALUES (?,?,?,?,?,?,?,?,?,1,1,?)").bind(iid, id, "processed", `garments/${id}/p.png`, "image/png", w, h, png.length, sha, created).run();
-  await env.DB.prepare("INSERT INTO garment_thumbnails (image_id,garment_id,data,mime_type,byte_size,width,height,has_alpha,source_sha256,version,updated_at) VALUES (?,?,?,?,?,?,?,1,?,?,?)").bind(iid, id, thumb, "image/webp", thumb.length, Math.round(w / 4), Math.round(h / 4), sha, sha.slice(0, 16), created).run();
+  await env.DB.prepare("INSERT INTO garment_images (id,garment_id,image_type,r2_key,mime_type,width,height,file_size,sha256,has_alpha,is_primary,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,1,?)").bind(iid, id, opaque ? "original" : "processed", `garments/${id}/p.png`, "image/png", w, h, png.length, sha, opaque ? 0 : 1, created).run();
+  await env.DB.prepare("INSERT INTO garment_thumbnails (image_id,garment_id,data,mime_type,byte_size,width,height,has_alpha,source_sha256,version,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(iid, id, thumb, "image/webp", thumb.length, Math.round(w / 4), Math.round(h / 4), opaque ? 0 : 1, sha, sha.slice(0, 16), created).run();
   return id;
 }
 

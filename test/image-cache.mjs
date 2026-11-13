@@ -23,6 +23,28 @@ await new Promise(r=>setTimeout(r,50));loader.clearImageMemory();navigator.onLin
 const previous=requests;assert.equal(await(await loader.thumbnailBlob(ids[0])).text(),'webp');assert.equal(requests,previous);console.log('✓ offline restart uses persisted thumbnail without network');
 loader.clearImageMemory();navigator.onLine=true;globalThis.fetch=async()=>new Response('unavailable',{status:503});
 await assert.rejects(()=>loader.highResolutionBlob('/api/images/img_test'));console.log('✓ HD failures throw; export cannot receive low-resolution fallback');
+// Phase 3.8：重新整理只核對版本，不刪除縮圖庫；只下載版本已改變的縮圖
+{
+  navigator.onLine=true;loader.clearImageMemory();
+  const log=[];let version='test';
+  globalThis.fetch=async url=>{const u=new URL(url,'https://test');log.push(u.searchParams.get('data')==='1'?'data':'meta');const ids=u.searchParams.get('ids').split(',');return Response.json({items:ids.map(image_id=>({image_id,version:image_id===ids[0]?version:'test',base64:Buffer.from('new').toString('base64')}))});};
+  globalThis.window={dispatchEvent(){},addEventListener(){}};
+  await loader.refreshImageCache();
+  version='changed';
+  const got=await Promise.all(ids.slice(0,16).map(id=>loader.thumbnailBlob(id)));
+  assert.deepEqual(log,['meta','data'],log);
+  assert.equal(await got[0].text(),'new');assert.equal(await got[1].text(),'webp');
+  console.log('✓ pull-to-refresh: version check only, downloads 1 changed thumbnail, keeps 15 unchanged');
+  assert.ok((await caches.keys()).includes('aw-private-thumbs-v1'));console.log('✓ refresh no longer deletes the thumbnail store');
+  // 高清：第二次讀取使用手機已保存的高清圖
+  let hd=0;globalThis.fetch=async()=>{hd++;return new Response(new Blob(['hd-bytes']),{headers:{'content-type':'image/png'}});};
+  const a=loader.highResolutionBlob('/api/images/img_hd'),b=loader.highResolutionBlob('/api/images/img_hd');
+  assert.equal(await (await a).text(),'hd-bytes');await b;assert.equal(hd,1);
+  await new Promise(r=>setTimeout(r,20));loader.clearImageMemory();
+  assert.equal(await (await loader.highResolutionBlob('/api/images/img_hd')).text(),'hd-bytes');assert.equal(hd,1);
+  console.log('✓ HD: duplicate requests merge; cached HD reused without another R2 read');
+  delete globalThis.window;
+}
 // Execute the actual service-worker lifecycle against mock caches/network.
 const listeners={};let net=true;
 const context={self:{addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting:async()=>{},clients:{claim:async()=>{}}},location:{origin:'https://test'},caches,URL,Response,Headers,Promise,fetch:async req=>{if(!net)throw new Error('offline');return Response.json(req.url.endsWith('status')?{logged_in:true}:{items:[{id:'g_1'}]});}};

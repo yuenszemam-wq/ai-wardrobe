@@ -294,6 +294,22 @@
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
   }
 
+  /* Phase 3.8：統一的彈出選單／彈層及輸入框 */
+  .pop {
+    border: 1px solid color-mix(in srgb, var(--color-gold) 55%, transparent);
+    background: color-mix(in srgb, var(--color-velvet) 96%, transparent);
+    color: var(--color-cream);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 0.35);
+    backdrop-filter: blur(6px);
+  }
+  .field {
+    background: var(--color-white);
+    color: var(--color-ink);
+    box-shadow: inset 0 0 0 1px var(--color-gold);
+  }
+  .field::placeholder { color: color-mix(in srgb, var(--color-mauve) 80%, transparent); }
+  .field:focus { outline: none; box-shadow: inset 0 0 0 2px var(--color-amethyst); }
+
   /* 透明圖片的棋盤底，用於檢查去背及穿搭畫布 */
   .checker {
     background-color: var(--color-white);

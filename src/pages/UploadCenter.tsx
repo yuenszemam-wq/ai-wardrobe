@@ -42,10 +42,9 @@ const STATE_TEXT: Record<ItemState, string> = {
   failed: "失敗",
 };
 
-function cutoutText(duplicate: boolean, cutoutId: string | null | undefined, kind?: string, note?: string) {
-  if (duplicate) return "";
-  if (cutoutId) return `｜已自動去背（${kind === "checkerboard" ? "假透明棋盤格" : "純色背景"}），原檔已保留`;
-  return note ? `｜${note}` : "";
+/** Phase 3.8：上傳不自動去背；需要時在衣物詳情或完成後按「去背」 */
+function cutoutText(duplicate: boolean) {
+  return duplicate ? "" : "｜原圖已保存，需要時可按「去背」";
 }
 
 export default function UploadCenter() {
@@ -158,7 +157,7 @@ export default function UploadCenter() {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const r = await intakeUpload(
-            { file: p.original, filename: p.filename, sha256: p.sha256, preview: p.preview, thumbnail: p.thumbnail, analysis: p.analysis, cutout: p.cutout },
+            { file: p.original, filename: p.filename, sha256: p.sha256, preview: p.preview, thumbnail: p.thumbnail, analysis: p.analysis, cutout: p.cutout, opaque: p.opaque },
             (ratio) => update(item.key, { progress: ratio * 0.97 }),
           );
           const dims = `${r.image.width}×${r.image.height}`;
@@ -169,7 +168,7 @@ export default function UploadCenter() {
             imageId: r.image.id,
             name: r.name,
             aiStatus: r.duplicate ? undefined : "pending_ai",
-            message: `${r.name}｜${dims}｜${formatBytes(r.image.file_size)}${p.isHeif ? "｜HEIC 原檔" : ""}${p.warning ? `｜${p.warning}` : ""}${cutoutText(r.duplicate, r.cutout_id, p.cutoutKind, p.cutoutNote)}${r.warnings[0] && !r.duplicate ? `｜${r.warnings[0]}` : ""}`,
+            message: `${r.name}｜${dims}｜${formatBytes(r.image.file_size)}${p.isHeif ? "｜HEIC 原檔" : ""}${p.warning ? `｜${p.warning}` : ""}${cutoutText(r.duplicate)}${r.warnings[0] && !r.duplicate ? `｜${r.warnings[0]}` : ""}`,
           });
           return;
         } catch (e) {
@@ -318,6 +317,7 @@ export default function UploadCenter() {
                       {mergeSource === i.garmentId ? "取消選取" : mergeSource ? "合併到這件" : "選取合併"}
                     </button>
                     <button type="button" disabled={running || merging} onClick={() => setSplitId(i.garmentId!)} className="min-h-11 px-2">拆開</button>
+                    {!merging && <Link to={`/g/${i.garmentId}?cutout=1`} className="min-h-11 px-2 leading-[2.75rem]" data-testid="upload-cutout">去背</Link>}
                     {!merging && <Link to={`/g/${i.garmentId}?edit=1`} className="underline underline-offset-4">填寫</Link>}
                   </div>
                 )}

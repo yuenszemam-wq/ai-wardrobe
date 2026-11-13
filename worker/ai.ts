@@ -195,7 +195,10 @@ export async function intakeUpload(req: Request, env: Env, actor: Actor): Promis
   if (clientSha && clientSha !== sha) {
     throw new HttpError(422, "integrity_mismatch", "上傳內容與原檔不一致（SHA-256 不符），請重試", { server_sha256: sha });
   }
-  const info = parseImage(bytes, { allowHeif: true });
+  const parsed = parseImage(bytes, { allowHeif: true });
+  // 瀏覽器檢查實際 Alpha 像素：有 Alpha 通道但全部不透明的 PNG／WebP 仍是原相（不按檔案格式判斷）
+  const opaque = form.get("opaque") === "1";
+  const info = opaque && parsed.hasAlpha ? { ...parsed, hasAlpha: false } : parsed;
   const mainType = info.hasAlpha ? "processed" : "original";
 
   // 衣櫃已有同一張相 → 不重複建立
@@ -225,7 +228,7 @@ export async function intakeUpload(req: Request, env: Env, actor: Actor): Promis
   const { id: garmentId, created } = await createPlaceholderGarment(env, `intake:${sha}`);
   let main: StoredImage;
   try {
-    main = await storeImage(env, { owner: "garment", ownerId: garmentId, imageType: mainType, bytes, actor, allowHeif: true });
+    main = await storeImage(env, { owner: "garment", ownerId: garmentId, imageType: mainType, bytes, actor, allowHeif: true, opaque });
   } catch (err) {
     if (created) {
       // 主圖失敗：移除剛建立、仍沒有圖片的衣物記錄，避免「有名無圖」

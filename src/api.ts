@@ -247,7 +247,7 @@ export interface IntakeResult {
 
 /** 批量上傳：一張相＝一件待整理衣物（multipart，附進度） */
 export function intakeUpload(
-  parts: { file: Blob; filename: string; sha256: string; preview?: Blob | null; thumbnail?: Blob | null; analysis?: Blob | null; cutout?: Blob | null },
+  parts: { file: Blob; filename: string; sha256: string; preview?: Blob | null; thumbnail?: Blob | null; analysis?: Blob | null; cutout?: Blob | null; opaque?: boolean },
   onProgress?: (ratio: number) => void,
   signal?: AbortSignal,
 ): Promise<IntakeResult> {
@@ -279,6 +279,7 @@ export function intakeUpload(
     if (parts.thumbnail) fd.set("thumbnail", parts.thumbnail, "thumb");
     if (parts.analysis) fd.set("analysis", parts.analysis, "analysis");
     if (parts.cutout) fd.set("cutout", parts.cutout, "cutout.png");
+    if (parts.opaque) fd.set("opaque", "1");
     xhr.send(fd);
   });
 }

@@ -183,6 +183,8 @@ export interface IntakePrepared {
   thumbnail: Blob | null; // 240×300px
   analysis: Blob | null; // 約 1600px，給 AI 辨認
   cutout: Blob | null; // 自動去背後的透明 PNG（原尺寸）；沒有去背時為 null。原檔永遠另外保存
+  /** 已檢查實際像素：全部不透明（檔案可能仍有 Alpha 通道） */
+  opaque?: boolean;
   cutoutKind?: BackgroundKind; // 偵測到的背景類型
   cutoutNote?: string; // 沒有自動去背的原因（給使用者看）
   warning?: string;
@@ -257,7 +259,28 @@ async function tryCutout(src: Drawable, w: number, h: number): Promise<{ blob: B
   return { blob, canvas, kind: result.kind };
 }
 
-/** 準備一張相：計算原檔 SHA-256、解碼一次產生縮圖及辨認圖；HEIC 另產生原尺寸 JPEG 預覽 */
+/**
+ * 手動去背（Phase 3.8）：使用者按「去背」才執行。讀取原始圖片 → 現有去背演算法 → 回傳透明 PNG 供預覽及確認。
+ * 已經是真正透明的圖片（檢查實際 Alpha 像素，不按副檔名）不會再去背。原圖永遠不變。
+ */
+export async function manualCutout(file: Blob): Promise<{ blob: Blob; kind: BackgroundKind; width: number; height: number } | { note: string; kind: BackgroundKind; transparent?: boolean }> {
+  let src: ImageBitmap | HTMLImageElement;
+  try { src = await decode(file); } catch { return { kind: "unknown", note: "這張圖片未能在此瀏覽器解碼" }; }
+  try {
+    const { w, h } = dims(src);
+    if (alphaOf(src)) return { kind: "transparent", transparent: true, note: "這張圖片已經是透明背景，不需要去背" };
+    const c = await tryCutout(src, w, h);
+    if ("blob" in c) { c.canvas.width = c.canvas.height = 0; return { blob: c.blob, kind: c.kind, width: w, height: h }; }
+    return { kind: c.kind, note: c.note || "未能辨認背景，沒有產生去背圖" };
+  } finally {
+    if ("close" in src) src.close();
+  }
+}
+
+/**
+ * 準備一張相：計算原檔 SHA-256、解碼一次產生縮圖及辨認圖；HEIC 另產生原尺寸 JPEG 預覽。
+ * Phase 3.8：上傳時不再自動去背（cutout 永遠為 null），需要時由使用者在衣物詳情按「去背」。
+ */
 export async function prepareIntake(file: File): Promise<IntakePrepared> {
   const mime = await sniffType(file);
   const isHeif = mime === "image/heic";
@@ -281,28 +304,13 @@ export async function prepareIntake(file: File): Promise<IntakePrepared> {
       preview = await canvasToBlob(canvas, "image/jpeg", 0.92);
       canvas.width = canvas.height = 0; // 釋放記憶體
     }
-    let cutout: Blob | null = null;
-    let cutoutKind: BackgroundKind | undefined;
-    let cutoutNote: string | undefined;
-    let thumbSource: Drawable = src;
-    let cutoutCanvas: HTMLCanvasElement | null = null;
-    if (!alpha) {
-      try {
-        const c = await tryCutout(src, w, h);
-        cutoutKind = c.kind;
-        if ("blob" in c) {
-          cutout = c.blob;
-          cutoutCanvas = c.canvas;
-          thumbSource = c.canvas; // 縮圖用去背後的圖（保留透明）
-        } else cutoutNote = c.note;
-      } catch {
-        cutoutNote = "自動去背失敗，原檔已保存";
-      }
-    }
+    const cutout: Blob | null = null;
+    const thumbSource: Drawable = src;
+    // 上傳不自動去背（Phase 3.8）：需要時由使用者在衣物詳情按「去背」
+    void tryCutout;
     const thumbnail = await thumbnailFromSource(thumbSource).catch(()=>null);
     const analysis = Math.max(w, h) > THUMB_MAX ? await scaled(src, ANALYSIS_MAX, alpha) : null;
-    if (cutoutCanvas) cutoutCanvas.width = cutoutCanvas.height = 0; // 釋放記憶體
-    return { original: file, filename: file.name, sha256: sha, mime, width: w, height: h, isHeif, preview, thumbnail, analysis, cutout, cutoutKind, cutoutNote };
+    return { original: file, filename: file.name, sha256: sha, mime, width: w, height: h, isHeif, preview, thumbnail, analysis, cutout, opaque: !alpha };
   } finally {
     if ("close" in src) src.close();
   }
