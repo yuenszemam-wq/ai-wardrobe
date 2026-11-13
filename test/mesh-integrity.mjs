@@ -1,4 +1,5 @@
 // 衣物完整性測試：把純色的測試衣物穿在角色身上，逐個姿勢實際畫出來，
+// （左右分開的襪、鞋在雙腿交叉時會互相遮住，所以面積下限較寬。）
 // 然後數畫面上「衣物顏色」連成多少塊、面積有沒有大幅減少。
 // 目的：不是「畫面有變化」就算成功，而是確認衣物沒有斷成碎片、沒有大面積消失、沒有漂浮的布料。
 // 執行：node test/mesh-integrity.mjs   （需要 esbuild、sharp、playwright）
@@ -54,7 +55,7 @@ try {
       await shot(`integrity-${name}-${pose}`, { garments: [{ name, slot, category }], poses: [pose], noHair: true });
       const m = await measure(join(OUT, `integrity-${name}-${pose}.png`));
       if (!rest) rest = m;
-      if (m.pieces < 1 || m.pieces > expected || m.area < rest.area * 0.72 || m.area > rest.area * 1.45 || m.stray > rest.area * 0.02) bad.push([label, m]);
+      if (m.pieces < 1 || m.pieces > expected || m.area < rest.area * (expected > 1 ? 0.5 : 0.72) || m.area > rest.area * 1.45 || m.stray > rest.area * 0.02) bad.push([label, m]);
     }
     check(`靜止時連成 ${expected} 塊`, rest.pieces === expected, rest);
     check(`全部 ${presets.length} 個姿勢：沒有斷成更多塊、沒有大面積消失、沒有漂浮布料`, bad.length === 0, bad);

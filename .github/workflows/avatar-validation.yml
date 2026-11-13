@@ -1,7 +1,7 @@
 name: Avatar and wardrobe validation
 on:
   push:
-    branches: [feature/phase3-dressing-game]
+    branches: [feature/phase3.1-mesh-skinning]
   pull_request:
     branches: [main]
 permissions:
@@ -28,3 +28,4 @@ jobs:
       - run: node test/organize.mjs
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
+      - run: node test/mesh-integrity.mjs

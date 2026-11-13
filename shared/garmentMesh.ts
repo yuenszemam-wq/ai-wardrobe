@@ -147,7 +147,7 @@ export function detectSleeves(grid: AlphaField, fit: Fit, ar: number, loose = fa
       }
     }
     // 太細小的（肩帶旁的荷葉邊、腰側的裝飾）不算袖子
-    if (area * s * s < 1500 || (far - cap < 40 && yb - ya < 110)) continue;
+    if (area * s * s < 1500 || far - cap < 60 || (far - cap < 90 && yb - ya < 110)) continue;
     // 袖根（袖子與衣身相接的位置）應該在肩膊附近；否則只找到袖子的一部分，強行變形會把布料扯長
     let rx = 0, ry = 0, rn = 0;
     for (let j = top; j <= bottom; j++) for (let i = 1; i < W - 1; i++) {

@@ -278,7 +278,11 @@ node test/ai-intake.mjs    # V2 批量上傳及 AI 待整理（75 項，含 12 �
 - **畫布**：邏輯尺寸 1200×1800。角色、頭髮及衣物全部畫在同一張 Canvas（`src/doll/engine.ts`）；造型縮圖用同一套繪畫程式輸出。
 - **骨架**：`public/doll/avatar_v2/rig.json`（v3，由 `scripts/build-avatar-v2.py` 及 `scripts/extend-avatar-rig.py` 產生）。22 節骨骼：整體重心、骨盆、腰、上胸、頸、頭、左右肩／肘／腕、左右髖／膝／踝、馬尾及側髮；部分節點可平移。姿勢＝`{ 骨骼: 角度, "骨骼.x": 平移 }`。引擎在 `shared/avatarRig.ts`（FK、兩節 IK、拖動末端瞄準）。
 - **自由疊穿**：沒有互斥規則。分類只決定預設位置及預設圖層次序（`shared/doll.ts` 的 `insertIndex`），造型內的次序＝`items` 陣列次序，可在「圖層」拖動、隱藏、脫下。
-- **衣物跟隨骨架**：`shared/skin.ts` 把同一張衣物圖按身體區域分成柔邊區域（骨盆／腰／上胸／上臂／前臂／大腿／小腿／腳掌），關節位置互相重疊。上衣及外套會先由輪廓找出袖子與衣身之間的空隙，按衣物實際形狀劃分袖子。每件衣物可選「自動／整件／袖子跟上臂／袖子跟整隻手」及附接的骨骼。
+- **衣物跟隨骨架（Phase 3.1）**：`shared/garmentMesh.ts`。每件衣物是連續的三角網格，頂點按骨骼權重平滑混合（Linear Blend Skinning），只會彎曲或拉伸，不會斷開。上身衣物分為「衣身」及「左右袖」三層：衣身一層伸入袖根底下，袖根（肩關節附近）仍然跟隨上胸，再向外過渡到手臂，所以袖子移開時不會露出空洞。褲／襪／鞋按左右腿分層；裙、頭飾、配件整件跟隨一節骨骼。舊的柔邊分區做法（`shared/skin.ts`）已移除。
+- **自動分辨袖子**：`detectSleeves` 按衣身側線（腋下至腰最窄的幾行、袖子內側、由下面看的輪廓三種線索）劃分，袖子須與肩膊附近的布料相連並且夠大；把握不足（例如長袖垂在裙身上連成一片、只是肩帶旁的荷葉邊）就保持整件衣物，不強行拆件。
+- **部件編輯**：衣物編輯的「部件」分頁可用筆刷標記右袖／左袖／衣身、改為「整件衣物（不拆袖）」、調整袖子靜止角度。人工部件圖是低解像度 PNG（R 通道＝部件編號 × 50），存在造型（`items[].parts`）或衣物預設（`data.parts`）。
+- **變形後的點選及塗抹**：點選、遮罩筆刷及部件筆刷都沿實際變形後的網格逆向換算到圖片位置（`locate`），任何姿勢下操作的都是畫面上看到的那塊布料；「移到身後」的部分與前面用同一組網格變形。遮罩快取以完整內容雜湊識別。
+- **其他（Phase 3.1）**：撤銷／重做（畫布左下角）、闊度及高度獨立微調（`fit.sy`，存在 `data.sy`）、姿勢校正（穿法可連同姿勢保存，擺出相近姿勢時提示套用）、匯出透明 PNG（1200×1800）。資料表沒有改動。
 - **後領及遮罩**：預設把頸部重畫在衣服後領之上（只限衣服蓋住頸部的位置）；另可在角色身上塗抹遮罩：「隱藏」或「移到身後」。遮罩是低解像度 PNG，原圖不變。
 - **衣物預設 vs 造型內調整**：`doll_fit_templates`（位置欄位＋`data` JSON：跟隨方式、後領、遮罩、建議姿勢、其他穿法）是衣物預設；造型內的個別調整存在 `doll_looks.state` 的 `items[].fit／opts／mask`，`null`＝跟隨預設。位置以靜止姿勢的畫布座標儲存，顯示時跟隨所附接的骨骼。
 - **穿法**：一件衣物可保存多種穿法（`data.variants`），可選擇另一張透明圖（存為 `garment_part` 素材），例如外套打開。
@@ -287,4 +291,4 @@ node test/ai-intake.mjs    # V2 批量上傳及 AI 待整理（75 項，含 12 �
 - **資料表**：0008（`doll_fit_templates`、`doll_looks`、`doll_look_items`）、0009（髮色及姿勢欄位）、0010（`doll_looks.state`、`doll_fit_templates.data`、`doll_look_thumbs`、`doll_assets`、`doll_asset_files`；全部只新增）。0010 復原：`DROP TABLE doll_asset_files; DROP TABLE doll_assets; DROP TABLE doll_look_thumbs;`（兩個新增欄位可保留，舊程式不會讀取）。
 - **API**：`GET /api/doll/templates`、`PUT｜DELETE /api/doll/templates/:garment_id`、`GET｜POST /api/doll/looks`、`GET｜PATCH｜DELETE /api/doll/looks/:id`、`GET｜PUT /api/doll/looks/:id/thumb`、`GET｜POST /api/doll/assets`、`PATCH｜DELETE /api/doll/assets/:id`、`POST /api/doll/assets/:id/files`、`GET｜PUT /api/doll/assets/:id/thumb`、`GET｜DELETE /api/doll/files/:id`。寫入只限 App 登入使用者。
 - **不會做的事**：不呼叫 AI、不修改或刪除衣物圖片及現有衣物／穿搭記錄。
-- **測試**：`node test/doll-logic.mjs`（純邏輯）、`node test/doll-api.mjs`（migration＋API）、`node test/doll-ui.mjs`（Chromium 模擬 iPhone 尺寸；不等於 iPhone Safari 實機驗收）。
+- **測試**：`node test/doll-logic.mjs`（純邏輯）、`node test/doll-api.mjs`（migration＋API）、`node test/doll-ui.mjs`（Chromium 模擬 iPhone 尺寸；不等於 iPhone Safari 實機驗收）。 `node test/mesh-integrity.mjs` 把純色測試衣物逐個姿勢實際畫出來，檢查有沒有斷成碎片、大面積消失或漂浮布料；`MESH_SOURCE=衣物PNG資料夾 node test/mesh-lab.mjs` 可用真實衣物圖輸出各姿勢的效果圖（衣物圖片不放進 repo）。
