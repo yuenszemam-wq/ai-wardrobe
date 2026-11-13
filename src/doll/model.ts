@@ -95,7 +95,8 @@ export function pieceOf(w: Worn, tpl: Template | null): Piece | null {
  * 名稱的左右＝角色自己的左右（右袖套在畫面左邊，附接角色的右前臂）。
  */
 export function pieceBone(p: Pick<Piece, "name" | "slot">): string {
-  const n = p.name;
+  // 括號內的「畫面左／畫面右」是畫面方向，不是角色的左右
+  const n = p.name.replace(/（[^）]*）|\([^)]*\)/g, "");
   if (/袖套|手套|手腕|手環|腕/.test(n)) return /左/.test(n) ? "elbow_l" : /右/.test(n) ? "elbow_r" : "world";
   if (/頸|領|choker|項鍊/i.test(n)) return "neck";
   if (p.slot === "headwear" || /頭飾|髮飾|帽|髮箍|kc|髮夾/i.test(n)) return "head";

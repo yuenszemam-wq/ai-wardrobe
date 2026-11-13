@@ -84,6 +84,8 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-testid="split-stage"]')?.dataset.k);
   await page.click('[data-testid="split-auto"]');
   await page.waitForTimeout(700);
+  const cards = await page.locator('[data-testid="split-pieces"] [data-piece]').allTextContents();
+  check("拆件編輯器：右袖套（畫面左）建議附接角色的右手肘", cards.some((t) => t.includes("右袖套") && t.includes("右手肘")) && cards.some((t) => t.includes("左袖套") && t.includes("左手肘")), cards);
   check("拆件編輯器：部件列表有縮圖", (await page.locator('[data-testid="split-pieces"] img').count()) >= 4);
   await page.click('[data-split-preview="piece"]');
   await page.waitForTimeout(200);
