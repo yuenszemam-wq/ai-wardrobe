@@ -2,11 +2,16 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 import { api, Garment } from "../api";
 import { Bars, Donut, pct, SERIES, swatch, topWithOther } from "../components/charts";
 import { BgImage, HomeBgEditor } from "../components/HomeBackground";
-import { IconCamera, IconChart, IconChevronRight, IconCloudUp, IconDress } from "../components/icons";
+import { IconCamera, IconChart, IconChevronRight, IconCloudUp, IconPerson, IconScissors, IconShirt } from "../components/icons";
 import { Empty, GarmentTile, Link, money, Spinner, useSettings } from "../components/ui";
 import { navigate } from "../router";
 import ReviewPanel from "./AiReview";
 import { AnalysisData } from "./Analysis";
+import { LookPreview, LookSummary, OutfitPreview, OutfitSummary } from "./Outfits";
+import { HomeLayout, Widget } from "../../shared/homeLayout";
+import { useHomeLayout } from "../homeLayoutStore";
+import { HomeEditor } from "../components/HomeEditor";
+import { loadFullList } from "../wardrobeList";
 
 interface Stats {
   total: number;
@@ -23,237 +28,251 @@ interface Stats {
   recent: Garment[];
   favorite_items: Garment[];
 }
+type LookEntry = { kind: "outfit" | "look"; id: string; name: string; is_favorite: boolean; updated_at: string; created_at: string; outfit?: OutfitSummary; look?: LookSummary };
+export interface HomeData { s: Stats; an: AnalysisData | null; garments: Garment[] | null; looks: LookEntry[] | null; seed: number }
 
+/**
+ * 主頁（Phase 3.8A）：可自由組合的資訊元件。布局由「編輯」或「設定 → 主頁佈局」修改。
+ * 數字盡量來自同一份資料（/api/stats 及完整衣物清單），避免不同區塊互相矛盾。
+ */
 export default function Home() {
   const [s, setS] = useState<Stats | null>(null);
   const [an, setAn] = useState<AnalysisData | null>(null);
+  const [garments, setGarments] = useState<Garment[] | null>(null);
+  const [looks, setLooks] = useState<LookEntry[] | null>(null);
   const [err, setErr] = useState("");
-  const [editBg, setEditBg] = useState(false);
-  const settings = useSettings();
+  const saved = useHomeLayout();
+  const [draft, setDraft] = useState<HomeLayout | null>(null);
+  const [editing, setEditing] = useState(() => new URLSearchParams(location.search).get("edit") === "home");
+  const [seed] = useState(() => Math.random());
   const loadStats = useCallback(() => {
     api<Stats>("/api/stats").then(setS).catch((e) => setErr(e.message));
     api<AnalysisData>("/api/analysis").then(setAn).catch(() => undefined);
+    loadFullList(new URLSearchParams()).then(setGarments).catch(() => setGarments([]));
+    Promise.all([api<{ outfits: OutfitSummary[] }>("/api/outfits").catch(() => ({ outfits: [] })), api<{ looks: LookSummary[] }>("/api/doll/looks").catch(() => ({ looks: [] }))]).then(([o, l]) => setLooks([
+      ...o.outfits.map((x): LookEntry => ({ kind: "outfit", id: x.id, name: x.name, is_favorite: x.is_favorite, updated_at: x.updated_at ?? x.created_at ?? "", created_at: x.created_at ?? "", outfit: x })),
+      ...l.looks.map((x): LookEntry => ({ kind: "look", id: x.id, name: x.name, is_favorite: x.is_favorite, updated_at: x.updated_at, created_at: x.created_at, look: x })),
+    ]));
   }, []);
   useEffect(() => {
     loadStats();
-    // 從其他頁面連到「待整理」時捲到該區
     if (location.hash === "#todo" || new URLSearchParams(location.search).get("tab")) setTimeout(() => document.getElementById("todo")?.scrollIntoView({ behavior: "smooth" }), 300);
   }, [loadStats]);
+  useEffect(() => { const on = () => setEditing(true); window.addEventListener("aw:edit-home", on); return () => window.removeEventListener("aw:edit-home", on); }, []);
   if (err) return <p className="py-10 text-center text-wine">{err}</p>;
   if (!s) return <Spinner />;
-
-  const bg = settings?.home_bg ?? null;
-
+  const layout = draft ?? saved;
+  const data: HomeData = { s, an, garments, looks, seed };
+  const forceTodo = !!new URLSearchParams(location.search).get("tab") || location.hash === "#todo";
+  const shown = layout.widgets.filter((w) => w.visible);
   return (
-    <div>
-      {/* 開場：自訂背景圖（下緣淡出融入底色），衣物總數放在拱窗銘牌中 */}
-      <section className="relative -mx-4 -mt-2" style={{ containerType: "inline-size" }}>
-        {bg && (
-          <div className="absolute inset-x-0 top-0">
-            <BgImage src={bg.url} iw={bg.width} ih={bg.height} layout={bg} />
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => setEditBg(true)}
-          className="btn-dark absolute right-3 top-3 z-10 flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] opacity-90"
-          aria-label={bg ? "更換主頁背景" : "加入主頁背景"}
-        >
-          <IconCamera className="text-[14px]" />
-          {bg ? "背景" : "加入背景"}
-        </button>
-        <div className="relative px-4 pb-1" style={{ paddingTop: bg ? `max(1.75rem, calc(${bg.ratio}cqw - 11.5rem))` : "1.75rem" }}>
-          <div className="flex items-end gap-4">
-            <div className="arch-dark grid h-36 w-28 shrink-0 place-items-center">
-              <div className="text-center">
-                <div className="font-serif text-[46px] font-bold leading-none text-gold-soft">{s.total}</div>
-                <div className="mt-1.5 text-[12px] text-mauve">件</div>
-              </div>
-            </div>
-            <div className="min-w-0 pb-2" style={bg ? { textShadow: "0 1px 6px rgb(28 14 26 / 0.9), 0 0 2px rgb(28 14 26 / 0.9)" } : undefined}>
-              <h1 className="font-serif text-[24px] font-bold tracking-[0.08em] text-gold-soft">我的衣櫃</h1>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-cream">
-                <Link to="/wardrobe?favorite=1">收藏 {s.favorites}</Link>
-                <Link to="/wardrobe?status=review" className={s.review ? "underline decoration-gold underline-offset-4" : ""}>
-                  待確認 {s.review}
-                </Link>
-                {s.missing_image > 0 && <Link to="/wardrobe?needs_image=1">缺圖片 {s.missing_image}</Link>}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-      {editBg && <HomeBgEditor current={bg} onClose={() => setEditBg(false)} />}
-
-      {/* 衣櫃總價 */}
-      <Link to="/analysis" className="frame mt-5 flex items-center justify-between gap-3 px-4 py-3.5">
-        <div className="min-w-0">
-          <div className="text-[12px] tracking-[0.12em] text-mauve">衣櫃總價</div>
-          <div className="mt-0.5 font-serif text-[30px] font-bold leading-none text-gold-soft">
-            <span className="mr-1 text-[15px] font-normal text-mauve">HK</span>
-            {money(s.total_value)}
-          </div>
-          <div className="mt-1.5 text-[12px] text-mauve">
-            {s.priced_count ? `已填價錢 ${s.priced_count} 件${s.total - s.priced_count > 0 ? `｜${s.total - s.priced_count} 件未填` : ""}` : "在衣物資料填上價錢，這裡就會自動統計"}
-          </div>
-        </div>
-        <span className="flex shrink-0 items-center gap-0.5 text-[13px] text-amethyst-deep">
-          分析
-          <IconChevronRight className="text-[14px]" />
-        </span>
-      </Link>
-
-      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-        <Stat to="/wardrobe" n={s.total} label="衣物總數" />
-        <Stat tab="pending_ai" n={s.ai_todo} label="待整理" hot={s.ai_todo > 0} />
-        <Stat tab="pending_review" n={s.ai_review} label="待確認" hot={s.ai_review > 0} />
-        <Stat tab="done" n={s.ai_done} label="已完成" />
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <Link to="/import" className="btn-jewel flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-serif text-[16px] tracking-[0.1em]">
-          <IconCloudUp className="text-[20px]" />
-          上傳衣物
-        </Link>
-        <Link to="/outfits/new" className="btn-dark flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-serif text-[16px] tracking-[0.1em]">
-          <IconDress className="text-[20px]" />
-          配搭一套
-        </Link>
-      </div>
-
-      {an && an.total > 0 && <AnalysisSummary an={an} />}
-
-      {s.ai_review > 0 && (
-        <button type="button" onClick={() => goTab("pending_review")} className="frame mt-4 block w-full px-4 py-3 text-left text-sm">
-          AI 已整理好 {s.ai_review} 件，等你確認
-        </button>
-      )}
-
-      <ReviewPanel onChanged={loadStats} />
-
-      <Section title="最近加入" more="/wardrobe">
-        {s.recent.length ? (
-          <Row items={s.recent} />
-        ) : (
-          <Empty title="衣櫃仍然空空的">按「上傳衣物」選相，填寫資料或交給 AI 填寫。</Empty>
-        )}
-      </Section>
-
-      {s.favorite_items.length > 0 && (
-        <Section title="收藏" more="/wardrobe?favorite=1">
-          <Row items={s.favorite_items} />
-        </Section>
-      )}
+    <div data-testid="home" data-layout={shown.map((w) => w.type).join(",")}>
+      {shown.map((w) => <WidgetView key={w.id} w={w} d={data} onChanged={loadStats} />)}
+      {forceTodo && !shown.some((w) => w.type === "todo") && <ReviewPanel onChanged={loadStats} />}
+      {editing && <HomeEditor layout={saved} onDraft={setDraft} onClose={() => { setEditing(false); setDraft(null); if (new URLSearchParams(location.search).get("edit")) navigate("/", true, false); }} />}
     </div>
   );
 }
 
-/** 主頁的衣櫥分析摘要：分類環形圖、主要顏色、風格；按下進入完整分析 */
-function AnalysisSummary({ an }: { an: AnalysisData }) {
-  const cats = topWithOther(an.by_category, 5);
-  const colors = an.by_color.slice(0, 7);
-  const styles = an.by_style.filter((x) => x.name !== "未填風格").slice(0, 3);
-  return (
-    <section className="frame mt-9 px-4 pb-4 pt-6">
-      <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="flex items-center gap-1.5 font-serif text-lg font-bold tracking-[0.08em] text-gold-soft">
-          <IconChart className="text-[17px]" />
-          衣櫥分析
-        </h2>
-        <Link to="/analysis" className="text-[13px] text-amethyst-deep">
-          查看完整分析
-        </Link>
-      </div>
-      <div className="flex items-center gap-4">
-        <Donut segs={cats} size={116} thickness={13}>
-          <div>
-            <div className="font-serif text-[26px] font-bold leading-none text-gold-soft">{an.total}</div>
-            <div className="mt-1 text-[11px] text-mauve">件</div>
-          </div>
-        </Donut>
-        <ul className="min-w-0 flex-1 space-y-1.5 text-[13px]">
-          {cats.map((c, i) => (
-            <li key={c.name} className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SERIES[i % SERIES.length] }} />
-                <span className="truncate">{c.name}</span>
-              </span>
-              <span className="shrink-0 tabular-nums text-mauve">
-                {c.n}（{pct(c.n, an.total)}）
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {colors.length > 0 && (
-        <div className="mt-4 flex items-center gap-3">
-          <span className="shrink-0 text-[12px] text-mauve">顏色</span>
-          <div className="flex flex-wrap gap-2">
-            {colors.map((c) => (
-              <Link key={c.name} to={`/wardrobe?color=${encodeURIComponent(c.name)}`} className="h-7 w-7 rounded-full ring-1 ring-gold/70" style={{ background: swatch(c.name) }} aria-label={`${c.name} ${c.n} 件`} />
+function WidgetView({ w, d, onChanged }: { w: Widget; d: HomeData; onChanged: () => void }) {
+  const { s } = d;
+  const o = w.opts, compact = w.size === "compact";
+  const title = (t: string) => (o.title === false ? undefined : t);
+  const pickGarments = (list: Garment[], sort: string | undefined, filter: (g: Garment) => boolean) => {
+    const out = list.filter((g) => filter(g) && (!o.category || g.category === o.category));
+    const by: Record<string, (a: Garment, b: Garment) => number> = {
+      created: (a, b) => b.created_at.localeCompare(a.created_at), created_asc: (a, b) => a.created_at.localeCompare(b.created_at),
+      updated: (a, b) => b.updated_at.localeCompare(a.updated_at), name: (a, b) => a.name.localeCompare(b.name, "zh-Hant"),
+      price_desc: (a, b) => (b.price ?? -1) - (a.price ?? -1),
+    };
+    return out.sort(by[sort ?? "created"] ?? by.created).slice(0, o.count ?? 8);
+  };
+  switch (w.type) {
+    case "cover": return <Cover w={w} s={s} />;
+    case "overview": {
+      const cells: [string, number, string, boolean?][] = [["衣物總數", s.total, "/wardrobe"], ["收藏", s.favorites, "/wardrobe?favorite=1"], ["待整理", s.ai_todo, "/?tab=pending_ai#todo", s.ai_todo > 0], ["待確認", s.ai_review, "/?tab=pending_review#todo", s.ai_review > 0], ["已完成", s.ai_done, "/?tab=done#todo"], ["缺少圖片", s.missing_image, "/wardrobe?needs_image=1"], ["未填價格", Math.max(0, s.total - s.priced_count), "/wardrobe?priced=0"]];
+      return (
+        <WSection title={title("衣櫃概覽")} testid="w-overview">
+          <div className={`grid ${compact ? "grid-cols-4 gap-1.5" : "grid-cols-3 gap-2"}`}>
+            {cells.filter((c, i) => i < 5 || c[1] > 0).map(([label, n, to, hot]) => (
+              <Link key={label} to={to} className={`frame px-1 text-center ${compact ? "py-2" : "py-3"} ${hot ? "frame-hot" : ""}`}>
+                <span className={`block font-serif font-bold leading-none ${compact ? "text-[19px]" : "text-[23px]"} ${hot ? "text-white" : "text-gold-soft"}`}>{n}</span>
+                <span className="mt-1 block text-[10.5px] text-mauve">{label}</span>
+              </Link>
             ))}
           </div>
+        </WSection>
+      );
+    }
+    case "value": return (
+      <WSection title={title("衣櫃總價")} testid="w-value">
+        <Link to="/analysis" className={`frame flex items-center justify-between gap-3 px-4 ${compact ? "py-2.5" : "py-3.5"}`}>
+          <div className="min-w-0">
+            {o.title === false && <div className="text-[11px] tracking-[0.12em] text-mauve">衣櫃總價</div>}
+            <div className={`font-serif font-bold leading-none text-gold-soft ${compact ? "text-[24px]" : "text-[30px]"}`}><span className="mr-1 text-[14px] font-normal text-mauve">HK</span>{money(s.total_value)}</div>
+            <div className="mt-1 text-[11.5px] text-mauve">{s.priced_count ? `已填價格 ${s.priced_count} 件｜未填 ${Math.max(0, s.total - s.priced_count)} 件` : "在衣物資料填上價錢，這裡就會自動統計"}</div>
+          </div>
+          <span className="flex shrink-0 items-center gap-0.5 text-[13px] text-amethyst-deep">分析<IconChevronRight className="text-[14px]" /></span>
+        </Link>
+      </WSection>
+    );
+    case "quick": {
+      const acts: [string, string, typeof IconShirt][] = [["/import", "上傳", IconCloudUp], ["/outfits/new", "配搭", IconShirt], ["/dressing", "換裝", IconPerson], ["/dressing/setup", "衣服設定", IconScissors], ["/analysis", "分析", IconChart]];
+      return (
+        <WSection title={title("快捷操作")} testid="w-quick">
+          <div className="grid grid-cols-5 gap-1.5">
+            {acts.map(([to, label, Icon]) => <Link key={to} to={to} className={`chip flex flex-col items-center gap-1 rounded-2xl ${compact ? "py-2" : "py-3"} text-[11px]`}><Icon className="text-[18px] text-gold-soft" />{label}</Link>)}
+          </div>
+        </WSection>
+      );
+    }
+    case "recent": case "updated": case "favorites": case "random_garment": {
+      if (!d.garments) return <WSection title={title(LABEL[w.type])} testid={"w-" + w.type}><div className="h-28" /></WSection>;
+      let items: Garment[];
+      if (w.type === "random_garment") {
+        const pool = d.garments.filter((g) => g.primary_image_id && (!o.category || g.category === o.category));
+        items = [...pool].sort((a, b) => hash(a.id, d.seed) - hash(b.id, d.seed)).slice(0, o.count ?? 3);
+      } else items = pickGarments(d.garments, w.type === "updated" ? "updated" : o.sort, w.type === "favorites" ? (g) => g.is_favorite : () => true);
+      if (!items.length && o.only_when_content) return null;
+      const more = w.type === "favorites" ? "/wardrobe?favorite=1" : w.type === "updated" ? "/wardrobe?sort=updated" : "/wardrobe";
+      return (
+        <WSection title={title(LABEL[w.type] + (o.category ? `｜${o.category}` : ""))} more={w.type === "random_garment" ? undefined : more} testid={"w-" + w.type}>
+          {items.length ? <Row items={items} compact={compact} /> : <Empty title="未有衣物">上傳衣物後就會在這裡顯示。</Empty>}
+        </WSection>
+      );
+    }
+    case "recent_looks": case "fav_looks": case "random_look": {
+      if (!d.looks) return null;
+      let list = w.type === "fav_looks" ? d.looks.filter((l) => l.is_favorite) : [...d.looks];
+      if (w.type === "random_look") list = list.sort((a, b) => hash(a.id, d.seed) - hash(b.id, d.seed));
+      else list.sort((a, b) => (o.sort === "name" ? a.name.localeCompare(b.name, "zh-Hant") : o.sort === "created" ? b.created_at.localeCompare(a.created_at) : b.updated_at.localeCompare(a.updated_at)));
+      list = list.slice(0, o.count ?? 6);
+      if (!list.length && (o.only_when_content || w.type === "random_look")) return null;
+      return (
+        <WSection title={title(LABEL[w.type])} more="/outfits" testid={"w-" + w.type}>
+          {list.length ? (
+            <div className="scrollbar-none -mx-4 flex gap-2.5 overflow-x-auto px-4">
+              {list.map((e) => (
+                <Link key={e.kind + e.id} to={e.kind === "outfit" ? `/outfits/${e.id}` : `/dressing/${e.id}`} className={`paper block shrink-0 p-1.5 ${compact ? "w-[26%]" : "w-[34%]"} sm:w-36`}>
+                  {e.outfit ? <OutfitPreview o={e.outfit} /> : <LookPreview l={e.look!} />}
+                  <span className="mt-1 block truncate px-0.5 text-[12px] font-medium text-ink">{e.name}</span>
+                </Link>
+              ))}
+            </div>
+          ) : <Empty title="仍未有造型">到穿搭工作室開始配搭。</Empty>}
+        </WSection>
+      );
+    }
+    case "analysis": return d.an && d.an.total > 0 ? <AnalysisSummary an={d.an} mode={o.mode ?? "category"} title={o.title !== false} /> : null;
+    case "todo": {
+      const items: [string, number, string][] = [["AI 待整理", s.ai_todo, "/?tab=pending_ai#todo"], ["AI 待確認", s.ai_review, "/?tab=pending_review#todo"], ["缺少圖片", s.missing_image, "/wardrobe?needs_image=1"], ["未填價格", Math.max(0, s.total - s.priced_count), "/wardrobe?priced=0"]];
+      const any = items.some((x) => x[1] > 0);
+      if (!any && o.only_when_content && !new URLSearchParams(location.search).get("tab")) return null;
+      return (
+        <WSection title={title("待處理事項")} testid="w-todo">
+          <div className="flex flex-wrap gap-1.5">
+            {items.filter((x) => x[1] > 0 || !o.only_when_content).map(([label, n, to]) => <Link key={label} to={to} className={`rounded-full px-3 py-1.5 text-[12px] ${n ? "chip-on" : "chip"}`}>{label} {n}</Link>)}
+            {!any && <span className="text-[12px] text-mauve">沒有待處理事項</span>}
+          </div>
+          {(s.ai_todo > 0 || s.ai_review > 0 || new URLSearchParams(location.search).get("tab")) && <ReviewPanel onChanged={onChanged} />}
+        </WSection>
+      );
+    }
+  }
+  return null;
+}
+const LABEL: Record<string, string> = { recent: "最近加入", updated: "最近修改", favorites: "收藏衣物", random_garment: "隨機推薦", recent_looks: "最近穿搭", fav_looks: "收藏穿搭", random_look: "隨機穿搭" };
+const hash = (id: string, seed: number) => { let h = Math.floor(seed * 1e9); for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 2654435761); return h >>> 0; };
+
+/** 背景封面：自訂背景圖、衣櫃名稱及統計（可在編輯器設定顯示、隱藏及文字可讀性漸層） */
+function Cover({ w, s }: { w: Widget; s: Stats }) {
+  const settings = useSettings();
+  const [editBg, setEditBg] = useState(false);
+  const bg = settings?.home_bg ?? null;
+  const o = w.opts;
+  const shade = o.shade ?? 0.55;
+  return (
+    <section className="relative -mx-4 -mt-2" style={{ containerType: "inline-size" }} data-testid="w-cover">
+      {bg && <div className="absolute inset-x-0 top-0"><BgImage src={bg.url} iw={bg.width} ih={bg.height} layout={bg} /></div>}
+      <button type="button" onClick={() => setEditBg(true)} className="btn-dark absolute right-3 top-3 z-10 flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] opacity-90" aria-label={bg ? "更換主頁背景" : "加入主頁背景"}>
+        <IconCamera className="text-[14px]" />{bg ? "背景" : "加入背景"}
+      </button>
+      {(o.show_name !== false || o.show_stats !== false) ? (
+        <div className="relative px-4 pb-1" style={{ paddingTop: bg ? `max(1.75rem, calc(${bg.ratio}cqw - 7.5rem))` : "1.25rem" }}>
+          <div className="min-w-0" style={bg && shade > 0 ? { textShadow: `0 1px 6px rgb(28 14 26 / ${shade + 0.1}), 0 0 2px rgb(28 14 26 / ${shade + 0.1})` } : undefined}>
+            {o.show_name !== false && <h1 className="font-serif text-[24px] font-bold tracking-[0.08em] text-gold-soft">{o.name || "我的衣櫃"}</h1>}
+            {o.show_stats !== false && (
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[13.5px] text-cream">
+                <Link to="/wardrobe">{s.total} 件衣物</Link>
+                <Link to="/wardrobe?favorite=1">收藏 {s.favorites}</Link>
+                {s.review > 0 && <Link to="/wardrobe?status=review" className="underline decoration-gold underline-offset-4">待確認 {s.review}</Link>}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : <div style={{ height: bg ? `${bg.ratio * 0.6}cqw` : "2.5rem" }} />}
+      {editBg && <HomeBgEditor current={bg} onClose={() => setEditBg(false)} />}
+    </section>
+  );
+}
+
+/** 主頁的衣櫥分析摘要：按設定顯示主分類、子分類、顏色、品牌或風格；按下進入完整分析 */
+function AnalysisSummary({ an, mode, title }: { an: AnalysisData; mode: string; title: boolean }) {
+  const source = mode === "subcategory" ? an.by_subcategory : mode === "color" ? an.by_color : mode === "brand" ? an.by_brand : mode === "style" ? an.by_style.filter((x) => x.name !== "未填風格") : an.by_category;
+  const key = mode === "subcategory" ? "subcategory" : mode === "color" ? "color" : mode === "brand" ? "brand" : mode === "style" ? "style" : "category";
+  const label = { category: "主分類", subcategory: "子分類", color: "顏色", brand: "品牌", style: "風格" }[key] ?? "主分類";
+  const segs = topWithOther(source, 5);
+  return (
+    <section className="frame mt-4 px-4 pb-4 pt-4" data-testid="w-analysis">
+      {title && (
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="flex items-center gap-1.5 font-serif text-[16px] font-bold tracking-[0.08em] text-gold-soft"><IconChart className="text-[16px]" />衣櫥分析｜{label}</h2>
+          <Link to="/analysis" className="text-[12.5px] text-amethyst-deep">完整分析</Link>
         </div>
       )}
-      {styles.length > 0 && (
-        <div className="mt-4">
-          <Bars rows={styles.map((x) => ({ name: x.name, n: x.n, sub: pct(x.n, an.total) }))} format={(n) => `${n} 件`} onPick={(name) => navigate(`/wardrobe?style=${encodeURIComponent(name)}`)} />
+      {key === "color" ? (
+        <div className="flex flex-wrap gap-2">
+          {an.by_color.slice(0, 10).map((c) => <Link key={c.name} to={`/wardrobe?color=${encodeURIComponent(c.name)}`} className="flex items-center gap-1.5 rounded-full bg-white/5 py-0.5 pl-0.5 pr-2 text-[12px]"><span className="h-6 w-6 rounded-full ring-1 ring-gold/70" style={{ background: swatch(c.name) }} />{c.name} {c.n}</Link>)}
+        </div>
+      ) : key === "style" || key === "brand" ? (
+        <Bars rows={source.slice(0, 5).map((x) => ({ name: x.name, n: x.n, sub: pct(x.n, an.total) }))} format={(n) => `${n} 件`} onPick={(name) => navigate(`/wardrobe?${key}=${encodeURIComponent(name)}`)} />
+      ) : (
+        <div className="flex items-center gap-4">
+          <Donut segs={segs} size={104} thickness={12}>
+            <div><div className="font-serif text-[22px] font-bold leading-none text-gold-soft">{an.total}</div><div className="mt-1 text-[10.5px] text-mauve">件</div></div>
+          </Donut>
+          <ul className="min-w-0 flex-1 space-y-1.5 text-[12.5px]">
+            {segs.map((c, i) => (
+              <li key={c.name} className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SERIES[i % SERIES.length] }} /><span className="truncate">{c.name}</span></span>
+                <span className="shrink-0 tabular-nums text-mauve">{c.n}（{pct(c.n, an.total)}）</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </section>
   );
 }
 
-/** 切換主頁「待整理」區的分頁並捲到該區 */
-function goTab(tab: string) {
-  navigate(`/?tab=${tab}`, true, false);
-  setTimeout(() => document.getElementById("todo")?.scrollIntoView({ behavior: "smooth" }), 50);
-}
-
-function Stat({ to, tab, n, label, hot }: { to?: string; tab?: string; n: number; label: string; hot?: boolean }) {
-  const cls = `frame px-1 py-3 ${hot ? "frame-hot" : ""}`;
-  const inner = (
-    <>
-      <div className={`font-serif text-[24px] font-bold leading-none ${hot ? "text-white" : "text-gold-soft"}`}>{n}</div>
-      <div className={`mt-1.5 text-[11px] ${hot ? "text-white/90" : "text-mauve"}`}>{label}</div>
-    </>
-  );
-  if (tab)
-    return (
-      <button type="button" onClick={() => goTab(tab)} className={cls}>
-        {inner}
-      </button>
-    );
+function WSection({ title, more, children, testid }: { title?: string; more?: string; children: ReactNode; testid: string }) {
   return (
-    <Link to={to!} className={cls}>
-      {inner}
-    </Link>
-  );
-}
-
-function Section({ title, more, children }: { title: string; more?: string; children: ReactNode }) {
-  return (
-    <section className="mt-8">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="ribbon font-serif text-[15px] font-bold tracking-[0.12em]">{title}</h2>
-        {more && (
-          <Link to={more} className="text-[13px] text-amethyst-deep">
-            查看全部
-          </Link>
-        )}
-      </div>
+    <section className="mt-4" data-testid={testid}>
+      {title && (
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="ribbon font-serif text-[15px] font-bold tracking-[0.12em]">{title}</h2>
+          {more && <Link to={more} className="text-[12.5px] text-amethyst-deep">查看全部</Link>}
+        </div>
+      )}
       {children}
     </section>
   );
 }
 
-function Row({ items }: { items: Garment[] }) {
+function Row({ items, compact }: { items: Garment[]; compact?: boolean }) {
   return (
-    <div className="scrollbar-none -mx-4 flex gap-3 overflow-x-auto px-4">
-      {items.map((g) => (
-        <div key={g.id} className="w-[30%] shrink-0 sm:w-36">
-          <GarmentTile g={g} size="sm" />
-        </div>
-      ))}
+    <div className="scrollbar-none -mx-4 flex gap-2.5 overflow-x-auto px-4">
+      {items.map((g) => <div key={g.id} className={`${compact ? "w-[24%]" : "w-[30%]"} shrink-0 sm:w-36`}><GarmentTile g={g} size="sm" /></div>)}
     </div>
   );
 }

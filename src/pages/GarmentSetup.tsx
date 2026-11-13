@@ -21,7 +21,9 @@ const VIEW_KEY = "aw:setup:view";
 /** 編輯器的「上一件／下一件」用目前列表的次序 */
 export const SETUP_LIST_KEY = "aw:setup:list";
 
-const STATE_TONE: Record<ItemState, string> = { auto: "bg-white/5 text-mauve", review: "bg-gold/20 text-gold-soft", done: "bg-[#6fbf8f]/25 text-[#bfeccf]", na: "bg-white/10 text-cream/60", todo: "bg-[#a12c4b]/35 text-[#ffc6d6]", optional: "bg-white/5 text-mauve" };
+/** 狀態符號：✓ 已完成、？ 待確認、！ 需要處理、自 自動、— 不需要／未設定 */
+const STATE_MARK: Record<ItemState, string> = { done: "✓", review: "？", todo: "！", auto: "自", na: "不需", optional: "—" };
+const STATE_TEXT: Record<ItemState, string> = { done: "text-[#bfeccf]", review: "text-gold-soft", todo: "text-[#ffc6d6]", auto: "text-cream/80", na: "text-cream/50", optional: "text-cream/50" };
 const OVERALL_TONE: Record<Overall, string> = { done: "bg-[#6fbf8f]/30 text-[#d6f5e1]", partial: "bg-gold/25 text-gold-soft", none: "bg-white/10 text-cream/70", stale: "bg-[#a12c4b]/45 text-white" };
 
 function loadView(): { filter: Filter; sort: Sort; cat: string; sub: string } {
@@ -126,20 +128,21 @@ export default function GarmentSetup() {
       {!garments || !tpls ? <div className="py-16"><Spinner /></div> : list.length === 0 ? (
         <p className="py-12 text-center text-[12.5px] text-mauve">沒有符合的衣物</p>
       ) : (
-        <ul className="mt-1 space-y-2" data-testid="setup-list">
+        <ul className="mt-1 space-y-1.5" data-testid="setup-list">
           {list.map((g) => {
             const i = infos.get(g.id)!;
             return (
               <li key={g.id}>
-                <button type="button" data-setup-garment={g.id} data-overall={i.overall} onClick={() => open(g.id)} className="frame flex w-full items-center gap-3 px-2.5 py-2 text-left">
-                  <span className="relative h-16 w-12 shrink-0 overflow-hidden rounded-xl bg-white/85"><TransparentImage src={imageUrl(g.transparent_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-0.5" /></span>
+                <button type="button" data-setup-garment={g.id} data-overall={i.overall} onClick={() => open(g.id)} className="frame flex w-full items-center gap-2.5 px-2 py-1.5 text-left">
+                  <span className="relative h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-white/85"><TransparentImage src={imageUrl(g.transparent_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-0.5" /></span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5"><span className="truncate text-[13.5px] font-medium">{displayName(g)}</span><span className={`shrink-0 rounded-full px-1.5 text-[10px] leading-[17px] ${OVERALL_TONE[i.overall]}`}>{OVERALL_LABEL[i.overall]}</span></span>
-                    <span className="block truncate text-[10.5px] text-mauve">{[g.category, g.subcategory].filter(Boolean).join("・")}{i.updated_at ? `｜${ago(i.updated_at)}設定` : ""}</span>
-                    <span className="mt-1 flex flex-wrap gap-1">
-                      {SETUP_KEYS.map((k) => <span key={k} data-item={k} data-state={i.items[k]} className={`rounded-full px-1.5 text-[10px] leading-[17px] ${STATE_TONE[i.items[k]]}`}>{SETUP_LABEL[k]}：{i.items[k] === "optional" ? "未設定" : ITEM_LABEL[i.items[k]]}</span>)}
-                      {i.convertible && <span data-convertible="1" className="rounded-full bg-amethyst/25 px-1.5 text-[10px] leading-[17px] text-cream/85">自動初始位置（由 V2 換算）</span>}
-                      {i.pieces && <span className={`rounded-full px-1.5 text-[10px] leading-[17px] ${i.pieces.set < i.pieces.total ? STATE_TONE.todo : STATE_TONE.done}`}>拆件：{i.pieces.total} 個部件{i.pieces.set < i.pieces.total ? `（${i.pieces.total - i.pieces.set} 個未校正）` : ""}</span>}
+                    <span className="flex items-center gap-1.5"><span className="truncate text-[13px] font-medium">{displayName(g)}</span><span className={`shrink-0 rounded-full px-1.5 text-[10px] leading-[16px] ${OVERALL_TONE[i.overall]}`}>{OVERALL_LABEL[i.overall]}</span></span>
+                    <span className="block truncate text-[10.5px] leading-4 text-mauve">{[g.category, g.subcategory].filter(Boolean).join("・")}{i.updated_at ? `｜${ago(i.updated_at)}` : ""}{i.convertible ? "｜由 V2 換算" : ""}</span>
+                    {/* 一行小型狀態指標：圖示＋文字（不只依靠顏色） */}
+                    <span className="flex items-center gap-0.5 overflow-hidden whitespace-nowrap text-[10.5px] leading-4" data-testid="setup-status-line">
+                      {SETUP_KEYS.map((k, n) => <span key={k} data-item={k} data-state={i.items[k]} title={`${SETUP_LABEL[k]}：${i.items[k] === "optional" ? "未設定" : ITEM_LABEL[i.items[k]]}`} className={STATE_TEXT[i.items[k]]}>{n ? <span aria-hidden className="mx-0.5 text-mauve/50">｜</span> : null}{SETUP_LABEL[k]} {STATE_MARK[i.items[k]]}</span>)}
+                      {i.pieces && <span data-pieces className={i.pieces.set < i.pieces.total ? STATE_TEXT.todo : STATE_TEXT.done}><span aria-hidden className="mx-0.5 text-mauve/50">｜</span>拆件 {i.pieces.set}/{i.pieces.total}</span>}
+                      {i.convertible && <span data-convertible="1" className="sr-only">自動初始位置（由 V2 換算）</span>}
                     </span>
                   </span>
                   <IconChevronRight className="shrink-0 text-[15px] text-mauve" />

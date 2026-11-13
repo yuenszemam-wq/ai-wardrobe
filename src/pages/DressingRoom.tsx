@@ -189,6 +189,20 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     return () => { generation.current++; };
   }, [id, setupKey]);
 
+  // 角色素材頁點選頭部／髮型素材：/dressing?asset=<id> 直接進入該素材的編輯（只執行一次）
+  const assetLink = useRef(new URLSearchParams(location.search).get("asset"));
+  useEffect(() => {
+    const aid = assetLink.current;
+    if (!aid || !loaded || id || setup) return;
+    const a = assets.find((x) => x.id === aid);
+    if (!a) return;
+    assetLink.current = null;
+    try { history.replaceState(null, "", "/dressing"); } catch { /* ignore */ }
+    setTab("look"); setLookTab(a.kind === "head" ? "head" : "hair");
+    editAsset(a);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, assets]);
+
   // ───── 衣服設定模式：載入目標衣物及其預設（含預設姿勢）；只在切換目標時執行一次 ─────
   const setupInit = useRef("");
   useEffect(() => {

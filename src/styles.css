@@ -26,7 +26,21 @@
 @layer base {
   :root {
     color-scheme: dark;
+    /* Phase 3.8 語意色彩（預設＝玫瑰桑紫，與原本介面相同）；介面主題以 inline style 覆蓋 */
+    --aw-header: var(--color-ink);
+    --aw-nav: #3b1f35;
+    --aw-card: #4a2742;
+    --aw-primary: #8f4d7c;
+    --aw-secondary: #4a2742;
+    --aw-selected: #a35c8f;
+    --aw-text2: #b79bae;
+    --aw-image: #f9ece7;
+    --aw-chart: #f2a7c3;
+    --aw-stripe: #321b2e;
+    --aw-radius: 18px;
+    --aw-border-w: 1px;
   }
+  :root[data-scheme="light"] { color-scheme: light; }
   /* html 與 body 都用深色實底：iOS 把網頁加到主畫面後，狀態列後面的模糊色取自這裡，
      以前是白色所以頂部會出現一片模糊白邊。 */
   html {
@@ -40,12 +54,19 @@
   body {
     margin: 0;
     background-color: var(--color-plum);
-    background-image: repeating-linear-gradient(90deg, #2a1526 0 12px, #321b2e 12px 24px);
+    background-image: repeating-linear-gradient(90deg, var(--color-plum) 0 12px, var(--aw-stripe) 12px 24px);
     color: var(--color-cream);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
   }
+  :root[data-pattern="plain"] body { background-image: none; }
+  :root[data-canvas] .doll-stage { background: var(--aw-canvas); }
+  :root[data-pattern="dots"] body { background-image: radial-gradient(circle, var(--aw-stripe) 1.6px, transparent 2.2px); background-size: 16px 16px; }
+  :root[data-lace="0"] .lace-b::after, :root[data-lace="0"] .lace-t::before, :root[data-lace="0"] .lace-trim, :root[data-lace="0"] .lace-trim-up { display: none; }
+  :root[data-frame="round"] .arch { border-radius: var(--aw-radius) !important; }
+  :root[data-density="compact"] main { padding-left: 0.6rem; padding-right: 0.6rem; }
+  :root[data-density="loose"] main { padding-left: 1.4rem; padding-right: 1.4rem; }
   /* 絲絨布幕：直向的柔和褶紋，固定在背景 */
   body::before {
     content: none;
@@ -89,7 +110,7 @@
   [class^="bg-plum"], [class*=" bg-plum"],
   [class^="bg-amethyst"], [class*=" bg-amethyst"],
   .frame, .btn-jewel {
-    --color-mauve: #b79bae;
+    --color-mauve: var(--aw-text2);
     --color-amethyst-deep: #e8bfd3;
     --color-wine: #f28ba3;
     --chip-bg: rgb(255 255 255 / 0.05);
@@ -101,16 +122,16 @@
   /* 玫瑰金雙線框的深色面板 */
   .frame {
     position: relative;
-    border-radius: 18px;
-    border: 1px solid rgb(217 179 145 / 0.55);
-    background: linear-gradient(180deg, rgb(74 39 66 / 0.92), rgb(43 21 38 / 0.94));
+    border-radius: var(--aw-radius);
+    border: var(--aw-border-w) solid color-mix(in srgb, var(--color-gold) 55%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--aw-card) 92%, transparent), color-mix(in srgb, color-mix(in srgb, var(--aw-card) 38%, var(--color-ink)) 94%, transparent));
     box-shadow:
       inset 0 0 0 3px rgb(28 14 26 / 0.45),
       inset 0 0 0 4px rgb(217 179 145 / 0.2),
       0 10px 24px rgb(0 0 0 / 0.28);
   }
   .frame-hot {
-    background: linear-gradient(180deg, #a35c8f, #7a3d69);
+    background: linear-gradient(180deg, var(--aw-selected), color-mix(in srgb, var(--aw-selected) 75%, #000));
     border-color: var(--color-gold-soft);
   }
 
@@ -261,7 +282,7 @@
   /* 主要按鈕：桑紫緞面＋金邊 */
   .btn-jewel {
     border: 1px solid var(--color-gold);
-    background: linear-gradient(180deg, #a9628f 0%, #8f4d7c 45%, #6f3760 100%);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--aw-primary) 86%, #fff) 0%, var(--aw-primary) 45%, color-mix(in srgb, var(--aw-primary) 78%, #000) 100%);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.28),
       inset 0 0 0 2px rgb(28 14 26 / 0.22),
@@ -273,7 +294,7 @@
   }
   .btn-dark {
     border: 1px solid rgb(217 179 145 / 0.6);
-    background: linear-gradient(180deg, #4a2742, #2f1729);
+    background: linear-gradient(180deg, var(--aw-secondary), color-mix(in srgb, var(--aw-secondary) 64%, #000));
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 6px 14px rgb(0 0 0 / 0.3);
     color: var(--color-cream);
   }
@@ -289,7 +310,7 @@
   }
   .chip-on {
     border: 1px solid var(--color-gold);
-    background: linear-gradient(180deg, #a35c8f, #7a3d69);
+    background: linear-gradient(180deg, var(--aw-selected), color-mix(in srgb, var(--aw-selected) 75%, #000));
     color: var(--color-white);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
   }
@@ -370,7 +391,7 @@
   scrollbar-width: none;
 }
 
-.sheet-surface { background: #2a1526; background-image: none; box-shadow: 0 -8px 36px rgb(0 0 0 / 0.4); }
+.sheet-surface { background: var(--color-plum); background-image: none; box-shadow: 0 -8px 36px rgb(0 0 0 / 0.4); }
 
 /* ───── 角色換裝工作室：魔法人偶館的舞台 ───── */
 .doll-stage {

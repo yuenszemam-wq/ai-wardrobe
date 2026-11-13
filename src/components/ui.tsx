@@ -1,3 +1,4 @@
+import { syncTheme } from "../theme";
 import { WardrobeImage } from "./WardrobeImage";
 import { TransparentImage } from "./TransparentImage";
 import { ButtonHTMLAttributes, CSSProperties, ReactNode, useEffect, useState } from "react";
@@ -141,9 +142,11 @@ function legacyCopy(text: string): boolean {
 
 /** 使用者設定（AI 指令、主頁背景）。模組內快取，進入頁面時預先載入，按鈕按下時可即時複製 */
 let settingsCache: AppSettings | null = null;
+export const getSettingsCache = () => settingsCache;
 const settingsListeners = new Set<(s: AppSettings) => void>();
 export function setSettingsCache(s: AppSettings) {
   settingsCache = s;
+  syncTheme(s.theme);
   settingsListeners.forEach((fn) => fn(s));
 }
 export function useSettings(): AppSettings | null {

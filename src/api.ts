@@ -94,6 +94,9 @@ export interface AppSettings {
   ai_command_is_default: boolean;
   default_ai_command: string;
   home_bg: HomeBg | null;
+  /** Phase 3.8：主頁布局及介面主題（null＝未自訂，使用預設） */
+  home_layout?: import("../shared/homeLayout").HomeLayout | null;
+  theme?: import("../shared/theme").ThemeSettings | null;
 }
 
 export interface Garment {
