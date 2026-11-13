@@ -16,7 +16,7 @@ import { IconChevronLeft, IconChevronRight, IconEye, IconEyeOff, IconHand, IconH
 import { Spinner, toast } from "../components/ui";
 import { AssetPanel, Draft } from "../doll/AssetPanel";
 import { Analysis, analyze, canvasBlob, loadImage, prepareAsset } from "../doll/content";
-import { DollRenderer, Scene, flatLocate, flatRect, mainBone } from "../doll/engine";
+import { BehindStats, DollRenderer, Scene, flatLocate, flatRect, mainBone } from "../doll/engine";
 import { pieceImage, pieceKey } from "../doll/pieces";
 import { SplitEditor } from "../doll/SplitEditor";
 import { Appearance, DEFAULT_APPEARANCE, GarmentLite, Resolved, Template, Templates, Worn, fetchStudioGarments, fetchLook, fetchTemplates, templateFor, addHairParts, pieceOf, wearHairPart, hairOf, headOf, imageOf, resolve, sceneItem, userAsset, wornFor } from "../doll/model";
@@ -34,7 +34,8 @@ const TABS: { id: Tab; label: string; Icon: typeof IconShirt }[] = [
   { id: "look", label: "外貌", Icon: IconPerson },
   { id: "pose", label: "姿勢", Icon: IconPose },
 ];
-const MASK_W = 256;
+/** 遮罩寬度（像素）。Phase 3.8 由 256 提高至 512：高倍率放大時蕾絲邊緣不再出現明顯方格；舊遮罩照常按比例讀入。 */
+const MASK_W = 512;
 /** 主要衣物：決定人物姿勢的衣物（配件、半裙、頭飾等不會改變姿勢） */
 const MAIN_SLOTS = new Set<Slot>(["top", "dress", "set", "outer"]);
 /** 正在編輯的遮罩／部件圖（像素緩衝）。塗抹時直接預覽，放手才寫入造型（每一筆＝一步，可以撤銷） */
@@ -312,7 +313,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const view: GarmentView = !advanced || preview ? "worn" : tool === "mask" ? (gview === "mesh" ? "worn" : gview) : tool === "follow" && autoParts ? gview : "worn";
   const selId = sel?.key ?? null;
   // 部件顏色：標記袖子、衣物原圖及部件網格視圖一定顯示（完整衣物＋半透明顏色）；遮罩的已編輯位置按「顯示已編輯位置」
-  const overlayMode = compare || preview || !selId ? null : editing === "mask" ? (hint ? "mask" : null) : tool === "follow" && autoParts && (editing === "parts" || view !== "worn" || hint) ? "parts" : null;
+  // 衣物原圖：一定以顏色區分「隱藏」（紅）及「移到身後」（藍），否則兩者在平面原圖上很難分辨
+  const overlayMode = compare || preview || !selId ? null : editing === "mask" ? (hint || view === "source" ? "mask" : null) : tool === "follow" && autoParts && (editing === "parts" || view !== "worn" || hint) ? "parts" : null;
   /**
    * 對比：只暫時停用目前工具負責的那一項設定（位置、大小、旋轉、姿勢及其他設定保持不變；不會改動衣物資料）。
    * 變形＝沒有手動網格；遮罩＝沒有遮罩；骨架＝不按骨架變形（整件跟隨主骨骼，即基準姿勢下的樣子）。
@@ -333,6 +335,21 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     wire: view === "mesh" && !compare ? selId : null,
   }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare]);
   const mats = useMemo(() => solve(rig, pose), [rig, pose]);
+  // 「移到身後」的實際像素效果：停筆後量度一次（低解像度），讓使用者分辨「身後」與「隱藏」
+  const [behindStats, setBehindStats] = useState<BehindStats | null>(null);
+  const selMask = sel?.mask ?? null;
+  useEffect(() => {
+    if (editing !== "mask" || !selId || !selMask) { setBehindStats(null); return; }
+    let alive = true, tries = 0;
+    const run = () => {
+      if (!alive) return;
+      const st = renderer.behindStats({ ...scene, items: scene.items.map((i) => (i.key === selId ? { ...i, mask: selMask } : i)) }, selId);
+      if (st || ++tries > 20) { if (alive) setBehindStats(st); return; }
+      timer = window.setTimeout(run, 250);
+    };
+    let timer = window.setTimeout(run, 350);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [editing, selId, selMask, pose, renderer, scene]);
 
   // ───── 撤銷／重做（衣物、位置、遮罩、部件、姿勢、外貌） ─────
   const snap: Snap = useMemo(() => ({ worn, pose, front, look }), [worn, pose, front, look]);
@@ -658,7 +675,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       }
       return;
     }
-    const w = MASK_W, h = Math.max(8, Math.min(420, Math.round(MASK_W * sel.analysis.content.ar)));
+    const w = MASK_W, h = Math.max(8, Math.min(900, Math.round(MASK_W * sel.analysis.content.ar)));
     const buf: EditBuf = { kind: "mask", key: gid, w, h, data: new Uint8ClampedArray(w * h * 4), ready: !editSource, committed: editSource, last: null, dirty: false, at: 0, backup: null };
     for (let i = 3; i < buf.data.length; i += 4) buf.data[i] = 255;
     edit.current = buf;
@@ -1284,7 +1301,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           <div ref={panelBox} className={`relative overflow-clip px-3 ${panelH > 0 ? "pt-2.5" : ""}`} style={{ height: panelH, minHeight: panelH > 0 ? undefined : 8 }} data-testid="doll-panel" data-size={panel}>
             {panelH < 40 ? null : draft ? <AssetPanel draft={draft} setDraft={setDraft} busy={busy} onFiles={(f) => void addAssetFiles(f)} onSave={() => void saveAsset()} onCancel={() => void cancelAsset()} onDelete={() => void deleteAsset()} hairTool={hairTool === "mask" ? "place" : hairTool} setHairTool={setHairTool} />
               : sel ? (
-                <FitPanel onBind={(on) => setBind(sel, on)} onApplyBind={() => { if (sel.opts.bind) setPose(sel.opts.bind); }} r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onMeshReset={() => applyFit(sel, { ...sel.fit, mesh: undefined })} onOpts={(o) => setOpts(sel, o)}
+                <FitPanel behind={behindStats} onBind={(on) => setBind(sel, on)} onApplyBind={() => { if (sel.opts.bind) setPose(sel.opts.bind); }} r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onMeshReset={() => applyFit(sel, { ...sel.fit, mesh: undefined })} onOpts={(o) => setOpts(sel, o)}
                   onMode={(m) => setMode(sel, m)} onWhole={() => wholeImage(sel)} compact={compact}
                   pieces={sel.piece ? null : sel.template?.data?.pieces ?? []} wornPieces={new Set(worn.filter((w) => w.garment_id === sel.garment.id && w.piece).map((w) => w.piece!))}
                   onOpenSplit={() => setSplit(sel.key)} onWearPieces={(ids, replace) => wearPieces(sel, ids, replace)} onTogglePiece={(pid) => { const k = sel.garment.id + "#" + pid; if (worn.some((w) => itemKey(w) === k)) remove(k); else wearPieces(sel, [pid], false); }} view={gview} setView={setGview} compare={compare} setCompare={setCompare} onFrame={frameTarget}

@@ -13,6 +13,7 @@ import { RigInfo } from "../../shared/garmentMesh";
 import { Appearance, BUILTIN_THUMB, GarmentLite, Resolved, wearHairPart } from "./model";
 import { HairColorStudio } from "./HairColor";
 import type { ModelSummary } from "./models";
+import type { BehindStats } from "./engine";
 import type { AvatarModel } from "../../shared/avatarModel";
 import { DRAG_MODES, DragMode, PoseControl, REGIONS, Region, adjustable, jointLabel, jointTitle, regionBones, regionOf } from "../../shared/poseControls";
 
@@ -290,7 +291,9 @@ const MODE_INFO: { id: WearMode; label: string; hint: string }[] = [
   { id: "body", label: "跟隨身體", hint: "整件衣物跟隨身體（或所附接的部位）移動及轉動，不拆袖，保持完整。" },
   { id: "auto", label: "跟隨手臂", hint: "袖子跟隨肩膊、手肘及手腕。分辨失敗時會自動保持完整衣物，不會斷開。" },
 ];
-export function FitPanel({ onBind, onApplyBind, r, info, tool, setTool, compact, view, setView, compare, setCompare, busy, onFit, onMeshReset, onMode, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onResetSleeve, onSleeveAuto, onPoseFix, onFrame, onWhole, pieces, wornPieces, onOpenSplit, onWearPieces, onTogglePiece }: {
+export function FitPanel({ behind, onBind, onApplyBind, r, info, tool, setTool, compact, view, setView, compare, setCompare, busy, onFit, onMeshReset, onMode, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onResetSleeve, onSleeveAuto, onPoseFix, onFrame, onWhole, pieces, wornPieces, onOpenSplit, onWearPieces, onTogglePiece }: {
+  /** 「移到身後」實際效果（像素量度）；null＝沒有身後部分或未計算 */
+  behind?: BehindStats | null;
   /** 基準姿勢：true＝以目前姿勢設定，false＝清除 */
   onBind: (on: boolean) => void; onApplyBind: () => void;
   pieces: Piece[] | null; wornPieces: Set<string>; onOpenSplit: () => void; onWearPieces: (ids: string[], replace: boolean) => void; onTogglePiece: (id: string) => void;
@@ -413,7 +416,17 @@ export function FitPanel({ onBind, onApplyBind, r, info, tool, setTool, compact,
               </div>
               <label className="mt-2 flex items-center gap-2">筆刷<input type="range" data-testid="mask-brush" min={2} max={60} value={mask.size} onChange={(e) => setMask({ ...mask, size: Number(e.target.value) })} className="flex-1" /></label>
               <button type="button" data-testid="mask-clear" onClick={onClearMask} disabled={!r.mask} className="chip mt-2 h-8 rounded-full px-3 disabled:opacity-40">還原整件（清除遮罩）</button>
-              <p className="mt-2 text-[11px] leading-snug text-mauve">「隱藏」令該部分不顯示（例如後領內側）；「移到身後」令該部分畫在身體後面（例如外套內裡）。可以在角色身上塗，也可以切換到「衣物原圖」放大來塗；兩邊是同一份遮罩，原圖不會被修改。</p>
+              <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-mauve" data-testid="mask-legend">
+                <span className="inline-flex items-center gap-1"><span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "rgb(255 40 80)" }} />紅＝隱藏</span>
+                <span className="inline-flex items-center gap-1"><span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "rgb(40 120 255)" }} />藍＝移到身後</span>
+                <span>沒有顏色＝正常顯示</span>
+              </p>
+              {behind && behind.total > 0 && (
+                <p className="mt-1 text-[11px] leading-snug text-mauve" data-testid="mask-behind-stats" data-total={behind.total} data-visible={behind.visible}>
+                  身後部分：約 {Math.round((behind.visible / behind.total) * 100)}% 在身體輪廓外仍然可見，其餘被頸部、身體、頭髮或衣物前面遮住（這是正常的「身後」效果，不是刪除）。
+                </p>
+              )}
+              <p className="mt-2 text-[11px] leading-snug text-mauve">「隱藏」令該部分完全不顯示；「移到身後」保留布料，改為畫在身體後面：被身體遮住的位置看不到，身體輪廓以外（例如頸部兩旁的後領）仍然可見。可以在角色身上塗，也可以切換到「衣物原圖」放大來塗；兩邊是同一份遮罩，原圖不會被修改。</p>
             </>
           )}
           {tool === "follow" && (
