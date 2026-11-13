@@ -37,6 +37,10 @@ jobs:
       - run: node test/mesh-integrity.mjs
       - run: node test/doll-camera.mjs
       - run: node test/doll-split.mjs
+      - run: node test/phase38.mjs
+      - run: node test/phase38-ui.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
       - run: node test/phase34.mjs
         if: always()
         env:
