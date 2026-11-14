@@ -296,7 +296,8 @@ function GalleryDetail({ type, draft, render, onBack, onAdd, onReadd }: { type: 
   const current: Widget = { ...w, display, size, span: spanFor(type, display, size, span) };
   const hidden = draft.widgets.find((x) => x.type === type && !x.visible);
   const jumping = useRef<number | null>(null);
-  const choose = (i: number) => { setIdx(i); setSize(list[i][2]); jumping.current = i; const c = rail.current?.children[i] as HTMLElement | undefined; if (c && rail.current) rail.current.scrollTo({ left: c.offsetLeft - (rail.current.clientWidth - c.offsetWidth) / 2, behavior: "smooth" }); setTimeout(() => { jumping.current = null; }, 900); };
+  const settle = useRef(0);
+  const choose = (i: number) => { setIdx(i); setSize(list[i][2]); jumping.current = i; const c = rail.current?.children[i] as HTMLElement | undefined; if (c && rail.current) rail.current.scrollTo({ left: c.offsetLeft - (rail.current.clientWidth - c.offsetWidth) / 2, behavior: "smooth" }); setTimeout(() => { if (jumping.current === i) jumping.current = null; }, 2500); };
   const sizes: WidgetSize[] = type === "cover" ? (display === "mini" ? ["small"] : ["large"]) : ["small", "medium", "large"];
   return (
     <div data-testid="gallery-detail" data-type={type} data-display={display} data-size={size} data-span={current.span}>
@@ -305,12 +306,16 @@ function GalleryDetail({ type, draft, render, onBack, onAdd, onReadd }: { type: 
       {/* 左右滑動切換展示方式；每一頁都是正式渲染器的真實預覽 */}
       <div ref={rail} className="scrollbar-none -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4" data-testid="gallery-rail"
         onScroll={(e) => {
-          // 以最接近中央的一頁為目前展示方式（按點選圓點捲動時，等捲動到達才更新，不會中途改變）
-          const el = e.currentTarget, mid = el.scrollLeft + el.clientWidth / 2;
-          let best = 0, dist = Infinity;
-          Array.from(el.children).forEach((c, i) => { const h = c as HTMLElement, d = Math.abs(h.offsetLeft + h.offsetWidth / 2 - mid); if (d < dist) { dist = d; best = i; } });
-          if (jumping.current !== null) { if (best === jumping.current) jumping.current = null; return; }
-          if (best !== idx) { setIdx(best); setSize(list[best][2]); }
+          // 停止捲動後（防抖）才以最接近中央的一頁為目前展示方式；按圓點捲動時等到達目標才更新
+          const el = e.currentTarget;
+          clearTimeout(settle.current);
+          settle.current = window.setTimeout(() => {
+            const mid = el.scrollLeft + el.clientWidth / 2;
+            let best = 0, dist = Infinity;
+            Array.from(el.children).forEach((c, i) => { const h = c as HTMLElement, d = Math.abs(h.offsetLeft + h.offsetWidth / 2 - mid); if (d < dist) { dist = d; best = i; } });
+            if (jumping.current !== null) { if (best === jumping.current) jumping.current = null; return; }
+            setIdx((cur) => { if (cur !== best) setSize(list[best][2]); return best; });
+          }, 160);
         }}>
         {list.map(([k], i) => {
           const pw: Widget = { ...w, display: k, size: i === idx ? size : list[i][2], span: spanFor(type, k, i === idx ? size : list[i][2], span) };
