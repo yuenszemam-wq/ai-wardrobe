@@ -28,6 +28,7 @@ jobs:
       - run: node test/taxonomy.mjs
       - run: node test/v4.mjs
       - run: node test/organize.mjs
+      - run: node test/image-cache.mjs
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
         env:
@@ -37,6 +38,16 @@ jobs:
       - run: node test/mesh-integrity.mjs
       - run: node test/doll-camera.mjs
       - run: node test/doll-split.mjs
+      - run: node test/phase38.mjs
+      - run: node test/phase38-ui.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/phase38-wardrobe.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/phase38-home.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
       - run: node test/phase34.mjs
         if: always()
         env:

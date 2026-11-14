@@ -74,6 +74,6 @@ export async function buildApp() {
   for (const f of walk(join(ROOT, "src"))) for (const m of readFileSync(f, "utf8").matchAll(/[^\s"'`{}<>=;,()]+/g)) candidates.add(m[0]);
   const css = compiler.build([...candidates]);
   writeFileSync(join(TMP, "doll-app.css"), css);
-  const html = `<!doctype html><html lang="zh-Hant-HK"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>html{background:#1c0e1a}body{background:#2a1526;margin:0}</style><link rel="stylesheet" href="/assets/app.css"></head><body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>`;
+  const html = `<!doctype html><html lang="zh-Hant-HK"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>html{background:var(--color-ink,#1c0e1a)}body{background-color:var(--color-plum,#2a1526);margin:0}</style><link rel="stylesheet" href="/assets/app.css"></head><body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>`;
   return { js: readFileSync(jsFile), css, html };
 }

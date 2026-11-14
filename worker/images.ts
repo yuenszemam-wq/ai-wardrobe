@@ -172,6 +172,8 @@ export interface StoreOptions {
   actor: Actor;
   /** 只限 App 上傳的原檔：保留 HEIC／HEIF 原檔（另需 JPEG 預覽） */
   allowHeif?: boolean;
+  /** 瀏覽器已檢查實際像素：全部不透明（即使檔案有 Alpha 通道） */
+  opaque?: boolean;
   /** 'preview'＝HEIC 的 JPEG 預覽；'analysis'＝給 AI 辨認用的中尺寸圖（image_type 必須是 thumbnail） */
   variant?: "preview" | "analysis" | null;
 }
@@ -205,7 +207,9 @@ export async function storeImage(env: Env, opt: StoreOptions): Promise<StoredIma
   if (bytes.byteLength > maxUploadBytes(env)) {
     throw new HttpError(413, "file_too_large", `檔案超過 ${intVar(env.MAX_UPLOAD_MB, 25)} MB 上限`);
   }
-  const info = parseImage(bytes, { allowHeif: Boolean(opt.allowHeif) && imageType === "original" && owner === "garment" });
+  const parsed = parseImage(bytes, { allowHeif: Boolean(opt.allowHeif) && imageType === "original" && owner === "garment" });
+  // Phase 3.8：PNG／WebP 有 Alpha 通道但瀏覽器已檢查實際像素全部不透明（opaque）時，記錄為沒有透明，才可以手動去背
+  const info = opt.opaque && parsed.hasAlpha ? { ...parsed, hasAlpha: false } : parsed;
   const { table, fk, parent } = tableFor(owner);
   const variant = owner === "garment" ? opt.variant ?? null : null;
   if (variant === "preview" && (imageType !== "original" || info.mime !== "image/jpeg")) {

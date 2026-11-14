@@ -1,9 +1,11 @@
 import { startThumbnailMaintenance } from "./thumbnailMaintenance";
 import { clearImageMemory } from "./imageCache";
 import { ReactElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api } from "./api";
-import { IconCrown, IconDress, IconGear, IconHome, IconPlus, IconSparkle } from "./components/icons";
-import { Link, Spinner, Toast } from "./components/ui";
+import { api, AppSettings } from "./api";
+import { clearHomeLayoutCache } from "./homeLayoutStore";
+import { clearCachedLists } from "./wardrobeList";
+import { IconCrown, IconDress, IconGear, IconHome, IconPencil, IconPlus, IconSparkle } from "./components/icons";
+import { Link, Spinner, Toast, setSettingsCache } from "./components/ui";
 import { match, navigate, usePath } from "./router";
 import GarmentDetail from "./pages/GarmentDetail";
 import Analysis from "./pages/Analysis";
@@ -35,10 +37,12 @@ export default function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
 
   useEffect(()=>{if(auth?.logged_in)return startThumbnailMaintenance();},[auth?.logged_in]);
+  // 登入後讀取設定一次：介面主題及主頁布局若在另一部裝置更新，套用較新的版本
+  useEffect(()=>{if(auth?.logged_in)api<AppSettings>("/api/settings").then(setSettingsCache).catch(()=>undefined);},[auth?.logged_in]);
 
   const refresh = useCallback(() => {
     api<AuthState>("/api/auth/status")
-      .then(a=>{setAuth(a);if(!a.logged_in){clearImageMemory();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});}})
+      .then(a=>{setAuth(a);if(!a.logged_in){clearImageMemory();clearCachedLists();clearHomeLayoutCache();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});}})
       .catch(() => setAuth({ setup_required: false, logged_in: false, username: null }));
   }, []);
 
@@ -80,21 +84,29 @@ export default function App() {
   else if ((p = match("/dressing/models/:id", path))) page = <ModelEditor id={p.id} />;
   else if ((p = match("/dressing/:id", path))) page = <DressingRoom id={p.id} />;
   else if (match("/settings", path)) page = <Settings username={auth.username} onLogout={refresh} />;
+  else if ((p = match("/settings/:section", path))) page = <Settings username={auth.username} onLogout={refresh} section={p.section} />;
   else page = <div className="py-20 text-center text-mauve">找不到這一頁</div>;
 
   return (
     <div className="mx-auto min-h-screen max-w-5xl">
-      <header className="safe-top lace-b sticky top-0 z-30 bg-ink">
+      <header className="safe-top lace-b sticky top-0 z-30" style={{ background: "var(--aw-header)" }}>
         <div className="flex h-10 items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2 font-serif text-[18px] tracking-[0.16em] text-gold-soft">
             <IconSparkle className="text-[10px] text-gold" />
             電子衣櫃
             <IconSparkle className="text-[10px] text-gold" />
           </Link>
-          <Link to="/import" className="btn-dark flex items-center gap-1 rounded-full px-3.5 py-1 text-[13px]">
-            <IconPlus className="text-[13px]" />
-            上傳
-          </Link>
+          {match("/", path) ? (
+            <button type="button" data-testid="home-edit" onClick={() => window.dispatchEvent(new Event("aw:edit-home"))} className="btn-dark flex items-center gap-1 rounded-full px-3.5 py-1 text-[13px]">
+              <IconPencil className="text-[13px]" />
+              編輯
+            </button>
+          ) : (
+            <Link to="/import" className="btn-dark flex items-center gap-1 rounded-full px-3.5 py-1 text-[13px]">
+              <IconPlus className="text-[13px]" />
+              上傳
+            </Link>
+          )}
         </div>
       </header>
       <main className="px-4 pb-32 pt-2">{offline&&<p role="status" className="mb-2 rounded bg-ink p-2 text-xs text-gold-soft">離線瀏覽：顯示已快取的資料和縮圖，連線後才能儲存或載入高清圖。</p>}{page}</main>
@@ -126,7 +138,7 @@ function TabBar({ path }: { path: string }) {
   }, []);
   const clean = path.split("?")[0];
   return (
-    <nav ref={bar} className="app-tabbar fixed inset-x-0 bottom-0 z-30 bg-ink" aria-label="主選單">
+    <nav ref={bar} className="app-tabbar fixed inset-x-0 bottom-0 z-30" style={{ background: "var(--aw-nav)" }} aria-label="主選單">
       <div>
         <div className="mx-auto grid max-w-5xl grid-cols-5">
           {TABS.map((t) => {

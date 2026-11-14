@@ -12,11 +12,11 @@ import { HAIR_VIS_MAX, BUILTIN_HAIR_ID, BUILTIN_HEAD_ID, DollAsset, FrontPart, H
 import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, Piece, SETUP_KEYS, SETUP_LABEL, SetupKey, SetupMark, SetupStatus, Slot, SLOT_SKIN, itemKey, fitHeight, LookState, SLEEVE_ROT_LIMIT, SY_LIMIT, insertIndex, layeringHints, normalizeFit, normalizeTemplateData, sameFit, defaultFit, Variant, WearOpts } from "../../shared/doll";
 import { poseDistance, suggestSleeveRot } from "../../shared/garmentMesh";
 import { api, ApiError, displayName, Garment } from "../api";
-import { IconChevronLeft, IconChevronRight, IconEye, IconEyeOff, IconHand, IconHeart, IconLayers, IconMore, IconPerson, IconPose, IconSave, IconShirt, IconTarget } from "../components/icons";
+import { IconChevronLeft, IconChevronRight, IconEye, IconEyeOff, IconHand, IconHeart, IconLayers, IconMore, IconPerson, IconPose, IconSave, IconShirt, IconSparkle, IconTarget } from "../components/icons";
 import { Spinner, toast } from "../components/ui";
 import { AssetPanel, Draft } from "../doll/AssetPanel";
 import { Analysis, analyze, canvasBlob, loadImage, prepareAsset } from "../doll/content";
-import { DollRenderer, Scene, flatLocate, flatRect, mainBone } from "../doll/engine";
+import { BehindStats, DollRenderer, Scene, flatLocate, flatRect, mainBone } from "../doll/engine";
 import { pieceImage, pieceKey } from "../doll/pieces";
 import { SplitEditor } from "../doll/SplitEditor";
 import { Appearance, DEFAULT_APPEARANCE, GarmentLite, Resolved, Template, Templates, Worn, fetchStudioGarments, fetchLook, fetchTemplates, templateFor, addHairParts, pieceOf, wearHairPart, hairOf, headOf, imageOf, resolve, sceneItem, userAsset, wornFor } from "../doll/model";
@@ -34,7 +34,8 @@ const TABS: { id: Tab; label: string; Icon: typeof IconShirt }[] = [
   { id: "look", label: "外貌", Icon: IconPerson },
   { id: "pose", label: "姿勢", Icon: IconPose },
 ];
-const MASK_W = 256;
+/** 遮罩寬度（像素）。Phase 3.8 由 256 提高至 512：高倍率放大時蕾絲邊緣不再出現明顯方格；舊遮罩照常按比例讀入。 */
+const MASK_W = 512;
 /** 主要衣物：決定人物姿勢的衣物（配件、半裙、頭飾等不會改變姿勢） */
 const MAIN_SLOTS = new Set<Slot>(["top", "dress", "set", "outer"]);
 /** 正在編輯的遮罩／部件圖（像素緩衝）。塗抹時直接預覽，放手才寫入造型（每一筆＝一步，可以撤銷） */
@@ -188,6 +189,20 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     return () => { generation.current++; };
   }, [id, setupKey]);
 
+  // 角色素材頁點選頭部／髮型素材：/dressing?asset=<id> 直接進入該素材的編輯（只執行一次）
+  const assetLink = useRef(new URLSearchParams(location.search).get("asset"));
+  useEffect(() => {
+    const aid = assetLink.current;
+    if (!aid || !loaded || id || setup) return;
+    const a = assets.find((x) => x.id === aid);
+    if (!a) return;
+    assetLink.current = null;
+    try { history.replaceState(null, "", "/dressing"); } catch { /* ignore */ }
+    setTab("look"); setLookTab(a.kind === "head" ? "head" : "hair");
+    editAsset(a);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, assets]);
+
   // ───── 衣服設定模式：載入目標衣物及其預設（含預設姿勢）；只在切換目標時執行一次 ─────
   const setupInit = useRef("");
   useEffect(() => {
@@ -312,7 +327,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const view: GarmentView = !advanced || preview ? "worn" : tool === "mask" ? (gview === "mesh" ? "worn" : gview) : tool === "follow" && autoParts ? gview : "worn";
   const selId = sel?.key ?? null;
   // 部件顏色：標記袖子、衣物原圖及部件網格視圖一定顯示（完整衣物＋半透明顏色）；遮罩的已編輯位置按「顯示已編輯位置」
-  const overlayMode = compare || preview || !selId ? null : editing === "mask" ? (hint ? "mask" : null) : tool === "follow" && autoParts && (editing === "parts" || view !== "worn" || hint) ? "parts" : null;
+  // 衣物原圖：一定以顏色區分「隱藏」（紅）及「移到身後」（藍），否則兩者在平面原圖上很難分辨
+  const overlayMode = compare || preview || !selId ? null : editing === "mask" ? (hint || view === "source" ? "mask" : null) : tool === "follow" && autoParts && (editing === "parts" || view !== "worn" || hint) ? "parts" : null;
   /**
    * 對比：只暫時停用目前工具負責的那一項設定（位置、大小、旋轉、姿勢及其他設定保持不變；不會改動衣物資料）。
    * 變形＝沒有手動網格；遮罩＝沒有遮罩；骨架＝不按骨架變形（整件跟隨主骨骼，即基準姿勢下的樣子）。
@@ -333,6 +349,21 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     wire: view === "mesh" && !compare ? selId : null,
   }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare]);
   const mats = useMemo(() => solve(rig, pose), [rig, pose]);
+  // 「移到身後」的實際像素效果：停筆後量度一次（低解像度），讓使用者分辨「身後」與「隱藏」
+  const [behindStats, setBehindStats] = useState<BehindStats | null>(null);
+  const selMask = sel?.mask ?? null;
+  useEffect(() => {
+    if (editing !== "mask" || !selId || !selMask) { setBehindStats(null); return; }
+    let alive = true, tries = 0;
+    const run = () => {
+      if (!alive) return;
+      const st = renderer.behindStats({ ...scene, items: scene.items.map((i) => (i.key === selId ? { ...i, mask: selMask } : i)) }, selId);
+      if (st || ++tries > 20) { if (alive) setBehindStats(st); return; }
+      timer = window.setTimeout(run, 250);
+    };
+    let timer = window.setTimeout(run, 350);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [editing, selId, selMask, pose, renderer, scene]);
 
   // ───── 撤銷／重做（衣物、位置、遮罩、部件、姿勢、外貌） ─────
   const snap: Snap = useMemo(() => ({ worn, pose, front, look }), [worn, pose, front, look]);
@@ -494,6 +525,35 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     if (m === "fixed") setOpts(r, { follow: "none", bone: "world" });
     else if (m === "body") setOpts(r, { follow: "none", bone: null });
     else setOpts(r, { follow: "auto", bone: null });
+  };
+  // ───── Phase 3.8A 快捷操作：還原姿勢、跟隨模式（與「骨架」分頁使用同一份設定） ─────
+  const [quick, setQuick] = useState(false);
+  /** 「跟隨手臂」只適用於有袖子的上身衣物（上衣、連身裙、外套、整套）；半裙、頭飾、頸飾等不強制使用袖子骨架 */
+  const armCapable = (r: Resolved) => SLOT_SKIN[r.worn.slot] === "upper";
+  /** 這件衣物（或套裝部件）未經造型調整時的跟隨模式 */
+  const defaultModeOf = (r: Resolved): WearMode => {
+    const base = r.piece ? r.piece.opts : (r.worn.variant ? r.template?.data?.variants[r.worn.variant]?.opts : null) ?? r.template?.data?.opts;
+    if (base) return wearMode(base);
+    // 與 model.ts 新穿上衣物一致：沒有衣物預設＝固定原圖；部件＝跟隨所附接的骨骼
+    return r.piece ? "body" : "fixed";
+  };
+  /** 還原姿勢：當前身體模型自己的預設站姿（姿勢＝{}＝該身體的靜止骨架）；衣物、遮罩、網格、髮型、鏡頭全部保留，可撤銷 */
+  const quickResetPose = () => { flushHist(); setPose({}, []); toast("已還原為預設站姿（衣物設定保留）"); };
+  const quickTargets = (m: WearMode) => resolved.filter((r) => r.image && !r.worn.hidden && (m !== "auto" || armCapable(r)));
+  const quickMode = (m: WearMode) => {
+    if (!sel) return;
+    if (m === "auto" && !armCapable(sel)) { toast("這件衣物沒有袖子骨架，不適用「跟隨手臂」", "err"); return; }
+    flushHist(); setMode(sel, m);
+  };
+  const quickModeAll = (m: WearMode | "default") => {
+    flushHist();
+    let n = 0;
+    for (const r of m === "default" ? resolved.filter((r) => r.image) : quickTargets(m)) {
+      const to = m === "default" ? defaultModeOf(r) : m;
+      if (wearMode(r.opts) === to) continue;
+      setMode(r, to); n++;
+    }
+    toast(n ? `已改變 ${n} 件衣物（只影響這個造型）` : "沒有需要改變的衣物");
   };
   /**
    * 基準姿勢：以目前角色姿勢作為這件衣物的綁定基準。畫面上的衣物形狀（位置、網格）就是基準形狀；
@@ -658,7 +718,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       }
       return;
     }
-    const w = MASK_W, h = Math.max(8, Math.min(420, Math.round(MASK_W * sel.analysis.content.ar)));
+    const w = MASK_W, h = Math.max(8, Math.min(900, Math.round(MASK_W * sel.analysis.content.ar)));
     const buf: EditBuf = { kind: "mask", key: gid, w, h, data: new Uint8ClampedArray(w * h * 4), ready: !editSource, committed: editSource, last: null, dirty: false, at: 0, backup: null };
     for (let i = 3; i < buf.data.length; i += 4) buf.data[i] = 255;
     edit.current = buf;
@@ -1190,7 +1250,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       </div>
 
       {/* ───── 舞台 ───── */}
-      <div className="doll-stage relative min-h-0 flex-1" onClick={() => { if (menu) setMenu(false); }}>
+      <div className="doll-stage relative min-h-0 flex-1" onClick={() => { if (menu) setMenu(false); }} onPointerDownCapture={(e) => { if (quick && !(e.target as HTMLElement).closest('[data-testid="quick-pop"],[data-testid="quick-toggle"]')) setQuick(false); }}>
         <Stage renderer={renderer} scene={scene} rig={rig} camera={camera} onCamera={moveCamera} onSize={setStageSize} mode={mode} hand={hand && !preview} selection={preview ? null : stageSel} onPick={sourceOn ? undefined : onPick} onFit={onFit}
           controls={shownControls} skeleton={skeletonStyle} activeControl={activeControl} dim={mode === "pose" && skel === "wire"}
           onPose={(p, c) => { setControlId(c.id); setJoint(c.kind === "ik" ? c.mid! : c.bone); if (c.region !== region) setRegion(c.region); if (p !== pose) setPose(p); }}
@@ -1209,7 +1269,38 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
             <button type="button" aria-label="縮小畫面" data-testid="zoom-out" disabled={camera.z <= ZOOM.min + 0.001} onClick={() => zoomBy(1 / 1.4)} className={`grid h-8 w-8 place-items-center rounded-full text-[17px] leading-none disabled:opacity-40 ${float}`}>－</button>
             {!preview && <button type="button" aria-label="畫面對準正在編輯的位置" data-testid="zoom-fit" onClick={frameTarget} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] ${float}`}><IconTarget /></button>}
             {!preview && <button type="button" aria-label="手掌工具：單指移動畫面" data-testid="hand-tool" aria-pressed={hand} onClick={() => setHand(!hand)} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] ${hand ? "chip-on" : float}`}><IconHand /></button>}
+            {!preview && !draft && <button type="button" aria-label="快捷操作：還原姿勢及衣物跟隨" data-testid="quick-toggle" aria-expanded={quick} onClick={() => { setQuick(!quick); setZoomOpen(false); }} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] ${quick ? "chip-on" : float}`}><IconSparkle /></button>}
           </div>
+          {quick && !preview && !draft && (
+            <div data-stage-ui data-testid="quick-pop" role="dialog" aria-label="快捷操作" className="absolute right-12 top-2 z-10 max-h-[calc(100%-1rem)] w-56 overflow-y-auto rounded-2xl border border-gold/50 bg-velvet/95 p-3 text-[12px] shadow-xl">
+              <div className="flex items-center justify-between"><span className="text-gold-soft">快捷操作</span><button type="button" aria-label="關閉快捷操作" onClick={() => setQuick(false)} className="px-1 text-mauve">✕</button></div>
+              <button type="button" data-quick="pose-reset" disabled={!Object.keys(pose).length && !front.length} onClick={quickResetPose} className="chip mt-2 h-9 w-full rounded-full px-3 disabled:opacity-40">還原姿勢（{bodyModel.name ?? "目前身體"}預設站姿）</button>
+              <div className="mt-3 border-t border-gold/20 pt-2" data-testid="quick-item">
+                {sel ? (
+                  <>
+                    <p className="truncate text-[11.5px]"><span className="text-mauve">目前衣物：</span>{sel.piece ? sel.piece.name : sel.garment.name}</p>
+                    <p className="text-[10.5px] text-mauve" data-testid="quick-mode" data-mode={wearMode(sel.opts)}>跟隨：{({ fixed: "固定原圖", body: "跟隨身體", auto: "跟隨手臂" } as const)[wearMode(sel.opts)]}</p>
+                    <div className="mt-1.5 grid grid-cols-3 gap-1">
+                      {([["fixed", "固定原圖"], ["body", "跟隨身體"], ["auto", "跟隨手臂"]] as const).map(([m, label]) => (
+                        <button key={m} type="button" data-quick-mode={m} aria-pressed={wearMode(sel.opts) === m} disabled={m === "auto" && !armCapable(sel)} onClick={() => quickMode(m)} className={`h-8 rounded-full px-1 text-[11px] disabled:opacity-35 ${wearMode(sel.opts) === m ? "chip-on" : "chip"}`}>{label}</button>
+                      ))}
+                    </div>
+                    {!armCapable(sel) && <p className="mt-1 text-[10.5px] leading-snug text-mauve">這件衣物沒有袖子骨架，不適用「跟隨手臂」。</p>}
+                  </>
+                ) : <p className="text-[11px] leading-snug text-mauve" data-testid="quick-noselect">先在角色身上點選一件衣物，或使用下面的批量操作。</p>}
+              </div>
+              <details className="mt-2 border-t border-gold/20 pt-2" data-testid="quick-batch">
+                <summary className="cursor-pointer text-[11.5px] text-gold-soft">批量操作（目前顯示的衣物）</summary>
+                <div className="mt-1.5 flex flex-col gap-1">
+                  <button type="button" data-quick-all="body" onClick={() => quickModeAll("body")} className="chip h-8 rounded-full px-3 text-left text-[11px]">全部跟隨身體（{quickTargets("body").length} 件）</button>
+                  <button type="button" data-quick-all="auto" onClick={() => quickModeAll("auto")} className="chip h-8 rounded-full px-3 text-left text-[11px]">有袖衣物跟隨手臂（{quickTargets("auto").length} 件）</button>
+                  <button type="button" data-quick-all="fixed" onClick={() => quickModeAll("fixed")} className="chip h-8 rounded-full px-3 text-left text-[11px]">全部固定原圖（{quickTargets("fixed").length} 件）</button>
+                  <button type="button" data-quick-all="default" onClick={() => quickModeAll("default")} className="chip h-8 rounded-full px-3 text-left text-[11px]">還原各自預設跟隨模式</button>
+                </div>
+              </details>
+              <p className="mt-2 text-[10.5px] leading-snug text-mauve">快捷操作只影響這個造型，可撤銷；位置、網格、遮罩及拆件保留。要更新衣物預設，請在衣物面板按「存為衣物預設」。</p>
+            </div>
+          )}
           {zoomOpen && (
             <div data-stage-ui data-testid="zoom-pop" className="absolute right-12 top-2 w-56 rounded-2xl border border-gold/50 bg-velvet/95 p-3 text-[12px] shadow-xl">
               <div className="flex items-center justify-between"><span className="text-gold-soft">畫面縮放</span><span className="tabular-nums">{pct}%</span></div>
@@ -1284,7 +1375,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           <div ref={panelBox} className={`relative overflow-clip px-3 ${panelH > 0 ? "pt-2.5" : ""}`} style={{ height: panelH, minHeight: panelH > 0 ? undefined : 8 }} data-testid="doll-panel" data-size={panel}>
             {panelH < 40 ? null : draft ? <AssetPanel draft={draft} setDraft={setDraft} busy={busy} onFiles={(f) => void addAssetFiles(f)} onSave={() => void saveAsset()} onCancel={() => void cancelAsset()} onDelete={() => void deleteAsset()} hairTool={hairTool === "mask" ? "place" : hairTool} setHairTool={setHairTool} />
               : sel ? (
-                <FitPanel onBind={(on) => setBind(sel, on)} onApplyBind={() => { if (sel.opts.bind) setPose(sel.opts.bind); }} r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onMeshReset={() => applyFit(sel, { ...sel.fit, mesh: undefined })} onOpts={(o) => setOpts(sel, o)}
+                <FitPanel behind={behindStats} onBind={(on) => setBind(sel, on)} onApplyBind={() => { if (sel.opts.bind) setPose(sel.opts.bind); }} r={sel} info={selItem ? renderer.info(selItem) : null} tool={tool} setTool={setTool} busy={busy} onFit={(f) => nudge(sel, f)} onMeshReset={() => applyFit(sel, { ...sel.fit, mesh: undefined })} onOpts={(o) => setOpts(sel, o)}
                   onMode={(m) => setMode(sel, m)} onWhole={() => wholeImage(sel)} compact={compact}
                   pieces={sel.piece ? null : sel.template?.data?.pieces ?? []} wornPieces={new Set(worn.filter((w) => w.garment_id === sel.garment.id && w.piece).map((w) => w.piece!))}
                   onOpenSplit={() => setSplit(sel.key)} onWearPieces={(ids, replace) => wearPieces(sel, ids, replace)} onTogglePiece={(pid) => { const k = sel.garment.id + "#" + pid; if (worn.some((w) => itemKey(w) === k)) remove(k); else wearPieces(sel, [pid], false); }} view={gview} setView={setGview} compare={compare} setCompare={setCompare} onFrame={frameTarget}

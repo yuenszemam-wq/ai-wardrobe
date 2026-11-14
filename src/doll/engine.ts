@@ -41,7 +41,11 @@ export interface Scene {
   flat?: string | null;
   /** 顯示這件衣物的變形網格線 */
   wire?: string | null;
+  /** 只供量度：不畫這件衣物「移到身後」的部分（比較兩次結果＝實際仍可見的身後像素） */
+  omitBehind?: string | null;
 }
+/** 「移到身後」的量度結果：total＝身後部分本身的像素；visible＝在完整角色畫面中仍然看得到的像素（其餘被身體、頭部、頭髮或衣物前面部分遮住） */
+export interface BehindStats { total: number; visible: number }
 /** 衣物原圖視圖中，圖片佔邏輯畫布的範圍（置中） */
 export function flatRect(ar: number): { x: number; y: number; w: number; h: number } {
   const a = ar > 0 ? ar : 4 / 3;
@@ -77,7 +81,7 @@ export function hashOf(s: string): string {
 }
 const dims = (b: Bitmap): [number, number] => [(b as HTMLImageElement).naturalWidth || b.width, (b as HTMLImageElement).naturalHeight || b.height];
 export interface LiveMask { w: number; h: number; data: Uint8ClampedArray }
-interface Worked { front: Bitmap; behind: Bitmap | null; /** 低解像度的「已隱藏／移到身後」格（點選用） */ gone: { w: number; h: number; data: Uint8Array } | null }
+interface Worked { front: Bitmap; behind: Bitmap | null; /** 低解像度的「已隱藏／移到身後」格（點選用） */ gone: { w: number; h: number; data: Uint8Array } | null; /** 遮罩圖片仍在讀取：暫時顯示未套用遮罩的衣物，但畫面不算完整（縮圖／匯出會等待） */ pending?: boolean }
 interface Geometry { key: string; rig: GarmentRig }
 /** 一個部件的貼圖：canvas 是原圖裁出該部件範圍後的一塊，x／y＝它在原圖的位置（原圖像素） */
 interface LayerTex { img: Bitmap; x: number; y: number; w: number; h: number; tw: number; th: number; /** 這張貼圖是為這個部件另外製作的（可以釋放） */ own?: boolean }
@@ -155,7 +159,7 @@ export class DollRenderer {
       maskSrc = c;
     } else {
       const mask = this.img(it.mask!);
-      if (!mask) return { front: src, behind: null, gone: null };
+      if (!mask) return { front: src, behind: null, gone: null, pending: true };
       maskSrc = mask;
     }
     const [sw, sh] = dims(src);
@@ -568,13 +572,14 @@ export class DollRenderer {
     for (const it of visible) {
       const w = this.worked(it);
       if (!w) { complete = false; continue; }
+      if (w.pending) complete = false;
       if (it.parts && it.parts !== "whole" && !this.partsOf(it)) complete = false;
       const live = this.liveMask.get(it.key);
       const rig = this.geometry(it), bm = rig.layers.map((l) => boneMatrices(l, mats));
       const r: Ready = { w, wkey: it.image + "|" + (live ? "live" + live.rev : it.mask && w.gone ? hashOf(it.mask) : ""), rig, posed: rig.layers.map((l, i) => skinMesh(l, mats, bm[i])), bm };
       ready.set(it.key, r);
       // 「移到身後」的部分用同一組網格變形，與前面的部分保持同步
-      if (w.behind) layers(ctx, it, r, this.textures(it, "behind", w.behind, r.wkey, rig), base);
+      if (w.behind && scene.omitBehind !== it.key) layers(ctx, it, r, this.textures(it, "behind", w.behind, r.wkey, rig), base);
     }
     const front = new Set<string>(scene.front);
     for (const name of this.model.rig.body_parts) {
@@ -634,14 +639,14 @@ export class DollRenderer {
     const q = 40;
     for (let j = 0; j * q < r.h + 24; j++) for (let i = j % 2; i * q < r.w + 24; i += 2) ctx.fillRect(r.x - 12 + i * q, r.y - 12 + j * q, Math.min(q, r.w + 24 - i * q), Math.min(q, r.h + 24 - j * q));
     let complete = true;
-    // 已套用遮罩：淡淡顯示原圖（看得到已隱藏的位置），上面是遮罩後的實際效果，移到身後的部分半透明。
+    // 已套用遮罩：淡淡顯示原圖（看得到已隱藏的位置），上面是遮罩後的實際效果；移到身後的部分完整顯示（之後由藍色提示層標示）。
     // 對比時（沒有遮罩）只顯示完整原圖。
     const w = it.mask || this.liveMask.has(it.key) ? this.worked(it) : null;
     if (w && w.front !== src) {
       ctx.globalAlpha = 0.28;
       ctx.drawImage(src, r.x, r.y, r.w, r.h);
       ctx.globalAlpha = 1;
-      if (w.behind) { ctx.globalAlpha = 0.5; ctx.drawImage(w.behind, r.x, r.y, r.w, r.h); ctx.globalAlpha = 1; }
+      if (w.behind) ctx.drawImage(w.behind, r.x, r.y, r.w, r.h);
       ctx.drawImage(w.front, r.x, r.y, r.w, r.h);
     } else {
       if (it.mask && !w) complete = false;
@@ -661,7 +666,9 @@ export class DollRenderer {
     const n = this.neck();
     if (!n) return;
     const p = this.model.rig.parts.neck;
-    const m = multiply(base, mats.neck);
+    // 自訂身體可以旋轉頸部部件：遮罩及重畫都要跟同一個旋轉，否則後領位置會錯開
+    const local: Mat = p.rot ? rotateAbout(p.rot, p.x + p.w / 2, p.y + p.h / 2) : [1, 0, 0, 1, 0, 0];
+    const m = multiply(multiply(base, mats.neck), local);
     const corners = [[p.x, p.y], [p.x + p.w, p.y], [p.x, p.y + p.h], [p.x + p.w, p.y + p.h]].map(([x, y]) => applyMat(m, x, y));
     const x0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 1, y0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 1;
     const w = Math.ceil(Math.max(...corners.map((c) => c[0]))) + 1 - x0, h = Math.ceil(Math.max(...corners.map((c) => c[1]))) + 1 - y0;
@@ -674,7 +681,7 @@ export class DollRenderer {
     c.clearRect(0, 0, t.width, t.height);
     const pre: Mat = [base[0], base[1], base[2], base[3], base[4] - x0, base[5] - y0];
     draw(c, pre);
-    const nm = multiply(pre, mats.neck);
+    const nm = multiply(multiply(pre, mats.neck), local);
     c.setTransform(nm[0], nm[1], nm[2], nm[3], nm[4], nm[5]);
     c.globalCompositeOperation = "destination-in";
     c.drawImage(n.mask, p.x, p.y, p.w, p.h);
@@ -683,6 +690,40 @@ export class DollRenderer {
     c.globalCompositeOperation = "source-over";
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(t, 0, 0, w, h, x0, y0, w, h);
+  }
+
+  /**
+   * 量度「移到身後」的效果（低解像度，約 300×450）：身後部分有多少像素、其中多少在完整畫面中仍可見。
+   * 用來在介面說明「移到身後」與「隱藏」的分別，以及作為測試的實際像素證據。未就緒時回傳 null。
+   */
+  behindStats(scene: Scene, key: string, width = 300): BehindStats | null {
+    const it = scene.items.find((i) => i.key === key && !i.hidden);
+    if (!it) return null;
+    const w = this.worked(it);
+    if (!w || w.pending) return null;
+    if (!w.behind) return { total: 0, visible: 0 };
+    const k = width / DOLL_W, H = Math.round(DOLL_H * k);
+    const mk = () => { const c = document.createElement("canvas"); c.width = width; c.height = H; return c; };
+    const a = mk(), b = mk(), only = mk();
+    const plain: Scene = { ...scene, overlay: null, wire: null, flat: null };
+    const okA = this.paint(a.getContext("2d")!, plain, [k, 0, 0, k, 0, 0]);
+    const okB = this.paint(b.getContext("2d")!, { ...plain, omitBehind: key }, [k, 0, 0, k, 0, 0]);
+    // 只畫身後部分（同一組網格及姿勢）
+    const rig: Rig = rigFor(scene.hair, this.model.rig), mats = solve(rig, scene.pose);
+    const geo = this.geometry(it), live = this.liveMask.get(it.key);
+    const wkey = it.image + "|" + (live ? "live" + live.rev : it.mask && w.gone ? hashOf(it.mask) : "");
+    const tex = this.textures(it, "behind", w.behind, wkey, geo), oc = only.getContext("2d")!;
+    geo.layers.forEach((l, i) => { const bm = boneMatrices(l, mats); this.drawMesh(oc, tex[i], it, l, skinMesh(l, mats, bm), bm, [k, 0, 0, k, 0, 0]); });
+    if (!okA || !okB) { for (const c of [a, b, only]) c.width = c.height = 0; return null; }
+    const da = a.getContext("2d")!.getImageData(0, 0, width, H).data, db = b.getContext("2d")!.getImageData(0, 0, width, H).data, dc = oc.getImageData(0, 0, width, H).data;
+    let total = 0, visible = 0;
+    for (let i = 0; i < dc.length; i += 4) {
+      if (dc[i + 3] < 128) continue;
+      total++;
+      if (Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]) + Math.abs(da[i + 3] - db[i + 3]) > 24) visible++;
+    }
+    for (const c of [a, b, only]) c.width = c.height = 0;
+    return { total, visible };
   }
 
   /** 造型縮圖：實際組裝完成的角色畫面（JPEG，約 20–40 KB） */

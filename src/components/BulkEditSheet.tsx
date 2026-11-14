@@ -9,6 +9,7 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
   const tax=useTaxonomy();
   const [modes,setModes]=useState<Record<string,string>>({});
   const [values,setValues]=useState<Record<string,string|string[]>>({});
+  const [progress,setProgress]=useState('');
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const fields=[
@@ -36,12 +37,19 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
     if(!Object.keys(patch).length)return;
     setBusy(true);
     try{
-      const r=await api<{results:{id:string;ok:boolean;error?:string}[]}>('/api/garments/bulk-edit',{method:'POST',json:{garment_ids:garments.map(g=>g.id),set:patch}});
-      const ok=r.results.filter(x=>x.ok).map(x=>x.id),failed=r.results.filter(x=>!x.ok);
+      // 伺服器每次最多 100 件：按安全批次逐批執行並顯示進度
+      const results:{id:string;ok:boolean;error?:string}[]=[];
+      for(let i=0;i<garments.length;i+=100){
+        setProgress(`${Math.min(i+100,garments.length)}／${garments.length}`);
+        const r=await api<{results:{id:string;ok:boolean;error?:string}[]}>('/api/garments/bulk-edit',{method:'POST',json:{garment_ids:garments.slice(i,i+100).map(g=>g.id),set:patch}});
+        results.push(...r.results);
+      }
+      setProgress('');
+      const ok=results.filter(x=>x.ok).map(x=>x.id),failed=results.filter(x=>!x.ok);
       onUpdated(ok);
       if(failed.length)setError(`已更新 ${ok.length} 件；${failed.length} 件未成功：${failed.map(x=>`${garments.find(g=>g.id===x.id)?.name||x.id}：${x.error}`).join('；')}。可重試剩餘項目。`);
       else onClose();
-    }catch(e){setError((e as Error).message)}finally{setBusy(false)}
+    }catch(e){setError((e as Error).message)}finally{setBusy(false);setProgress('')}
   }
   return <Sheet title={`批量修改（${garments.length} 件）`} onClose={()=>{if(!busy)onClose()}}>
     <p className="text-sm text-mauve">只修改已勾選的欄位；其他資料及 AI 辨認狀態保持不變。多選屬性會以本次選擇取代原值。更改主分類時，未指定的子分類會清空。</p>
@@ -56,6 +64,6 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
       {modes[field.id]==='clear'&&<p className="mt-2 text-sm text-wine">將清空所選衣物的這個欄位</p>}
     </div>)}</div>
     {error&&<p role="alert" className="my-3 text-sm text-wine">{error}</p>}
-    <div className="sticky bottom-0 bg-ink p-3"><p className="mb-2 text-xs">將修改 {garments.length} 件：{changed.map(f=>f.name).join('、')||'尚未選擇欄位'}</p><Button disabled={busy||!changed.length||!garments.length} onClick={save}>{busy?'修改中…':'套用至所選衣物'}</Button></div>
+    <div className="sticky bottom-0 bg-ink p-3"><p className="mb-2 text-xs">將修改 {garments.length} 件：{changed.map(f=>f.name).join('、')||'尚未選擇欄位'}</p><Button disabled={busy||!changed.length||!garments.length} onClick={save}>{busy?`修改中…${progress}`:'套用至所選衣物'}</Button></div>
   </Sheet>;
 }

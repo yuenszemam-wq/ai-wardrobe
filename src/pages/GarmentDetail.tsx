@@ -1,6 +1,9 @@
+import { dropCachedGarment, patchCachedGarment } from "../wardrobeList";
 import { WardrobeImage } from "../components/WardrobeImage";
 import { AttributeChoices, BrandInput } from "../components/GarmentChoices";
 import { SplitSheet } from "../components/SplitSheet";
+import { CutoutSheet } from "../components/CutoutSheet";
+import { cutoutSource } from "../cutoutFlow";
 import { useEffect, useState } from "react";
 import { attributesFor, attributeValues, isColumnAttribute, Taxonomy } from "../../shared/taxonomy";
 import { AI_STATUS_LABEL, api, displayName, formatBytes, formatDate, Garment, GarmentImage, imageUrl, STATUS_LABEL, uploadImage } from "../api";
@@ -27,7 +30,6 @@ const FIELD_LABEL: Record<string, string> = {
 };
 
 export default function GarmentDetail({ id }: { id: string }) {
-  const [highDetail,setHighDetail]=useState(false);
   const [g, setG] = useState<Garment | null>(null);
   const [err, setErr] = useState("");
   const [viewId, setViewId] = useState<string | null>(null);
@@ -37,6 +39,8 @@ export default function GarmentDetail({ id }: { id: string }) {
   const [splitting, setSplitting] = useState(false);
   const [checker, setChecker] = useState(false);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
+  // 手動去背：由上傳完成頁進入（?cutout=1）時自動打開
+  const [cutout, setCutout] = useState(() => new URLSearchParams(location.search).get("cutout") === "1");
   const tax = useTaxonomy();
 
   async function load() {
@@ -70,6 +74,7 @@ export default function GarmentDetail({ id }: { id: string }) {
     try {
       const updated = await api<Garment>(`/api/garments/${id}`, { method: "PATCH", json: body });
       setG(updated);
+      patchCachedGarment(updated);
       toast(msg);
     } catch (e) {
       toast((e as Error).message, "err");
@@ -130,11 +135,11 @@ export default function GarmentDetail({ id }: { id: string }) {
       <div className="mt-4 lg:grid lg:grid-cols-2 lg:gap-8">
         <div>
           <div className={`relative mx-auto ${editing ? "max-w-[13rem]" : "max-w-sm"} lg:max-w-none`}>
-            <div className={`relative aspect-[3/4] overflow-hidden ${checker ? "checker rounded-2xl" : "arch"}`}>
+            <div data-testid="detail-image" className={`relative aspect-[3/4] overflow-hidden ${checker ? "checker rounded-2xl" : "arch"}`}>
               {shown ? (
                 <WardrobeImage
                   src={shown.url}
-                  quality={editing || highDetail ? "high" : "thumbnail"}
+                  quality="high"
                   alt={displayName(g)}
                   className={`absolute inset-0 h-full w-full object-contain ${checker ? "p-2" : "px-[7%] pb-[6%] pt-[17%]"}`}
                   decoding="async"
@@ -143,7 +148,6 @@ export default function GarmentDetail({ id }: { id: string }) {
                 <div className="absolute inset-0 grid place-items-center text-mauve">未有圖片</div>
               )}
             </div>
-            {shown && !editing && <button type="button" className="btn-dark mt-2 rounded-full px-3 py-1 text-xs" onClick={()=>setHighDetail(v=>!v)}>{highDetail?"使用縮圖":"載入高清細節"}</button>}
             {/* 刪除目前顯示的這張圖：右上角的小交叉 */}
             {shown && (
               <button
@@ -196,6 +200,7 @@ export default function GarmentDetail({ id }: { id: string }) {
             </div>
           )}
           <div className="mt-3 flex flex-wrap justify-center gap-2">
+            {shown && shown.image_type !== "processed" && !shown.has_alpha && <button type="button" data-testid="cutout-start" onClick={() => setCutout(true)} className="btn-jewel min-h-9 rounded-full px-4 text-[13px]">去背</button>}
             <FileButton label="＋ 去背圖" onFile={(f) => addImage(f, "processed")} disabled={uploadPct !== null} />
             <FileButton label="＋ 原相" onFile={(f) => addImage(f, "original")} disabled={uploadPct !== null} />
             <button type="button" onClick={() => setMerging(true)} className="chip inline-flex min-h-9 items-center gap-1 rounded-full px-3.5 text-[13px]">
@@ -331,6 +336,7 @@ export default function GarmentDetail({ id }: { id: string }) {
                   onClick={async () => {
                     if (!confirm(`確定永久刪除「${displayName(g)}」及其所有圖片？此動作無法復原。`)) return;
                     await api(`/api/garments/${id}`, { method: "DELETE" });
+                    dropCachedGarment(id);
                     toast("已刪除");
                     navigate("/wardrobe", true);
                   }}
@@ -343,6 +349,7 @@ export default function GarmentDetail({ id }: { id: string }) {
         </div>
       </div>
 
+      {cutout && g && (() => { const src = cutoutSource(g, shown?.image_type === "original" ? shown : null); return src ? <CutoutSheet g={g} image={src} onClose={() => setCutout(false)} onSaved={() => { void load(); }} /> : null; })()}
       {splitting && <SplitSheet id={id} onClose={() => setSplitting(false)} onSplit={(r) => { setSplitting(false); setG(r.source); setViewId(null); }} />}
       {merging && (
         <MergeSheet

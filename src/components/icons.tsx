@@ -249,3 +249,8 @@ export const IconTarget = (p: P) => (
     <path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4" />
   </Svg>
 );
+export const IconDownload = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" />
+  </Svg>
+);

@@ -1,4 +1,6 @@
 import { ensureTaxonomy, invalidateTaxonomy } from "./taxonomy";
+import { HomeLayout, normalizeHomeLayout } from "../shared/homeLayout";
+import { ThemeSettings, normalizeThemeSettings } from "../shared/theme";
 import { parseImage } from "./images";
 import { Actor, Env, HttpError, audit, json, newId, nowIso, sha256Hex, str } from "./util";
 
@@ -6,6 +8,8 @@ import { Actor, Env, HttpError, audit, json, newId, nowIso, sha256Hex, str } fro
  * 使用者設定（存放在原有的 app_settings）：
  * - ai_command：「交給 AI 填寫」按鈕複製的指令，可在設定頁自行修改。
  * - home_bg：主頁頂部背景圖的版面（縮放、位置、高度）；圖片檔存 R2 的 settings/ 路徑。
+ * - home_layout（Phase 3.8）：主頁元件布局，有版本；未設定時回傳 null（前端使用預設布局）。
+ * - theme（Phase 3.8）：介面主題（目前主題及自訂主題），有版本；未設定時回傳 null（現有玫瑰桑紫）。
  */
 
 export const DEFAULT_AI_COMMAND =
@@ -63,9 +67,14 @@ function publicBg(bg: HomeBg | null) {
   return { url: `/api/settings/home-bg?v=${bg.sha256.slice(0, 12)}`, width: bg.width, height: bg.height, ratio: bg.ratio, zoom: bg.zoom, x: bg.x, y: bg.y };
 }
 
+async function readJson<T>(env: Env, key: string, norm: (v: unknown) => T): Promise<T | null> {
+  const raw = await getSetting(env, key);
+  if (!raw) return null;
+  try { return norm(JSON.parse(raw)); } catch { return null; }
+}
 export async function getSettings(env: Env) {
-  const [cmd, bg] = await Promise.all([getSetting(env, "ai_command"), readBg(env)]);
-  return { ai_command: cmd || DEFAULT_AI_COMMAND, ai_command_is_default: !cmd, default_ai_command: DEFAULT_AI_COMMAND, home_bg: publicBg(bg) };
+  const [cmd, bg, layout, theme] = await Promise.all([getSetting(env, "ai_command"), readBg(env), readJson(env, "home_layout", normalizeHomeLayout), readJson(env, "theme", normalizeThemeSettings)]);
+  return { ai_command: cmd || DEFAULT_AI_COMMAND, ai_command_is_default: !cmd, default_ai_command: DEFAULT_AI_COMMAND, home_bg: publicBg(bg), home_layout: layout, theme };
 }
 
 export async function updateSettings(env: Env, actor: Actor, body: Record<string, unknown>) {
@@ -74,6 +83,23 @@ export async function updateSettings(env: Env, actor: Actor, body: Record<string
     if (!text || text === DEFAULT_AI_COMMAND) await env.DB.prepare("DELETE FROM app_settings WHERE key = 'ai_command'").run();
     else await putSetting(env, "ai_command", text);
     await audit(env, actor, "settings.ai_command", undefined, { reset: !text });
+  }
+  // 主頁布局／主題：整份保存（經驗證），null＝還原預設。base_updated_at 防止另一部裝置的較新設定被舊畫面覆蓋。
+  for (const [key, norm] of [["home_layout", normalizeHomeLayout], ["theme", normalizeThemeSettings]] as const) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const base = (body as Record<string, unknown>)[key + "_base"];
+    if (typeof base === "string") {
+      const cur = await readJson<HomeLayout | ThemeSettings>(env, key, norm as (v: unknown) => HomeLayout | ThemeSettings);
+      if (cur?.updated_at && cur.updated_at !== base) throw new HttpError(409, "settings_conflict", "這項設定已在另一部裝置更新，請重新載入後再修改", { current: cur });
+    }
+    const v = (body as Record<string, unknown>)[key];
+    if (v === null) await env.DB.prepare("DELETE FROM app_settings WHERE key = ?").bind(key).run();
+    else {
+      const raw = JSON.stringify({ ...norm(v), updated_at: nowIso() });
+      if (raw.length > 60000) throw new HttpError(413, "settings_too_large", "設定內容太大");
+      await putSetting(env, key, raw);
+    }
+    await audit(env, actor, "settings." + key, undefined, { reset: v === null });
   }
   if (body.home_bg && typeof body.home_bg === "object") {
     const cur = await readBg(env);

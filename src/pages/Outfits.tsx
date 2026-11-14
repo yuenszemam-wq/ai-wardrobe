@@ -17,7 +17,7 @@ export interface OutfitSummary {
   updated_at?: string;
   items: { garment_id: string; name: string; image_id: string | null; layer_order: number; x: number | null; y: number | null; w: number | null; h: number | null }[];
 }
-interface LookSummary { id: string; name: string; is_favorite: boolean; item_count: number; thumb_at: string | null; created_at: string; updated_at: string }
+export interface LookSummary { id: string; name: string; is_favorite: boolean; item_count: number; thumb_at: string | null; created_at: string; updated_at: string }
 type Kind = "outfit" | "look";
 type Entry = { kind: Kind; id: string; name: string; is_favorite: boolean; item_count: number; updated_at: string; created_at: string; outfit?: OutfitSummary; look?: LookSummary };
 type Filter = "all" | Kind;
@@ -67,14 +67,18 @@ export default function Outfits() {
   return (
     <div data-testid="outfits-home">
       <h1 className="pb-3 pt-5 font-serif text-[22px] font-bold tracking-[0.12em] text-gold-soft">穿搭工作室</h1>
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+      {/* 主要功能：兩個中型入口 */}
+      <div className="grid grid-cols-2 gap-2.5" data-testid="studio-main">
         <EntryCard to="/outfits/new" testid="entry-outfit" Icon={IconShirt} title="衣服配搭" text="自由組合衣櫃單品" />
         <EntryCard to="/dressing" testid="entry-look" Icon={IconPerson} title="角色換裝" text="為角色打造新造型" hot />
-        <EntryCard to="/dressing/setup" testid="entry-setup" Icon={IconScissors} title="衣服設定" text="校正每件衣服的穿著效果" />
-        <EntryCard to="/dressing/assets" testid="entry-assets" Icon={IconCrown} title="角色素材" text="身體、頭部、髮型及姿勢" />
+      </div>
+      {/* 管理工具：較小的一行入口 */}
+      <div className="mt-2 grid grid-cols-2 gap-2" data-testid="studio-tools">
+        <ToolLink to="/dressing/setup" testid="entry-setup" Icon={IconScissors} title="衣服設定" />
+        <ToolLink to="/dressing/assets" testid="entry-assets" Icon={IconCrown} title="角色素材" />
       </div>
 
-      <div className="mt-6 flex items-center justify-between">
+      <div className="mt-4 flex items-center justify-between">
         <h2 className="font-serif text-[18px] font-bold tracking-[0.1em] text-gold-soft">我的穿搭</h2>
         <div className="flex items-center gap-1.5">
           <button type="button" aria-label="搜尋造型" aria-pressed={search} onClick={() => { setSearch(!search); setQ(""); }} className={`grid h-9 w-9 place-items-center rounded-full text-[16px] ${search ? "chip-on" : "chip"}`}><IconSearch /></button>
@@ -118,21 +122,33 @@ export default function Outfits() {
   );
 }
 
+/** 主要功能入口：中型卡片（比 Phase 3.6 的版本矮一半） */
 function EntryCard({ to, Icon, title, text, hot, testid }: { to: string; Icon: typeof IconShirt; title: string; text: string; hot?: boolean; testid: string }) {
   return (
-    <Link to={to} className={`frame ${hot ? "frame-hot" : ""} relative block px-2.5 pb-2.5 pt-3`}>
-      <span data-testid={testid} className="block">
-        <span className="block text-[22px] text-gold-soft"><Icon /></span>
-        <span className="mt-1 block font-serif text-[15px] font-bold tracking-[0.06em] text-white">{title}</span>
-        <span className="mt-0.5 block text-[11px] leading-snug text-cream/75">{text}</span>
-        <span className="mt-2 flex justify-end text-gold-soft"><span className="grid h-6 w-6 place-items-center rounded-full border border-gold/70 text-[11px]"><IconPlus /></span></span>
+    <Link to={to} className={`frame ${hot ? "frame-hot" : ""} relative block px-3 py-2.5`}>
+      <span data-testid={testid} className="flex items-center gap-2.5">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-gold/60 text-[19px] text-gold-soft"><Icon /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-serif text-[15px] font-bold tracking-[0.06em] text-white">{title}</span>
+          <span className="block truncate text-[11px] leading-snug text-cream/75">{text}</span>
+        </span>
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-gold/70 text-[11px] text-gold-soft"><IconPlus /></span>
       </span>
+    </Link>
+  );
+}
+/** 管理工具：小型一行入口 */
+function ToolLink({ to, Icon, title, testid }: { to: string; Icon: typeof IconShirt; title: string; testid: string }) {
+  return (
+    <Link to={to} className="chip flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px]">
+      <span data-testid={testid} className="flex min-w-0 flex-1 items-center gap-2"><Icon className="shrink-0 text-[15px] text-gold-soft" /><span className="truncate">{title}</span></span>
+      <span aria-hidden className="text-mauve">›</span>
     </Link>
   );
 }
 
 /** 角色換裝縮圖：保存造型時由畫布輸出的實際組裝畫面 */
-function LookPreview({ l }: { l: LookSummary }) {
+export function LookPreview({ l }: { l: LookSummary }) {
   const [failed, setFailed] = useState(false);
   return (
     <div className="relative aspect-[3/4] overflow-hidden rounded-[14px] ring-1 ring-gold/50" style={{ background: "linear-gradient(#f7f0f6, #e6d6ea)" }}>
