@@ -21,11 +21,11 @@ await addGarment(env, { id: "gar_clear", name: "已去背上衣", category: "上
 await addGarment(env, { id: "gar_white", name: "白底原相上衣", category: "上衣", subcategory: "Blouse", svg: '<path d="M300 200 L600 200 L700 1000 L200 1000 Z" fill="#7a1f2b"/>', w: 450, h: 600, opaque: true, created: "2025-01-01T00:00:00Z" });
 
 try {
-  console.log("緊湊固定工具列");
+  console.log("衣櫃頁首（Phase 3.8B.1：完整／收合）");
   await page.goto(A.base + "/wardrobe");
   await page.waitForSelector('[data-testid="wardrobe-list"]');
   const bar = await page.locator('[data-testid="wardrobe-toolbar"]').boundingBox();
-  check("固定工具列高度約 85–105px", bar.height >= 70 && bar.height <= 105, bar);
+  check("頂部完整頁首：標題、搜尋、篩選、更多、主分類、數量及排序都在同一頁首內（約 100–150px）", bar.height >= 90 && bar.height <= 150 && (await page.locator('[data-testid="wardrobe-toolbar"] [data-testid="wardrobe-title"]').count()) === 1 && (await page.locator('[data-testid="wardrobe-toolbar"] [data-testid="wardrobe-search"]').count()) === 1 && (await page.locator('[data-testid="wardrobe-toolbar"] [data-testid="wardrobe-filter"]').count()) === 1, bar);
   check("顯示真正符合條件的總數", (await page.textContent('[data-testid="wardrobe-count"]')).includes("122 件"), await page.textContent('[data-testid="wardrobe-count"]'));
   check("沒有「載入更多」按鈕", (await page.locator('button:has-text("載入更多")').count()) === 0);
   const shown0 = Number(await page.getAttribute('[data-testid="wardrobe-list"]', "data-shown"));
@@ -36,16 +36,18 @@ try {
   for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 8000); await page.waitForTimeout(250); }
   check("最終顯示全部衣物", Number(await page.getAttribute('[data-testid="wardrobe-list"]', "data-shown")) === 122);
   const barTop = await page.locator('[data-testid="wardrobe-toolbar"]').boundingBox();
-  check("捲動後工具列仍固定在頁首下方", barTop.y >= 0 && barTop.y < 120, barTop);
+  check("捲動後頁首收合並固定在頂部（約 100–125px，不含安全區）", barTop.y >= 0 && barTop.y < 10 && barTop.height >= 85 && barTop.height <= 125 && (await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed")) === "1", barTop);
+  check("收合時全站頁首隱藏，避免兩條頁首重疊", (await page.evaluate(() => document.documentElement.dataset.headerCollapsed)) === "1" && (await page.evaluate(() => document.querySelector("header.app-header").getBoundingClientRect().bottom)) <= 1);
+  check("收合時只有一條分隔（沒有重複蕾絲）", !(await page.getAttribute('[data-testid="wardrobe-toolbar"]', "class")).includes("lace-b") && !(await page.getAttribute("header.app-header", "class")).includes("lace-b"));
 
   console.log("主分類及子分類（由實際資料產生）");
   const req0 = A.requests.length;
   await page.click('[data-cat="連身裙"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="wardrobe-count"]')?.textContent.includes("80 件"));
-  const opts = await page.locator('[data-testid="wardrobe-sub"] option').allTextContents();
-  check("子分類選項只列出實際存在的子分類及數量", opts.length === 3 && opts.some((o) => o.startsWith("JSK（40）")) && !opts.some((o) => o.startsWith("SK（")), opts);
+  const opts = await page.locator('[data-testid="wardrobe-subs"] [data-sub]').allTextContents();
+  check("子分類（按需顯示）只列出實際存在的子分類及數量", opts.length === 3 && opts.some((o) => o.replace(/\s/g, "") === "JSK40") && !opts.some((o) => o.startsWith("SK")), opts);
   const req1 = A.requests.length;
-  await page.selectOption('[data-testid="wardrobe-sub"]', "OP");
+  await page.click('[data-sub="OP"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="wardrobe-count"]')?.textContent.includes("OP 40 件"));
   check("切換子分類在本機篩選，不重新下載清單", A.requests.slice(req1).filter((r) => r.startsWith("GET /api/garments?")).length === 0, A.requests.slice(req1));
   await page.click('[data-cat="半身裙"]');

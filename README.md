@@ -44,6 +44,18 @@ npx wrangler d1 migrations apply DB --remote
 - Service Worker（`aw-shell-v4`）安裝時預先保存 App Shell 及其 JS／CSS／圖示，可離線冷啟動。
 - R2 用量頁：`GET /api/r2/usage`。官方數據需要 Worker Secret `CF_API_TOKEN`（只需 Account › Account Analytics › Read）；`CF_ACCOUNT_ID` 已在 `wrangler.jsonc` vars。Worker 內所有 `env.IMAGES` 操作經統一包裝計數（`worker/r2usage.ts`）。
 
+### Phase 3.8B.1：R2 儀表板、直接調色、衣櫃頁首
+
+- R2 用量頁改為視覺化儀表板（本月費用 → 免費額度進度條 → 每日趨勢 → Bucket 分布 → 月底估算 → App 用途 → 本機快取 → 提醒 → 進階資訊）。`GET /api/r2/usage` 新增 `official.daily`（GraphQL `r2OperationsAdaptiveGroups` 以 `date` 維度分組、`r2StorageAdaptiveGroups` 每日最高容量；涵蓋最近 30 日及本月）、`forecast`。
+  - 沒有官方資料的日期＝`null`（不當作 0）；今日標示 `partial`；未列於官方文件的操作＝`unknown`（不當作免費）。
+  - GB-month（估算）＝本月每日最高容量總和 ÷ 30 日；費用按官方規則向上取整至下一個計費單位；儲存資料缺失時總費用為 `null`（不是 US$0）。
+  - 官方請求失敗時返回最後一次成功數據（`stale: true`）；失敗結果快取 2 分鐘；手動重新整理 30 秒冷卻；不會為圖表掃描 R2。
+  - 每日維度不可用時自動改用舊查詢（只顯示本月合計，不偽造每日數據）。
+- 主題編輯器：點擊色票或預覽元素即打開底部調色面板（色盤、彩虹色相、飽和度／明度漸層、HEX、原生選擇器、恢復此項、複製、上一項／下一項）；一次拖動＝一筆撤銷；支援重做；保存使用開始編輯時的版本（空字串＝當時伺服器未有主題），失敗保留草稿、衝突可明確覆寫，不會把本機草稿顯示為已保存。
+- 衣櫃頁首：標題、搜尋、篩選、更多、主分類、按需子分類、數量及排序整合為一個固定頁首（固定定位＋佔位，收合時清單不跳位）；向下捲動收合（約 100 px），全站頁首同時收起；`--app-header-h` 由 ResizeObserver 量度。篩選改為底部面板。
+- 本機同步：IndexedDB 衣物與同步紀錄不一致時自動重新同步（不再顯示 0 件）；伺服器清單突然變成 0 件時先再核對；首次載入失敗與「真正沒有衣服」分開顯示。
+- Preview D1：2026-11-15 已核對實際 schema 確認缺少 0010、0011 的欄位及資料表後補齊並記錄於 `d1_migrations`（只限預覽資料庫）。
+
 ## V3：分類字典 × 批量入庫 × 穿搭排版
 
 - **分類字典**（D1 `taxonomy`）：主分類 → 子分類，以及屬性（袖長、裙長、材質…）→ 選項。固定 ID、顯示名稱可改。預設值在 `shared/taxonomy.ts`，首次讀取時寫入（`app_settings.taxonomy_seeded`），之後全部在 App「設定 → 分類管理」增加／改名／刪除／拖拉排序。

@@ -170,6 +170,7 @@ try {
   }
   await page.locator('[data-testid="theme-preview"]').scrollIntoViewIfNeeded();
   await shot("06-preview-dress");
+  await page.click('[data-testid="theme-sheet-done"]'); await page.waitForTimeout(120);
   await page.click('[data-testid="theme-trial"]');
   check("套用到整個 App 試用：全站暫時使用草稿", (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--color-plum").trim())) === "#003344");
   // 進階色票：色相滑桿顯示彩虹漸層
@@ -179,6 +180,7 @@ try {
   check("色相滑桿是彩虹漸層", /#f00/.test(hueBg) && /#0ff/.test(hueBg), hueBg);
   const satBg = await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="theme-sat"]')).getPropertyValue("--grad"));
   check("飽和度滑桿按目前顏色顯示漸層", /linear-gradient/.test(satBg), satBg);
+  await page.click('[data-testid="theme-sheet-done"]'); await page.waitForTimeout(120);
   await page.click('[data-testid="theme-cancel"]');
   await page.waitForSelector('[data-testid="theme-list"]');
   check("取消編輯完整恢復原本主題", (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--color-plum").trim())) === rootBg0 && !(await page.evaluate(() => document.documentElement.dataset.themeTrial)));
@@ -189,6 +191,7 @@ try {
   await page.fill('[data-testid="theme-name"]', "我的黑夜");
   await page.click('[data-token="bg"]');
   await page.fill('[data-testid="theme-hex"]', "#101010"); await page.locator('[data-testid="theme-hex"]').blur();
+  await page.click('[data-testid="theme-sheet-done"]'); await page.waitForTimeout(120);
   // 保存工具列不遮住內容
   await page.evaluate(() => scrollTo(0, document.body.scrollHeight));
   await page.waitForTimeout(200);
@@ -205,6 +208,7 @@ try {
   check("編輯已有主題：顯示為編輯（不是新增）", (await page.getAttribute('[data-testid="theme-editor"]', "data-new")) === "0" && (await page.getAttribute('[data-testid="theme-editor"]', "data-editing")) === id);
   await page.click('[data-token="title"]');
   await page.fill('[data-testid="theme-hex"]', "#ffeeaa"); await page.locator('[data-testid="theme-hex"]').blur();
+  await page.click('[data-testid="theme-sheet-done"]'); await page.waitForTimeout(120);
   await page.click('[data-testid="theme-save"]');
   await page.waitForSelector('[data-testid="theme-list"]');
   st = JSON.parse((await env.DB.prepare("SELECT value FROM app_settings WHERE key='theme'").first()).value);

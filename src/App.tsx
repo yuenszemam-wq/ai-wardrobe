@@ -1,6 +1,6 @@
 import { startThumbnailMaintenance } from "./thumbnailMaintenance";
 import { clearImageMemory } from "./imageCache";
-import { ReactElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ReactElement, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, AppSettings } from "./api";
 import { clearHomeLayoutCache } from "./homeLayoutStore";
 import { clearCachedLists } from "./wardrobeList";
@@ -111,7 +111,7 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-screen max-w-5xl">
-      <header className="safe-top lace-b sticky top-0 z-30" style={{ background: "var(--aw-header)" }}>
+      <AppHeader lace={!path.startsWith("/wardrobe")}>
         <div className="flex h-10 items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2 font-serif text-[18px] tracking-[0.16em] text-gold-soft">
             <IconSparkle className="text-[10px] text-gold" />
@@ -130,12 +130,30 @@ export default function App() {
             </Link>
           )}
         </div>
-      </header>
+      </AppHeader>
       <main className="px-4 pb-32 pt-2">{offline&&<OfflineBanner />}{page}</main>
       <TabBar path={path} />
       <Toast />
     </div>
   );
+}
+
+/**
+ * 全站頁首（Phase 3.8B.1）：以 ResizeObserver 把實際高度寫入 --app-header-h（各頁的固定工具列以此定位，不再寫死高度）。
+ * 衣櫃頁向下捲動時可收合（html[data-header-collapsed]），由衣櫃頁首接手；衣櫃頁不顯示頁首蕾絲，避免兩條重複蕾絲。
+ */
+function AppHeader({ lace, children }: { lace: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => document.documentElement.style.setProperty("--app-header-h", `${el.getBoundingClientRect().height}px`);
+    measure();
+    const ob = new ResizeObserver(measure);
+    ob.observe(el);
+    return () => ob.disconnect();
+  }, []);
+  return <header ref={ref} className={`app-header safe-top sticky top-0 z-30 ${lace ? "lace-b" : ""}`} style={{ background: "var(--aw-header)" }}>{children}</header>;
 }
 
 const TABS = [
