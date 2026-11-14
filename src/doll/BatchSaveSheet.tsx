@@ -62,7 +62,7 @@ export function BatchSaveSheet({ entries, bodyName, selectedGid, onSave, onClose
 
   return (
     <Sheet title={alsoLook ? "保存造型及全部衣物設定" : "一次保存全部衣物設定"} onClose={busy ? () => undefined : onClose}>
-      <div data-testid="batch-sheet" className="space-y-3 text-[12.5px]">
+      <div data-testid="batch-sheet" className="space-y-3 text-[12.5px] text-cream">
         <p className="leading-snug text-mauve">目前身體：<b className="text-gold-soft" data-testid="batch-body">{bodyName}</b>｜{alsoLook ? "會同時執行兩種保存：先更新這個身體的衣物預設，全部成功後再保存目前造型。" : "只更新這個身體的衣物預設，不會建立或覆寫造型，其他身體模型不受影響。"}</p>
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="保存範圍">
           {(["changed", "set", "all", "custom"] as BatchScope[]).map((s) => (

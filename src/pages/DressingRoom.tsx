@@ -1369,17 +1369,17 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
 
       {/* ───── 快捷工具列（Phase 3.8A.1）：放在畫布與面板之間，不遮住人物 ───── */}
       {!preview && !draft && (
-        <div className="relative shrink-0 border-t border-gold/25 bg-ink/85 px-2 pb-1 pt-1" data-testid="quick-bar" data-open={quickOpen ? "1" : "0"}>
-          <div className="flex h-7 items-center gap-1.5 text-[11px]">
+        <div className="relative shrink-0 border-t border-gold/25 bg-ink/85 px-2 pb-1 pt-0.5" data-testid="quick-bar" data-open={quickOpen ? "1" : "0"}>
+          <div className="flex h-6 items-center gap-1.5 text-[11px]">
             <label className="flex min-w-0 items-center gap-1 text-mauve">作用於
-              <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-7 max-w-[7.5rem] rounded-full bg-white/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
+              <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-6 max-w-[7.5rem] rounded-full bg-white/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
                 {(["item", "set", "all"] as QuickScope[]).map((s) => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
               </select>
             </label>
             <span className="min-w-0 flex-1 truncate text-right text-gold-soft" data-testid="quick-state" data-mode={quickState ?? "none"} data-count={quickList.length} data-auto={scopeTargets(resolved, quickScope, sel, "auto").length}>
               {quickState ? `${quickState === "mixed" ? "混合設定" : MODE_LABEL[quickState]} · ${quickList.length} ${unitOf(quickList)}` : quickScope === "all" ? "沒有已穿衣物" : "未選衣物：先點選衣物"}
             </span>
-            <button type="button" aria-label={quickOpen ? "收起快捷工具" : "展開快捷工具"} aria-expanded={quickOpen} data-testid="quick-collapse" onClick={() => { setQuickOpenSaved(!quickOpen); setQuickMore(false); }} className="grid h-7 w-8 shrink-0 place-items-center rounded-full text-mauve">{quickOpen ? "▾" : "▴"}</button>
+            <button type="button" aria-label={quickOpen ? "收起快捷工具" : "展開快捷工具"} aria-expanded={quickOpen} data-testid="quick-collapse" onClick={() => { setQuickOpenSaved(!quickOpen); setQuickMore(false); }} className="grid h-6 w-9 shrink-0 place-items-center rounded-full text-mauve">{quickOpen ? "▾" : "▴"}</button>
           </div>
           {quickOpen && (
             <div className="mt-0.5 grid grid-cols-5 gap-1" role="toolbar" aria-label="快捷工具">
