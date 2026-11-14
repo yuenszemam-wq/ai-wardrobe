@@ -78,6 +78,12 @@ export default function Outfits() {
         <EntryCard to="/outfits/new" testid="entry-outfit" Icon={IconShirt} title="衣服配搭" text="自由組合衣櫃單品" />
         <EntryCard to="/dressing" testid="entry-look" Icon={IconPerson} title="角色換裝" text="為角色打造新造型" hot />
       </div>
+      {/* Phase 3.9A.1：日常使用（日誌、日曆、穿著分析），小型快捷 */}
+      <div className="mt-2 grid grid-cols-3 gap-2" data-testid="studio-daily">
+        <Link to="/diary?view=list" className="chip flex h-10 items-center justify-center rounded-full text-[13px]" data-testid="entry-diary">穿搭日誌</Link>
+        <Link to="/diary" className="chip flex h-10 items-center justify-center rounded-full text-[13px]" data-testid="entry-calendar">穿搭日曆</Link>
+        <Link to="/diary/new" className="chip flex h-10 items-center justify-center rounded-full text-[13px]" data-testid="entry-record-today">記錄今日</Link>
+      </div>
       {/* 管理工具：較小的一行入口 */}
       <div className="mt-2 grid grid-cols-2 gap-2" data-testid="studio-tools">
         <ToolLink to="/dressing/setup" testid="entry-setup" Icon={IconScissors} title="衣服設定" />

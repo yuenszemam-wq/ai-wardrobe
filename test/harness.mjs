@@ -118,6 +118,7 @@ export function makeEnv(opts = {}) {
   DB.migrate(new URL("../migrations/0010_doll_phase3.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0011_doll_models.sql", import.meta.url));
   if (!opts.withoutR2Usage) DB.migrate(new URL("../migrations/0012_r2_usage.sql", import.meta.url));
+  if (!opts.withoutDiary) DB.migrate(new URL("../migrations/0013_outfit_diary.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),

@@ -56,6 +56,14 @@ npx wrangler d1 migrations apply DB --remote
 - 本機同步：IndexedDB 衣物與同步紀錄不一致時自動重新同步（不再顯示 0 件）；伺服器清單突然變成 0 件時先再核對；首次載入失敗與「真正沒有衣服」分開顯示。
 - Preview D1：2026-11-15 已核對實際 schema 確認缺少 0010、0011 的欄位及資料表後補齊並記錄於 `d1_migrations`（只限預覽資料庫）。
 
+### Phase 3.9A.1：穿搭日誌、日曆及穿著統計
+
+- D1 `0013_outfit_diary.sql`（只新增資料表）：`diary_entries`（本地日期、已穿著／計劃／靈感、場合、地點、天氣、標籤、備註、收藏、封面）、`diary_items`（衣物＋套裝部件，保存當時名稱及分類；不設外鍵，刪除衣物後歷史仍在）、`diary_snaps`（D1 小縮圖快照，按來源去重共用，不複製高清圖）、`diary_photos`（R2 `diary/`＋D1 縮圖）。2026-11-15 已套用預覽 D1。
+- API：`GET/POST /api/diary`、`GET/PATCH/DELETE /api/diary/:id`（`base_updated_at` 衝突檢查）、`POST /api/diary/:id/duplicate`、`POST/DELETE /api/diary/:id/photos[/:pid]`、`GET /api/diary/photos/:pid[/thumb]`、`GET /api/diary/snaps/:id`、`GET /api/diary/stats?today=`、`GET /api/garments/:id/wear?today=`。
+- 統計：只計已穿著且日期不晚於使用者「今天」；同一件衣物同一天只計一次；套裝部件不另計；每次穿著成本＝價格 ÷ 穿著日數，未填價格＝未知。
+- 照片：手機以 Canvas 重新編碼（最長邊 2560px JPEG），移除 EXIF／GPS；伺服器按 SHA-256 去重，上傳重試不重複建立；D1 失敗時刪除剛寫入的 R2 檔案。
+- 前端：`/diary`（緊湊月曆、照片月曆、月份列表、週視圖；月份／日期／顯示方式記在網址）、`/diary/new`、`/diary/:id`、`/diary/:id/edit`、`/diary/stats`；衣物詳情顯示穿著紀錄；衣服配搭及角色換裝可「加入穿搭日誌」；首頁新增 6 個可選元件（不預設加入）。離線時顯示已同步的日誌（唯讀），未保存表單存為本機草稿。
+
 ## V3：分類字典 × 批量入庫 × 穿搭排版
 
 - **分類字典**（D1 `taxonomy`）：主分類 → 子分類，以及屬性（袖長、裙長、材質…）→ 選項。固定 ID、顯示名稱可改。預設值在 `shared/taxonomy.ts`，首次讀取時寫入（`app_settings.taxonomy_seeded`），之後全部在 App「設定 → 分類管理」增加／改名／刪除／拖拉排序。

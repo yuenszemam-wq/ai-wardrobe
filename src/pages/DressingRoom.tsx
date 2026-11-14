@@ -1164,9 +1164,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   }
 
   // ───── 保存造型 ─────
-  async function save(asNew = false) {
-    if (pending.size) return toast("衣物仍在載入，請稍後再保存", "err");
-    if (draft) return toast("請先儲存或取消正在編輯的素材", "err");
+  async function save(asNew = false): Promise<string | undefined> {
+    if (pending.size) { toast("衣物仍在載入，請稍後再保存", "err"); return; }
+    if (draft) { toast("請先儲存或取消正在編輯的素材", "err"); return; }
     setBusy(true);
     const state: LookState = {
       v: 3, model: modelRef(bodyModel), head: look.head, head_config: head, hair: look.hair, ...(hair?{hair_config:hair}:{}), hair_color: look.hair_color, accent_color: look.accent_color, tip_color: look.tip_color, pose: clampPose(rig, pose), front,
@@ -1183,6 +1183,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       setDirty(false); setNotice(""); await discardRecovery();
       if (res.id !== id) navigate(`/dressing/${res.id}`, true);
       else setWorn((cur) => cur.map((w) => (w.v1fit ? { ...w, fit: state.items.find((i) => itemKey(i) === itemKey(w))?.fit ?? null, v1fit: null } : w)));
+      return res.id;
     } catch (e) {
       toast((e as Error).message, "err");
     } finally {
@@ -1372,6 +1373,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
             {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); void save(true); }}>另存為新造型</button>}
             <button type="button" role="menuitem" data-testid="menu-batch-save" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); openBatch(); }}>一次保存全部衣物設定</button>
             <button type="button" role="menuitem" data-testid="menu-save-both" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); openBatch(true); }}>保存造型及全部衣物設定</button>
+            <button type="button" role="menuitem" data-testid="menu-diary" className="block w-full px-4 py-2.5 text-left" onClick={async () => { setMenu(false); const lid = dirty || !id ? await save() : id; if (lid) navigate(`/diary/new?look=${lid}`); }}>加入穿搭日誌</button>
             <button type="button" role="menuitem" data-testid="export-png" className="block w-full px-4 py-2.5 text-left" onClick={() => void exportPng()}>匯出透明 PNG</button>
             {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left text-wine" onClick={() => { setMenu(false); void removeLook(); }}>刪除造型</button>}
           </div>

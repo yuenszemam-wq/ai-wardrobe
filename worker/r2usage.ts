@@ -21,7 +21,7 @@ export type OpClass = "class_a" | "class_b" | "free" | "unknown";
 /** 官方分類；文件沒有列出的操作標示為 unknown（不會當作免費） */
 export const classOf = (action: string): OpClass => (CLASS_A.has(action) ? "class_a" : CLASS_B.has(action) ? "class_b" : FREE_OPS.has(action) ? "free" : "unknown");
 
-export const PURPOSES: [string, string][] = [["originals", "衣物原圖"], ["processed", "去背圖片（衣物高清圖）"], ["thumbnails", "舊版 R2 縮圖"], ["outfits", "穿搭圖片"], ["doll_assets", "頭部、髮件及衣物部件"], ["doll_models", "自訂身體素材"], ["home_bg", "首頁背景"], ["other", "其他 R2 物件"]];
+export const PURPOSES: [string, string][] = [["originals", "衣物原圖"], ["processed", "去背圖片（衣物高清圖）"], ["thumbnails", "舊版 R2 縮圖"], ["outfits", "穿搭圖片"], ["doll_assets", "頭部、髮件及衣物部件"], ["doll_models", "自訂身體素材"], ["home_bg", "首頁背景"], ["diary_photos", "穿搭日誌照片"], ["other", "其他 R2 物件"]];
 export function purposeOf(key: string): string {
   if (key.startsWith("originals/")) return "originals";
   if (key.startsWith("processed/")) return "processed";
@@ -30,6 +30,7 @@ export function purposeOf(key: string): string {
   if (key.startsWith("doll/assets/")) return "doll_assets";
   if (key.startsWith("doll/models/")) return "doll_models";
   if (key.startsWith("settings/home-bg")) return "home_bg";
+  if (key.startsWith("diary/")) return "diary_photos";
   return "other";
 }
 export type Counter = Map<string, number>;
@@ -235,6 +236,8 @@ export async function appUsage(env: Env) {
   if (dollAssets) { storage.doll_assets.objects += dollAssets.n; storage.doll_assets.bytes += dollAssets.b; }
   const dollModels = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(file_size),0) AS b FROM doll_model_files").first<{ n: number; b: number }>().catch(() => null);
   if (dollModels) { storage.doll_models.objects += dollModels.n; storage.doll_models.bytes += dollModels.b; }
+  const diary = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(file_size),0) AS b FROM diary_photos").first<{ n: number; b: number }>().catch(() => null);
+  if (diary) { storage.diary_photos.objects += diary.n; storage.diary_photos.bytes += diary.b; }
   const bg = await env.DB.prepare("SELECT value FROM app_settings WHERE key = 'home_bg'").first<{ value: string }>().catch(() => null);
   if (bg) { try { const o = JSON.parse(bg.value) as { size?: number }; storage.home_bg.objects += 1; storage.home_bg.bytes += Number(o.size) || 0; } catch { /* ignore */ } }
   let ops: { purpose: string; op: string; n: number }[] = [], table = true;

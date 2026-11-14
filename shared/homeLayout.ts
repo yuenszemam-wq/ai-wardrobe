@@ -7,7 +7,9 @@ export const HOME_LAYOUT_VERSION = 2;
 
 export type WidgetType =
   | "cover" | "overview" | "value" | "quick" | "recent" | "updated" | "favorites"
-  | "recent_looks" | "fav_looks" | "analysis" | "todo" | "random_garment" | "random_look";
+  | "recent_looks" | "fav_looks" | "analysis" | "todo" | "random_garment" | "random_look"
+  /** Phase 3.9A.1：穿搭日誌元件（不會預設加入首頁） */
+  | "diary_today" | "diary_recent" | "diary_calendar" | "diary_usage" | "most_worn" | "least_worn";
 /** Phase 3.8A.2：小型（半寬）、中型（半寬或全寬）、大型（全寬）。舊版 compact／standard 自動升級。 */
 export type WidgetSize = "small" | "medium" | "large";
 export type WidgetSpan = 1 | 2;
@@ -71,6 +73,12 @@ export const DISPLAYS: Record<WidgetType, [string, string, WidgetSize][]> = {
   random_look: [["hero", "單張大圖", "small"], ["carousel", "橫向相簿", "large"], ["grid2", "雙欄卡片", "large"], ["list", "緊湊列表", "large"]],
   analysis: [["donut", "圓環圖", "large"], ["bars", "橫向長條圖", "large"], ["rank", "分類排行", "medium"], ["ratio", "單一比例", "small"], ["numbers", "純數字摘要", "medium"]],
   todo: [["chips", "標籤列", "large"], ["list", "緊湊列表", "medium"], ["count", "待處理總數", "small"]],
+  diary_today: [["card", "今日穿搭卡片", "large"], ["mini", "小型今日穿搭", "small"], ["photo", "今日照片大圖", "large"], ["list", "今日全部穿搭", "medium"]],
+  diary_recent: [["carousel", "橫向相簿", "large"], ["grid2", "雙欄照片", "large"], ["list", "緊湊列表", "large"], ["hero", "單張大圖", "small"]],
+  diary_calendar: [["month", "本月月曆", "large"], ["dots", "小型月曆", "medium"], ["week", "本週", "large"], ["count", "本月記錄日數", "small"]],
+  diary_usage: [["ratio", "使用率", "small"], ["numbers", "數字摘要", "medium"], ["bar", "進度條", "medium"], ["count", "穿過件數", "small"]],
+  most_worn: [["list", "排行列表", "large"], ["grid", "圖片排行", "large"], ["carousel", "橫向圖片", "large"], ["hero", "第一名", "small"]],
+  least_worn: [["list", "排行列表", "large"], ["grid", "圖片排行", "large"], ["carousel", "橫向圖片", "large"], ["hero", "最久未穿", "small"]],
 };
 export const SIZE_LABEL: Record<WidgetSize, string> = { small: "小型", medium: "中型", large: "大型" };
 export const displayLabel = (t: WidgetType, d: string) => DISPLAYS[t]?.find((x) => x[0] === d)?.[1] ?? d;
@@ -120,13 +128,20 @@ export const WIDGETS: WidgetSpec[] = [
   { type: "todo", label: "待處理事項", hint: "AI 待整理、待確認、缺少圖片、未填價格", onlyWhen: true },
   { type: "random_garment", label: "隨機衣物推薦", hint: "隨機推薦衣物；按「重新推薦」才會更換", count: 3, maxCount: 8, category: true, multi: true },
   { type: "random_look", label: "隨機穿搭", hint: "隨機顯示已保存的穿搭；按「重新推薦」才會更換", count: 1, maxCount: 3, onlyWhen: true, multi: true },
+  { type: "diary_today", label: "今日穿搭", hint: "今天的穿搭紀錄及快速記錄" },
+  { type: "diary_recent", label: "最近穿搭日誌", hint: "最近的穿搭紀錄及照片", count: 6, maxCount: 12, multi: true },
+  { type: "diary_calendar", label: "本月穿搭日曆", hint: "本月有穿搭紀錄的日子" },
+  { type: "diary_usage", label: "本月衣櫃使用率", hint: "本月穿過的衣物佔衣櫃的比例", multi: true },
+  { type: "most_worn", label: "最常穿衣物", hint: "按穿著日數排行（只計已穿著紀錄）", count: 5, maxCount: 10, multi: true },
+  { type: "least_worn", label: "最近未穿衣物", hint: "已有紀錄但最久未穿的衣物", count: 5, maxCount: 10, multi: true },
 ];
 export const widgetSpec = (t: string) => WIDGETS.find((w) => w.type === t);
 
 const w = (type: WidgetType, opts: WidgetOpts = {}, visible = true, size: WidgetSize = "large", display = DISPLAYS[type][0][0]): Widget => ({ id: type, type, visible, size, display, span: spanFor(type, display, size), opts });
 /** 新元件（新增小工具時）：按展示方式的建議大小 */
 export function newWidget(type: WidgetType, id: string, display = DISPLAYS[type][0][0], size?: WidgetSize, opts?: WidgetOpts): Widget {
-  const tpl = defaultHomeLayout().widgets.find((x) => x.type === type)!;
+  // 不在預設主頁的元件（例如穿搭日誌元件）沒有範本設定，使用空白設定
+  const tpl = defaultHomeLayout().widgets.find((x) => x.type === type) ?? { opts: {} as WidgetOpts };
   const sz = size ?? DISPLAYS[type].find((d) => d[0] === display)?.[2] ?? "large";
   const spec = widgetSpec(type)!;
   return { id, type, visible: true, size: sz, display, span: spanFor(type, display, sz), opts: normalizeOpts(spec, { ...tpl.opts, ...(opts ?? {}) }) };
