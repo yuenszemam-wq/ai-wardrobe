@@ -33,6 +33,8 @@ try {
   const ms = Date.now() - t0;
   check("第二次開啟：不等伺服器，先顯示本機資料", ms < 2500 && (await ids()).length === 8, ms);
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  // 等待被延遲的背景同步完成，之後才修改伺服器資料
+  await page.waitForTimeout(3500);
   check("沒有重新下載完整衣櫃", count(/^POST \/api\/sync\/garments$/) === 0 && count(/^GET \/api\/garments\?/) === 0, requests);
 
   console.log("增量同步");
@@ -40,12 +42,12 @@ try {
   await env.DB.prepare("DELETE FROM garments WHERE id='gar_lh'").run();
   await addGarment(env, { id: "gar_lnew", name: "新加入衣物", category: "連身裙", subcategory: "JSK", svg: SVG("#aa3366") });
   requests.length = 0;
-  let body = null;
-  page.on("request", (r) => { if (r.url().endsWith("/api/sync/garments") && r.method() === "POST") body = r.postData(); });
+  const posted = [];
+  page.on("request", (r) => { if (r.url().endsWith("/api/sync/garments") && r.method() === "POST") posted.push(...JSON.parse(r.postData()).ids); });
   await page.goto(A.base + "/wardrobe");
   await page.waitForFunction(() => document.querySelectorAll("[data-gid]").length === 8 && document.body.textContent.includes("新加入衣物"), null, { timeout: 8000 }).catch(() => undefined);
   const got = await ids();
-  check("增量同步：只下載有改動的衣物（改名＋新增＝2 件）", body && JSON.parse(body).ids.sort().join() === "gar_lc,gar_lnew", body);
+  check("增量同步：只下載有改動的衣物（改名＋新增＝2 件）", [...new Set(posted)].sort().join() === "gar_lc,gar_lnew", posted);
   check("新增衣物出現、刪除的衣物移除、沒有重複", got.includes("gar_lnew") && !got.includes("gar_lh") && new Set(got).size === got.length && got.length === 8, got);
   check("改名立即更新", (await page.textContent("body")).includes("已在另一部手機改名"));
   check("同步後不清空列表、不重新初始化", count(/^GET \/api\/garments\?/) === 0);

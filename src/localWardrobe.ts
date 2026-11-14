@@ -10,7 +10,7 @@
  * - 首頁、衣櫃、衣服設定、穿搭選單共用同一份本機資料（透過 wardrobeList.loadFullList）。
  * 預留（Phase 3.8C）：outbox 資料表名稱已保留，未啟用離線修改。
  */
-import { api, Garment } from "./api";
+import { api, ApiError, Garment } from "./api";
 
 const VERSION = 1;
 const STORES = ["garments", "meta", "kv", "outbox"] as const;
@@ -200,7 +200,11 @@ export async function kvSet(key: string, value: unknown) {
 /** 讀取伺服器資料並保存本機副本；失敗時使用最後成功的本機副本（離線） */
 export async function cachedApi<T>(path: string, key = "api:" + path): Promise<{ data: T; offline: boolean }> {
   try { const data = await api<T>(path); void kvSet(key, { data, at: new Date().toISOString() }); return { data, offline: false }; }
-  catch (e) { const hit = await kvGet<{ data: T }>(key); if (hit) return { data: hit.data, offline: true }; throw e; }
+  catch (e) {
+    // 只在網絡失敗（離線）時使用本機副本；伺服器回覆錯誤時如實顯示並可重試
+    if (e instanceof ApiError) throw e;
+    const hit = await kvGet<{ data: T }>(key); if (hit) return { data: hit.data, offline: true }; throw e;
+  }
 }
 
 // ───── 本機篩選及排序（與伺服器 /api/garments 相同的條件） ─────
