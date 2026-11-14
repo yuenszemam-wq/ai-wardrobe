@@ -14,6 +14,7 @@ import { Appearance, BUILTIN_THUMB, GarmentLite, Resolved, wearHairPart } from "
 import { HairColorStudio } from "./HairColor";
 import type { ModelSummary } from "./models";
 import type { BehindStats } from "./engine";
+import type { BatchSummary } from "./batchSave";
 import type { AvatarModel } from "../../shared/avatarModel";
 import { DRAG_MODES, DragMode, PoseControl, REGIONS, Region, adjustable, jointLabel, jointTitle, regionBones, regionOf } from "../../shared/poseControls";
 
@@ -133,8 +134,10 @@ export interface LayerGroupOps { onHideGroup: (gid: string, hide: boolean) => vo
 type LayerRow = { id: string; r: Resolved; group?: { gid: string; members: Resolved[] } };
 /** 圖層的名稱：套裝部件用部件自己的名稱 */
 export const layerName = (r: Resolved) => (r.piece ? r.piece.name : displayName(r.garment as Garment));
-export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRemove, onClear, hints, onHideGroup, onRemoveGroup }: {
+export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRemove, onClear, hints, onHideGroup, onRemoveGroup, batch }: {
   items: Resolved[]; selected: string | null; onSelect: (id: string | null) => void; onReorder: (ids: string[]) => void; onHide: (id: string) => void; onRemove: (id: string) => void; onClear: () => void; hints: string[];
+  /** Phase 3.8A.1：衣物設定保存狀態及「一次保存全部設定」 */
+  batch?: { summary: BatchSummary; onOpen: () => void; pending: number };
 } & LayerGroupOps) {
   /** 收起的套裝群組（只影響顯示；圖層次序仍然是每個部件獨立） */
   const [folded, setFolded] = useState<Set<string>>(new Set());
@@ -175,6 +178,19 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
         <span>已穿 {items.length} 件｜上面的在外層，按住 ☰ 拖動排序</span>
         <button type="button" data-testid="clear-all" onClick={onClear} className="chip rounded-full px-2.5 py-1 text-[11.5px]">全部脫下</button>
       </div>
+      {batch && (() => {
+        const b = batch.summary, unsaved = b.modified + b.uncalibrated;
+        const unit = items.every((r) => r.piece) ? "個部件" : "件";
+        return (
+          <div data-testid="batch-bar" data-unsaved={unsaved} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/5 px-2.5 py-1.5">
+            <div className="min-w-0 flex-1 text-[11px] leading-snug">
+              <p className="text-gold-soft">已穿 {b.worn} {unit}｜{unsaved ? `${unsaved} 項設定尚未保存` : "衣物設定已全部保存"}</p>
+              <p className="text-mauve">已修改 {b.modified} · 未校正 {b.uncalibrated} · 已保存 {b.saved}{b.other ? ` · 其他 ${b.other}` : ""}{batch.pending ? ` · 載入中 ${batch.pending}` : ""}</p>
+            </div>
+            <button type="button" data-testid="batch-open" onClick={batch.onOpen} className={`h-9 shrink-0 rounded-full px-3 text-[12px] ${unsaved ? "btn-jewel" : "chip"}`}>一次保存全部設定</button>
+          </div>
+        );
+      })()}
       {hints.map((h) => <p key={h} role="note" className="mb-1.5 rounded-xl bg-white/5 px-2.5 py-1.5 text-[11px] leading-snug text-gold-soft">提示：{h}</p>)}
       {groups.size > 0 && (
         <div className="mb-1.5 space-y-1" data-testid="layer-groups">

@@ -382,6 +382,37 @@ export interface TemplateData {
   pieces?: Piece[];
   /** 各設定項目的手動狀態（已完成／不需要）；沒有標記的項目由程式按實際設定判斷 */
   status?: SetupStatus;
+  /** 整套穿著配置（Phase 3.8A.1）：穿上整套時使用的部件、相對圖層次序及建議姿勢 */
+  set_layout?: SetLayout;
+}
+/**
+ * 整套穿著配置：只記錄同一套裝內部件之間的相對次序（由內到外），以及預設穿上的部件。
+ * 各部件的位置、遮罩、骨架仍然存在各自的部件預設（pieces[].fit 等），這裡只引用部件 id。
+ * 不記錄造型內其他衣物的全域圖層次序。
+ */
+export interface SetLayout {
+  /** 部件 id，由內到外 */
+  order: string[];
+  /** 預設穿上的部件 id */
+  worn: string[];
+  /** 建議姿勢（可選擇套用） */
+  pose?: Pose | null;
+  /** 保存這份配置時使用的身體模型（只作記錄；配置本身已按身體分開保存） */
+  avatar?: string;
+  updated_at?: string;
+}
+export function normalizeSetLayout(v: unknown, pieces: Piece[], poseRig: Rig = RIG_V2): SetLayout | undefined {
+  if (!v || typeof v !== "object" || !pieces.length) return undefined;
+  const o = v as Record<string, unknown>, ids = new Set(pieces.map((p) => p.id));
+  const list = (x: unknown) => (Array.isArray(x) ? x.filter((i): i is string => typeof i === "string" && ids.has(i)).filter((i, n, a) => a.indexOf(i) === n) : []);
+  const order = list(o.order), worn = list(o.worn).filter((i) => order.includes(i));
+  if (!order.length || !worn.length) return undefined;
+  return {
+    order, worn,
+    ...(o.pose && typeof o.pose === "object" ? { pose: normalizePose(poseRig, o.pose) } : {}),
+    ...(isModelId(o.avatar) ? { avatar: o.avatar } : {}),
+    ...(typeof o.updated_at === "string" && o.updated_at.length <= 40 ? { updated_at: o.updated_at } : {}),
+  };
 }
 const frontOf = (v: unknown): FrontPart[] => (Array.isArray(v) ? (["hand_r", "hand_l"] as FrontPart[]).filter((k) => v.includes(k)) : []);
 export function normalizeTemplateData(v: unknown, slot: Slot, poseRig: Rig = RIG_V2): TemplateData {
@@ -403,8 +434,9 @@ export function normalizeTemplateData(v: unknown, slot: Slot, poseRig: Rig = RIG
     }
   }
   const sy = typeof o.sy === "number" && o.sy >= SY_LIMIT.min && o.sy <= SY_LIMIT.max && Math.abs(o.sy - 1) > 0.0005 ? Math.round(o.sy * 1000) / 1000 : undefined;
-  return { opts: normalizeOpts(o.opts, slot, poseRig), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(poseRig, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}), ...(o.converted && isModelId(o.converted_from) ? { converted_from: o.converted_from } : {}), ...(normalizePieces(o.pieces, poseRig).length ? { pieces: normalizePieces(o.pieces, poseRig) } : {}), ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}) };
+  return { opts: normalizeOpts(o.opts, slot, poseRig), mask: isMask(o.mask) ? o.mask : null, ...(isParts(o.parts) ? { parts: o.parts } : {}), ...(sy ? { sy } : {}), ...(normalizeManualMesh(o.mesh) ? { mesh: normalizeManualMesh(o.mesh) } : {}), pose: o.pose ? normalizePose(poseRig, o.pose) : null, front: frontOf(o.front), variants, ...(o.converted ? { converted: true } : {}), ...(o.converted && isModelId(o.converted_from) ? { converted_from: o.converted_from } : {}), ...(normalizePieces(o.pieces, poseRig).length ? { pieces: normalizePieces(o.pieces, poseRig) } : {}), ...(normalizeStatus(o.status) ? { status: normalizeStatus(o.status) } : {}), ...setLayoutOf(o.set_layout, normalizePieces(o.pieces, poseRig), poseRig) };
 }
+const setLayoutOf = (v: unknown, pieces: Piece[], poseRig: Rig) => { const l = normalizeSetLayout(v, pieces, poseRig); return l ? { set_layout: l } : {}; };
 
 // ───── 造型 ─────
 /** 造型內的一件衣物。fit／opts／mask 為 null＝跟隨衣物預設；有值＝只用於這個造型。 */
