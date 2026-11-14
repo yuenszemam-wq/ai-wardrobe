@@ -11,7 +11,7 @@ function ItemPicker({ all, value, onChange, testid }: { all: [string, string][];
   return (
     <div className="space-y-1" data-testid={testid}>
       {value.map((k, i) => (
-        <div key={k} className="flex items-center gap-1 rounded-xl bg-white/5 py-0.5 pl-2 pr-1" data-item={k}>
+        <div key={k} className="flex items-center gap-1 rounded-xl bg-cream/5 py-0.5 pl-2 pr-1" data-item={k}>
           <label className="flex min-h-9 flex-1 items-center gap-2"><input type="checkbox" checked disabled={value.length <= 1} onChange={() => onChange(value.filter((x) => x !== k))} />{label(k)}</label>
           <button type="button" aria-label={`${label(k)} 上移`} data-item-move="up" disabled={i === 0} onClick={() => move(i, -1)} className="grid h-9 w-8 place-items-center disabled:opacity-30"><IconChevronUp /></button>
           <button type="button" aria-label={`${label(k)} 下移`} data-item-move="down" disabled={i === value.length - 1} onClick={() => move(i, 1)} className="grid h-9 w-8 place-items-center disabled:opacity-30"><IconChevronDown /></button>

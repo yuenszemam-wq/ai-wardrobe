@@ -348,7 +348,7 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-plum" data-testid="split-editor">
-      <div className="safe-top shrink-0 bg-ink">
+      <div className="safe-top shrink-0 bg-head">
         <div className="flex h-12 items-center gap-2 px-2.5">
           <button type="button" aria-label="關閉拆件編輯" onClick={onClose} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full"><IconClose /></button>
           <div className="min-w-0 flex-1"><div className="text-[10.5px] text-mauve">套裝拆件（原圖不會被修改）</div><div className="truncate text-[13.5px] text-gold-soft">{name}</div></div>
@@ -360,14 +360,14 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" />
         {!alpha && <span className="absolute inset-0 grid place-items-center text-[12px] text-mauve">讀取原圖中…</span>}
-        <button type="button" aria-label="撤銷" disabled={!undo.current.length} onClick={() => { const u = undo.current.pop(); const e = list.find((x) => x.id === u?.id); if (u && e) { e.mask = u.data && alpha ? { w: alpha.w, h: alpha.h, data: u.data } : null; touched(); } }} className="absolute bottom-2 left-2 grid h-8 w-8 place-items-center rounded-full bg-ink/50 text-cream disabled:opacity-35">↶</button>
-        <button type="button" onClick={() => setCam({ z: 1, x: 0, y: 0 })} className="absolute bottom-2 right-2 rounded-full bg-ink/50 px-3 py-1 text-[11px] text-cream">{Math.round(cam.z * 100)}%</button>
+        <button type="button" aria-label="撤銷" disabled={!undo.current.length} onClick={() => { const u = undo.current.pop(); const e = list.find((x) => x.id === u?.id); if (u && e) { e.mask = u.data && alpha ? { w: alpha.w, h: alpha.h, data: u.data } : null; touched(); } }} className="absolute bottom-2 left-2 grid h-8 w-8 place-items-center rounded-full bg-head/50 text-cream disabled:opacity-35">↶</button>
+        <button type="button" onClick={() => setCam({ z: 1, x: 0, y: 0 })} className="absolute bottom-2 right-2 rounded-full bg-head/50 px-3 py-1 text-[11px] text-cream">{Math.round(cam.z * 100)}%</button>
       </div>
       <div className="shrink-0 border-t border-gold/40 bg-velvet px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-2 text-[12.5px]">
         <div className="scrollbar-none -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-2">
           <button type="button" data-testid="split-auto" disabled={!alpha} onClick={autoSplit} className="btn-jewel shrink-0 rounded-full px-3 py-1.5">自動拆出分開的部件</button>
           <button type="button" data-testid="split-add" onClick={() => addPiece()} className="chip flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5"><IconPlus className="text-[11px]" />新部件</button>
-          {PREVIEWS.map(([v, label]) => <button key={v} type="button" data-split-preview={v} aria-pressed={preview === v} onClick={() => setPreview(v)} className={`shrink-0 rounded-full px-2.5 py-1.5 text-[11.5px] ${preview === v ? "chip-on" : "bg-white/5 text-cream/80"}`}>{label}</button>)}
+          {PREVIEWS.map(([v, label]) => <button key={v} type="button" data-split-preview={v} aria-pressed={preview === v} onClick={() => setPreview(v)} className={`shrink-0 rounded-full px-2.5 py-1.5 text-[11.5px] ${preview === v ? "chip-on" : "bg-cream/5 text-cream/80"}`}>{label}</button>)}
         </div>
         {/* 部件列表：縮圖＋名稱＋分類＋附接位置＋是否已設定穿著位置 */}
         <div className="scrollbar-none -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-2" data-testid="split-pieces">
@@ -375,7 +375,7 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
             const on = cur === e.id, bone = e.keep.opts?.bone ?? pieceBone(e);
             return (
               <button key={e.id} type="button" data-piece={e.id} aria-pressed={on} onClick={() => setCur(e.id)} className={`flex w-[8.6rem] shrink-0 items-center gap-1.5 rounded-2xl p-1 text-left ${on ? "chip-on ring-2 ring-gold-soft" : "chip"}`}>
-                <span className="relative grid h-11 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white/85" style={{ boxShadow: `inset 0 0 0 2px ${e.rest ? "#f0d9c0" : colorOf(e.id)}` }}>
+                <span className="relative grid h-11 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-field/85" style={{ boxShadow: `inset 0 0 0 2px ${e.rest ? "#f0d9c0" : colorOf(e.id)}` }}>
                   {thumbs.get(e.id) ? <img src={thumbs.get(e.id)} alt="" className="h-full w-full object-contain p-0.5" /> : <span className="text-[9px] text-mauve">未選取</span>}
                 </span>
                 <span className="min-w-0 leading-tight">
@@ -399,7 +399,7 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
         )}
         {current && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="split-current">
-            <input value={current.name} onChange={(e) => patch({ name: e.target.value.slice(0, 30) })} aria-label="部件名稱" data-testid="split-name" className="h-8 w-32 rounded-full bg-white px-3 text-[12.5px] text-ink ring-1 ring-gold focus:outline-none" />
+            <input value={current.name} onChange={(e) => patch({ name: e.target.value.slice(0, 30) })} aria-label="部件名稱" data-testid="split-name" className="h-8 w-32 rounded-full bg-field px-3 text-[12.5px] text-ink ring-1 ring-gold focus:outline-none" />
             <select aria-label="部件分類" data-testid="split-slot" value={current.slot} onChange={(e) => patch({ slot: e.target.value as Slot })} className="h-8 rounded-full bg-velvet px-2 text-[12px]">{SLOTS.map((s) => <option key={s} value={s}>{SLOT_LABEL[s] ?? s}</option>)}</select>
             <select aria-label="附接位置" data-testid="split-bone" value={current.keep.opts?.bone ?? ""} onChange={(e) => { const b = e.target.value; patch({ keep: { ...current.keep, opts: b ? { ...(current.keep.opts ?? { ...defaultOpts(current.slot), follow: "none" as const }), bone: b } : null } }); }} className="h-8 max-w-[9rem] rounded-full bg-velvet px-2 text-[12px]">
               <option value="">附接：自動（{BONE_LABEL[pieceBone(current)] ?? (pieceBone(current) === "world" ? "固定" : pieceBone(current))}）</option>

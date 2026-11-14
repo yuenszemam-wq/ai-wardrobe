@@ -133,7 +133,7 @@ try {
   check("保存自訂主題並套用", th.custom.length === 1 && th.custom[0].name === "我的夜色" && th.active === th.custom[0].id, th);
   await page.click('[data-testid="theme-reset"]');
   await page.waitForFunction(() => document.documentElement.dataset.theme === "rose_mulberry");
-  check("還原預設主題：移除覆蓋，回到原有介面", (await page.evaluate(() => document.documentElement.style.getPropertyValue("--color-plum"))) === "");
+  check("還原預設主題：回到原有介面數值", (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--color-plum").trim())) === "#2a1526");
 
   console.log("穿搭工作室及角色素材");
   await page.goto(A.base + "/outfits");

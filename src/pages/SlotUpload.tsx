@@ -134,12 +134,12 @@ export default function SlotUpload({ token, initial }: { token: string; initial:
 
   return (
     <div className="safe-top min-h-screen bg-lace">
-      <header className="bg-ink px-4 py-4 text-rose">
+      <header className="bg-head px-4 py-4 text-rose">
         <p className="font-serif text-lg tracking-[0.12em]">✝ 電子衣櫃</p>
         <p className="mt-1 text-[13px] text-rose/80">批量上傳去背圖：可一次選取全部檔案，系統會按檔名自動配對。</p>
       </header>
       <main className="mx-auto max-w-xl px-4 py-5">
-        <div className="mb-4 rounded-2xl bg-white p-4 ring-1 ring-ink/5">
+        <div className="mb-4 rounded-2xl bg-field p-4 ring-1 ring-ink/5">
           <div className="flex items-center justify-between text-[14px]">
             <span>
               已完成 {done} / {total}
@@ -178,7 +178,7 @@ export default function SlotUpload({ token, initial }: { token: string; initial:
             const isDone = finished(s) || st?.tone === "ok";
             const failed = !isDone && (st?.tone === "err" || s.status === "failed");
             return (
-              <li key={s.slot_id} className="rounded-2xl bg-white p-3 ring-1 ring-ink/5">
+              <li key={s.slot_id} className="rounded-2xl bg-field p-3 ring-1 ring-ink/5">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[12px] text-mauve">

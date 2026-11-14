@@ -61,7 +61,8 @@ const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 /** 手指要移動超過這個距離（螢幕像素）才算拖動：輕觸、或準備雙指縮放時第一指的輕微移動，不會改動任何東西 */
 const SLOP = 5;
 const HIT = 30;
-const COLOR: Record<ControlKind, string> = { ik: "#f28ba3", aim: "#c9a0e8", move: "#f0d9c0" };
+// 控制點顏色跟隨主題（選中控制點／骨架色）；三種類型以形狀及深淺區分
+const COLOR: Record<ControlKind, string> = { ik: "var(--aw-handle)", aim: "var(--aw-bone)", move: "color-mix(in srgb, var(--aw-handle) 55%, var(--aw-bone))" };
 
 export function Stage({ renderer, scene, rig, camera, onCamera, onSize, mode, hand, selection, onPick, onFit, controls, skeleton, activeControl, onPose, onPaint, brush, onEditStart, onEditCancel, onReadyChange, dim, children }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -360,27 +361,27 @@ export function Stage({ renderer, scene, rig, camera, onCamera, onSize, mode, ha
             <g data-testid="manual-mesh">
               {meshPts.map((q, i) => (
                 <g key={i}>
-                  {i % 4 < 3 && <line x1={q[0]} y1={q[1]} x2={meshPts[i + 1][0]} y2={meshPts[i + 1][1]} stroke="#a96bda" strokeOpacity={0.85} strokeWidth={1.2} />}
-                  {i < 12 && <line x1={q[0]} y1={q[1]} x2={meshPts[i + 4][0]} y2={meshPts[i + 4][1]} stroke="#a96bda" strokeOpacity={0.85} strokeWidth={1.2} />}
+                  {i % 4 < 3 && <line x1={q[0]} y1={q[1]} x2={meshPts[i + 1][0]} y2={meshPts[i + 1][1]} className="sv-mesh" strokeOpacity={0.85} strokeWidth={1.2} />}
+                  {i < 12 && <line x1={q[0]} y1={q[1]} x2={meshPts[i + 4][0]} y2={meshPts[i + 4][1]} className="sv-mesh" strokeOpacity={0.85} strokeWidth={1.2} />}
                 </g>
               ))}
-              {meshPts.map((q, i) => <circle key={"p" + i} data-mesh-point={i} data-x={q[0].toFixed(1)} data-y={q[1].toFixed(1)} cx={q[0]} cy={q[1]} r={6} fill="rgb(255 250 246 / 0.85)" stroke="#8f4d7c" strokeWidth={2} />)}
+              {meshPts.map((q, i) => <circle key={"p" + i} data-mesh-point={i} data-x={q[0].toFixed(1)} data-y={q[1].toFixed(1)} cx={q[0]} cy={q[1]} r={6} className="sv-mesh-pt" strokeWidth={2} />)}
             </g>
           )}
           {frame && mode !== "pose" && mode !== "mesh" && (
             <g data-testid="fit-frame">
-              <polygon points={frame.pts.map((p) => p.join(",")).join(" ")} fill="none" stroke="#c9a0e8" strokeWidth={1.2} strokeDasharray="5 4" strokeOpacity={mode === "mask" ? 0.45 : 0.9} />
+              <polygon points={frame.pts.map((p) => p.join(",")).join(" ")} fill="none" className="sv-frame" strokeWidth={1.2} strokeDasharray="5 4" strokeOpacity={mode === "mask" ? 0.45 : 0.9} />
               {mode === "dress" && !hand && (
                 <>
                   {selection?.rotate !== false && (
                     <g data-testid="handle-rotate" transform={`translate(${frame.rotate[0]},${frame.rotate[1]})`}>
-                      <circle r={11} fill="#8f4d7c" stroke="#f0d9c0" strokeWidth={1.2} />
-                      <path d="M-5 1a5 5 0 1 0 2-5m-3-2v3.5h3.5" fill="none" stroke="#fffaf6" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                      <circle r={11} className="sv-handle" strokeWidth={1.2} />
+                      <path d="M-5 1a5 5 0 1 0 2-5m-3-2v3.5h3.5" fill="none" className="sv-handle-icon" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
                     </g>
                   )}
                   <g data-testid="handle-resize" transform={`translate(${frame.resize[0]},${frame.resize[1]})`}>
-                    <circle r={11} fill="#8f4d7c" stroke="#f0d9c0" strokeWidth={1.2} />
-                    <path d="M-4.5-4.5l9 9m0-4.5v4.5h-4.5m-4.5-4.5v-4.5h4.5" fill="none" stroke="#fffaf6" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                    <circle r={11} className="sv-handle" strokeWidth={1.2} />
+                    <path d="M-4.5-4.5l9 9m0-4.5v4.5h-4.5m-4.5-4.5v-4.5h4.5" fill="none" className="sv-handle-icon" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
                   </g>
                 </>
               )}
@@ -391,7 +392,7 @@ export function Stage({ renderer, scene, rig, camera, onCamera, onSize, mode, ha
               {sk.bones && rig.bones.filter((b) => b.parent && b.parent !== "root" && sk.bones!.has(b.id) && !b.id.startsWith("hair") && !b.id.startsWith("hp_")).map((b) => {
                 const a = toScreen(...applyMat(mats[b.parent!], ...(bones.get(b.parent!)!.pivot as [number, number])));
                 const c = toScreen(...applyMat(mats[b.id], b.pivot[0], b.pivot[1]));
-                return <g key={b.id} data-bone-line={b.id}><line x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke="#2a1526" strokeOpacity={0.35} strokeWidth={dim ? 4.5 : 2.6} strokeLinecap="round" /><line x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke="#fffaf6" strokeOpacity={0.9} strokeWidth={dim ? 2.6 : 1.1} strokeLinecap="round" /></g>;
+                return <g key={b.id} data-bone-line={b.id}><line x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} className="sv-bone-shadow" strokeOpacity={0.35} strokeWidth={dim ? 4.5 : 2.6} strokeLinecap="round" /><line x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} className="sv-bone" strokeOpacity={0.9} strokeWidth={dim ? 2.6 : 1.1} strokeLinecap="round" /></g>;
               })}
               {shown.map((h) => {
                 const [x, y] = toScreen(...applyMat(mats[h.follow] ?? mats.root, h.at[0], h.at[1]));
@@ -400,11 +401,11 @@ export function Stage({ renderer, scene, rig, camera, onCamera, onSize, mode, ha
                 return (
                   <g key={h.id} data-handle={h.id} data-kind={h.kind} data-x={x.toFixed(1)} data-y={y.toFixed(1)} transform={`translate(${x},${y})`} opacity={on || !activeControl || dragging ? 1 : 0.7}>
                     {h.kind === "ik" ? (
-                      <rect x={-r} y={-r} width={r * 2} height={r * 2} transform="rotate(45)" fill={on ? col : "rgb(255 250 246 / 0.25)"} stroke="#2a1526" strokeOpacity={0.55} strokeWidth={3.4} />
-                    ) : <circle r={r} fill={on ? col : "rgb(255 250 246 / 0.25)"} stroke="#2a1526" strokeOpacity={0.55} strokeWidth={3.4} />}
-                    {h.kind === "ik" ? <rect x={-r} y={-r} width={r * 2} height={r * 2} transform="rotate(45)" fill="none" stroke={col} strokeWidth={1.6} /> : <circle r={r} fill="none" stroke={col} strokeWidth={1.6} />}
-                    {h.kind === "move" && <path d="M-3 0h6M0-3v6" stroke={on ? "#3b1f35" : col} strokeWidth={1.3} strokeLinecap="round" />}
-                    {on && <circle r={12} fill="none" stroke="#fffaf6" strokeOpacity={0.9} strokeWidth={1} />}
+                      <rect x={-r} y={-r} width={r * 2} height={r * 2} transform="rotate(45)" style={{ fill: on ? col : "color-mix(in srgb, var(--aw-image-hi) 25%, transparent)", stroke: "var(--aw-shadow)" }} strokeOpacity={0.55} strokeWidth={3.4} />
+                    ) : <circle r={r} style={{ fill: on ? col : "color-mix(in srgb, var(--aw-image-hi) 25%, transparent)", stroke: "var(--aw-shadow)" }} strokeOpacity={0.55} strokeWidth={3.4} />}
+                    {h.kind === "ik" ? <rect x={-r} y={-r} width={r * 2} height={r * 2} transform="rotate(45)" fill="none" style={{ stroke: col }} strokeWidth={1.6} /> : <circle r={r} fill="none" style={{ stroke: col }} strokeWidth={1.6} />}
+                    {h.kind === "move" && <path d="M-3 0h6M0-3v6" style={{ stroke: on ? "var(--aw-shadow)" : col }} strokeWidth={1.3} strokeLinecap="round" />}
+                    {on && <circle r={12} fill="none" className="sv-handle-ring" strokeOpacity={0.9} strokeWidth={1} />}
                   </g>
                 );
               })}

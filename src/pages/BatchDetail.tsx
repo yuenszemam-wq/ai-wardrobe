@@ -134,7 +134,7 @@ export default function BatchDetail({ id }: { id: string }) {
 
       <ul className="mt-5 space-y-3">
         {jobs.map((j) => (
-          <li key={j.id} className="flex gap-3 rounded-2xl bg-white p-3 ring-1 ring-ink/5">
+          <li key={j.id} className="flex gap-3 rounded-2xl bg-field p-3 ring-1 ring-ink/5">
             <div className="arch relative h-24 w-[4.5rem] shrink-0 overflow-hidden">
               {j.preview_image_id && <WardrobeImage src={imageUrl(j.preview_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1.5 pt-3" />}
             </div>

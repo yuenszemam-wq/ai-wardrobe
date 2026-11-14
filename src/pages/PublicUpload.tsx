@@ -79,7 +79,7 @@ function LegacyUpload({ token }: { token: string }) {
 
   return (
     <div className="safe-top min-h-screen bg-lace">
-      <header className="bg-ink px-4 py-4 text-rose">
+      <header className="bg-head px-4 py-4 text-rose">
         <p className="font-serif text-lg tracking-[0.12em]">✝ 電子衣櫃</p>
         <p className="mt-1 text-[13px] text-rose/80">請按次序為每件衣物選擇對應的相片（建議用去背後的高清圖）。</p>
       </header>
@@ -92,7 +92,7 @@ function LegacyUpload({ token }: { token: string }) {
               {info.targets.map((t) => {
                 const st = state[t.index];
                 return (
-                  <li key={t.index} className="rounded-2xl bg-white p-3 ring-1 ring-ink/5">
+                  <li key={t.index} className="rounded-2xl bg-field p-3 ring-1 ring-ink/5">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[12px] text-mauve">第 {t.index + 1} 件｜{t.image_type === "processed" ? "去背圖" : "原相"}</div>

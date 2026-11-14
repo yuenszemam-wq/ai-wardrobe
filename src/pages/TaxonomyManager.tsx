@@ -65,7 +65,7 @@ export default function TaxonomyManager() {
       <PageTitle>分類管理</PageTitle>
       <p className="-mt-1 mb-3 text-[13px] text-mauve">按住 ☰ 拖拉排序；改名會連帶更新已入庫的衣物；刪除只會從清單移除，衣物不會被刪除。</p>
 
-      <div className="mb-4 inline-flex rounded-full bg-white p-1 ring-1 ring-ink/10">
+      <div className="mb-4 inline-flex rounded-full bg-field p-1 ring-1 ring-ink/10">
         {[
           ["cat", "主分類及子分類"],
           ["attr", "屬性"],
@@ -74,7 +74,7 @@ export default function TaxonomyManager() {
             key={k}
             type="button"
             onClick={() => navigate(`/taxonomy${k === "attr" ? "?tab=attr" : ""}`, true)}
-            className={`rounded-full px-4 py-1.5 text-[14px] ${tab === k ? "bg-ink text-rose" : "text-ink"}`}
+            className={`rounded-full px-4 py-1.5 text-[14px] ${tab === k ? "bg-head text-rose" : "text-ink"}`}
           >
             {label}
           </button>
@@ -89,7 +89,7 @@ export default function TaxonomyManager() {
             items={data.categories}
             onReorder={reorder}
             render={(c, handle) => (
-              <div className="rounded-2xl bg-white ring-1 ring-ink/5">
+              <div className="rounded-2xl bg-field ring-1 ring-ink/5">
                 <div className="flex items-center gap-1 py-1 pl-1 pr-3">
                   <DragHandle {...handle} />
                   <button type="button" className="min-w-0 flex-1 truncate py-2 text-left text-[15px] font-medium" onClick={() => setOpen(open === c.id ? null : c.id)}>
@@ -136,7 +136,7 @@ export default function TaxonomyManager() {
             items={data.attributes}
             onReorder={reorder}
             render={(a, handle) => (
-              <div className="rounded-2xl bg-white ring-1 ring-ink/5">
+              <div className="rounded-2xl bg-field ring-1 ring-ink/5">
                 <div className="flex items-center gap-1 py-1 pl-1 pr-3">
                   <DragHandle {...handle} />
                   <button type="button" className="min-w-0 flex-1 truncate py-2 text-left text-[15px] font-medium" onClick={() => setOpen(open === a.id ? null : a.id)}>
@@ -224,7 +224,7 @@ function SubRow({
             setEditing(false);
           }}
         >
-          <input autoFocus className="min-w-0 flex-1 rounded-lg bg-white px-2 py-1.5 ring-1 ring-ink/10" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
+          <input autoFocus className="min-w-0 flex-1 rounded-lg bg-field px-2 py-1.5 ring-1 ring-ink/10" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
           <button type="submit" className="px-2 text-[14px] text-amethyst-deep">
             完成
           </button>
@@ -302,17 +302,17 @@ function AttrSettings({ attr, categories, onSave }: { attr: TaxNode; categories:
     <div className="mt-4 space-y-3 rounded-2xl bg-lace p-3 ring-1 ring-ink/5">
       <div className="flex flex-wrap items-center gap-3 text-[14px]">
         <label className="flex items-center gap-2">
-          <input type="radio" checked={!multi} onChange={() => setMulti(false)} className="h-4 w-4 accent-amethyst" />
+          <input type="radio" checked={!multi} onChange={() => setMulti(false)} className="h-4 w-4 accent-[var(--aw-check)]" />
           單選
         </label>
         <label className="flex items-center gap-2">
-          <input type="radio" checked={multi} onChange={() => setMulti(true)} className="h-4 w-4 accent-amethyst" />
+          <input type="radio" checked={multi} onChange={() => setMulti(true)} className="h-4 w-4 accent-[var(--aw-check)]" />
           多選
         </label>
         {multi && (
           <label className="flex items-center gap-1 text-mauve">
             最多
-            <input type="number" min={1} max={20} inputMode="numeric" className="w-16 rounded-lg bg-white px-2 py-1 ring-1 ring-ink/10" value={max} onChange={(e) => setMax(e.target.value)} placeholder="不限" />個
+            <input type="number" min={1} max={20} inputMode="numeric" className="w-16 rounded-lg bg-field px-2 py-1 ring-1 ring-ink/10" value={max} onChange={(e) => setMax(e.target.value)} placeholder="不限" />個
           </label>
         )}
       </div>

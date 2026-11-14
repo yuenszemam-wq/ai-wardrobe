@@ -33,7 +33,7 @@ function Num({ label, value, onChange, step = 1, min, max }: { label: string; va
     <label className="flex items-center gap-1 text-[11.5px]">
       <span className="w-9 shrink-0 text-mauve">{label}</span>
       <button type="button" className="chip h-7 w-7 rounded-full" onClick={() => onChange(r1(value - step))}>−</button>
-      <input type="number" inputMode="decimal" value={r1(value)} step={step} min={min} max={max} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v)) onChange(v); }} className="h-7 w-16 rounded-full bg-white/10 px-2 text-center text-cream ring-1 ring-gold/30" />
+      <input type="number" inputMode="decimal" value={r1(value)} step={step} min={min} max={max} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v)) onChange(v); }} className="h-7 w-16 rounded-full bg-cream/10 px-2 text-center text-cream ring-1 ring-gold/30" />
       <button type="button" className="chip h-7 w-7 rounded-full" onClick={() => onChange(r1(value + step))}>＋</button>
     </label>
   );
@@ -274,13 +274,13 @@ export default function ModelEditor({ id }: { id: string }) {
   const leave = () => { if (!dirty || confirm("身體的修改尚未保存，確定離開？（本機草稿會保留）")) navigate("/dressing/assets"); };
 
   if (!def || !model || !detail) return <div className="fixed inset-0 z-40 grid place-items-center bg-plum"><Spinner /></div>;
-  const float = "bg-ink/45 text-cream ring-1 ring-gold/40 backdrop-blur";
+  const float = "bg-head/45 text-cream ring-1 ring-gold/40 backdrop-blur";
   const sp = selPart ? partRect(selPart) : null;
   const order = def.order ?? RIG_V2.body_parts;
   const curFit = headOnly ? def.heads?.[headId] ?? def.head : def.head;
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-plum" data-testid="model-editor" data-dirty={dirty ? "1" : "0"} data-rev={rev} data-def={JSON.stringify(compactDef(def))}>
-      <div className="safe-top shrink-0 bg-ink">
+      <div className="safe-top shrink-0 bg-head">
         <div className="flex h-12 items-center gap-1.5 px-2.5">
           <button type="button" aria-label="返回角色素材" onClick={leave} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
           <input value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} aria-label="身體名稱" data-testid="model-name" className="h-9 min-w-0 flex-1 rounded-full border border-transparent bg-transparent px-2 font-serif text-[16px] font-bold text-gold-soft focus:border-gold/50 focus:outline-none" />
@@ -294,19 +294,19 @@ export default function ModelEditor({ id }: { id: string }) {
           mode={compare ? "view" : tab === "preview" ? "pose" : tab === "parts" || tab === "head" ? "dress" : "view"} selection={selection} onPick={onPick} onFit={onFit}
           controls={previewControls} skeleton={{ opacity: 0.9, bones: tab === "preview" ? new Set(rig.bones.map((b) => b.id)) : null }} onPose={(p) => setPose(p)}>
           <svg ref={svgRef} data-stage-ui className="pointer-events-none absolute inset-0 h-full w-full" data-testid="model-handles">
-            {tab === "parts" && sp && !compare && <text x={8} y={stageSize.h - 10} fill="#f0d9c0" fontSize={11}>{PART_LABEL[selPart!]}</text>}
+            {tab === "parts" && sp && !compare && <text x={8} y={stageSize.h - 10} style={{ fill: "var(--aw-tool-icon)" }} fontSize={11}>{PART_LABEL[selPart!]}</text>}
             {tab === "bones" && rig.bones.filter((b) => b.parent && BODY_BONES.has(b.id) && BODY_BONES.has(b.parent)).map((b) => {
               const a = rig.bones.find((x) => x.id === b.parent)!.pivot;
-              return <line key={b.id} x1={a[0] * xf.k + xf.ox} y1={a[1] * xf.k + xf.oy} x2={b.pivot[0] * xf.k + xf.ox} y2={b.pivot[1] * xf.k + xf.oy} stroke="#fffaf6" strokeOpacity={0.7} strokeWidth={1.2} />;
+              return <line key={b.id} x1={a[0] * xf.k + xf.ox} y1={a[1] * xf.k + xf.oy} x2={b.pivot[0] * xf.k + xf.ox} y2={b.pivot[1] * xf.k + xf.oy} className="sv-bone" strokeOpacity={0.7} strokeWidth={1.2} />;
             })}
             {handles.map((h) => {
               const x = h.at[0] * xf.k + xf.ox, y = h.at[1] * xf.k + xf.oy, on = active === h.id;
               return (
                 <g key={h.id} data-model-handle={h.id} data-x={x.toFixed(1)} data-y={y.toFixed(1)}>
-                  <circle cx={x} cy={y} r={on ? 7 : 5} fill={on ? "#f28ba3" : "rgb(255 250 246 / 0.3)"} stroke="#2a1526" strokeWidth={2.5} />
-                  <circle cx={x} cy={y} r={on ? 7 : 5} fill="none" stroke={tab === "bones" ? "#f28ba3" : "#9fd7ff"} strokeWidth={1.4} />
+                  <circle cx={x} cy={y} r={on ? 7 : 5} style={{ fill: on ? "var(--aw-handle)" : "color-mix(in srgb, var(--aw-image-hi) 30%, transparent)", stroke: "var(--aw-shadow)" }} strokeWidth={2.5} />
+                  <circle cx={x} cy={y} r={on ? 7 : 5} fill="none" style={{ stroke: tab === "bones" ? "var(--aw-bone)" : "var(--aw-mesh)" }} strokeWidth={1.4} />
                   <circle cx={x} cy={y} r={18} fill="transparent" style={{ pointerEvents: "auto", touchAction: "none", cursor: "grab" }} onPointerDown={hDown(h.id)} onPointerMove={hMove} onPointerUp={hUp} onPointerCancel={hUp} />
-                  {on && <text x={x + 10} y={y - 8} fill="#fffaf6" fontSize={11} stroke="#2a1526" strokeWidth={3} paintOrder="stroke">{h.label}</text>}
+                  {on && <text x={x + 10} y={y - 8} style={{ fill: "var(--aw-tool-icon)", stroke: "var(--aw-tool)" }} fontSize={11} strokeWidth={3} paintOrder="stroke">{h.label}</text>}
                 </g>
               );
             })}
@@ -325,7 +325,7 @@ export default function ModelEditor({ id }: { id: string }) {
             <button type="button" aria-label="撤銷" data-testid="model-undo" disabled={!hist.current.past.length} onClick={() => undo("undo")} className={`grid h-8 w-8 place-items-center rounded-full disabled:opacity-35 ${float}`}>↶</button>
             <button type="button" aria-label="重做" disabled={!hist.current.future.length} onClick={() => undo("redo")} className={`grid h-8 w-8 place-items-center rounded-full disabled:opacity-35 ${float}`}>↷</button>
           </div>
-          {notice && <p data-stage-ui role="status" className="pointer-events-none absolute inset-x-14 top-2 rounded-2xl bg-ink/80 px-3 py-2 text-center text-[11px] text-gold-soft">{notice}</p>}
+          {notice && <p data-stage-ui role="status" className="pointer-events-none absolute inset-x-14 top-2 rounded-2xl bg-head/80 px-3 py-2 text-center text-[11px] text-gold-soft">{notice}</p>}
           {compare && <span data-stage-ui className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-danger/85 px-3 py-1 text-[11px] text-white">原本 Avatar V2（修改前）</span>}
         </Stage>
       </div>
@@ -348,7 +348,7 @@ export default function ModelEditor({ id }: { id: string }) {
               })}
             </Row>
             {selPart && sp ? (
-              <div className="space-y-1.5 rounded-xl bg-white/5 p-2" data-testid="part-editor">
+              <div className="space-y-1.5 rounded-xl bg-cream/5 p-2" data-testid="part-editor">
                 <div className="flex flex-wrap gap-1.5">
                   <button type="button" disabled={busy} onClick={() => fileInput.current?.click()} className="btn-jewel rounded-full px-3 py-1.5 text-[12px]">上傳替換圖片</button>
                   <button type="button" onClick={() => setPart(selPart, { hidden: !rig.parts[selPart].hidden || undefined })} className="chip rounded-full px-3 py-1.5">{rig.parts[selPart].hidden ? "顯示部件" : "隱藏部件"}</button>
@@ -362,7 +362,7 @@ export default function ModelEditor({ id }: { id: string }) {
                   <Num label="高度" value={sp.h} onChange={(v) => setPart(selPart, { h: Math.max(4, v) })} step={2} />
                   <Num label="旋轉" value={sp.rot} onChange={(v) => setPart(selPart, { rot: Math.max(-180, Math.min(180, v)) || undefined })} />
                   <label className="flex items-center gap-1 text-[11.5px]"><span className="w-9 shrink-0 text-mauve">附接</span>
-                    <select aria-label="附接骨骼" value={rig.parts[selPart].bone} onChange={(e) => setPart(selPart, { bone: e.target.value })} className="h-7 flex-1 rounded-full bg-white/10 px-2 text-cream">{[...BODY_BONES].map((b) => <option key={b} value={b}>{BONE_LABEL[b] ?? b}</option>)}</select>
+                    <select aria-label="附接骨骼" value={rig.parts[selPart].bone} onChange={(e) => setPart(selPart, { bone: e.target.value })} className="h-7 flex-1 rounded-full bg-cream/10 px-2 text-cream">{[...BODY_BONES].map((b) => <option key={b} value={b}>{BONE_LABEL[b] ?? b}</option>)}</select>
                   </label>
                 </div>
                 {def.parts[selPart]?.src && <p className="text-[10.5px] text-mauve">原圖 {def.parts[selPart]!.src!.w}×{def.parts[selPart]!.src!.h}，裁剪範圍 {def.parts[selPart]!.src!.crop.join(", ")}</p>}
@@ -374,7 +374,7 @@ export default function ModelEditor({ id }: { id: string }) {
             <label className="flex items-center gap-2 pb-1.5 text-[12px]"><input type="checkbox" checked={withChildren} onChange={(e) => setWithChildren(e.target.checked)} />連同下游部件一起移動（改變比例，例如加長手臂）；不勾選＝只改旋轉中心</label>
             <Row className="pb-1.5">{rig.bones.filter((b) => BODY_BONES.has(b.id)).map((b) => <button key={b.id} type="button" data-joint={b.id} onClick={() => setSelJoint(b.id)} className={pill(selJoint === b.id)}>{BONE_LABEL[b.id] ?? b.id}{def.bones[b.id] ? " ●" : ""}</button>)}</Row>
             {joint ? (
-              <div className="space-y-1.5 rounded-xl bg-white/5 p-2" data-testid="joint-editor">
+              <div className="space-y-1.5 rounded-xl bg-cream/5 p-2" data-testid="joint-editor">
                 <div className="grid grid-cols-2 gap-1.5">
                   <Num label="X" value={joint.pivot[0]} onChange={(v) => setDef(moveJoint(def, rig, joint.id, [v, joint.pivot[1]], withChildren))} />
                   <Num label="Y" value={joint.pivot[1]} onChange={(v) => setDef(moveJoint(def, rig, joint.id, [joint.pivot[0], v], withChildren))} />
@@ -389,7 +389,7 @@ export default function ModelEditor({ id }: { id: string }) {
           {tab === "anchors" && (<>
             <Row className="pb-1.5">{Object.keys(rig.anchors).map((k) => <button key={k} type="button" onClick={() => setSelAnchor(k)} className={pill(selAnchor === k)}>{ANCHOR_LABEL[k] ?? k}{def.anchors[k] ? " ●" : ""}</button>)}</Row>
             {selAnchor ? (
-              <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-white/5 p-2">
+              <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-cream/5 p-2">
                 <Num label="X" value={rig.anchors[selAnchor][0]} onChange={(v) => setDef({ ...def, anchors: { ...def.anchors, [selAnchor]: [v, rig.anchors[selAnchor][1]] } })} />
                 <Num label="Y" value={rig.anchors[selAnchor][1]} onChange={(v) => setDef({ ...def, anchors: { ...def.anchors, [selAnchor]: [rig.anchors[selAnchor][0], v] } })} />
                 <button type="button" disabled={!def.anchors[selAnchor]} onClick={() => { const a = { ...def.anchors }; delete a[selAnchor]; setDef({ ...def, anchors: a }); }} className="chip rounded-full px-3 py-1.5 disabled:opacity-40">重設</button>
@@ -402,7 +402,7 @@ export default function ModelEditor({ id }: { id: string }) {
                 const i = order.length - 1 - ri;
                 const swap = (j: number) => { const a = [...order]; [a[i], a[j]] = [a[j], a[i]]; setDef({ ...def, order: a }); };
                 return (
-                  <li key={n} className="flex items-center gap-1.5 rounded-xl bg-white/5 px-2 py-1">
+                  <li key={n} className="flex items-center gap-1.5 rounded-xl bg-cream/5 px-2 py-1">
                     <span className="min-w-0 flex-1 truncate">{PART_LABEL[n] ?? n}</span>
                     <button type="button" aria-label="移前" disabled={i === order.length - 1} onClick={() => swap(i + 1)} className="chip h-7 rounded-full px-2 disabled:opacity-30">↑</button>
                     <button type="button" aria-label="移後" disabled={i === 0} onClick={() => swap(i - 1)} className="chip h-7 rounded-full px-2 disabled:opacity-30">↓</button>
@@ -425,7 +425,7 @@ export default function ModelEditor({ id }: { id: string }) {
           </>)}
           {tab === "preview" && (<>
             <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-8">
-              {POSE_PRESETS.map((p) => <button key={p.id} type="button" onClick={() => setPose(p.pose)} className="rounded-xl bg-white/5 px-1 py-2 text-[11px]">{p.label}</button>)}
+              {POSE_PRESETS.map((p) => <button key={p.id} type="button" onClick={() => setPose(p.pose)} className="rounded-xl bg-cream/5 px-1 py-2 text-[11px]">{p.label}</button>)}
               {poses.filter((p) => !p.model_id || p.model_id === id).map((p) => <button key={p.id} type="button" onClick={() => setPose(p.pose)} className="rounded-xl bg-amethyst/25 px-1 py-2 text-[11px]">{p.name}</button>)}
               <button type="button" onClick={() => setPose({})} className="chip rounded-xl px-1 py-2 text-[11px]">靜止</button>
             </div>

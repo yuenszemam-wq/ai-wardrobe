@@ -1276,13 +1276,13 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
 
   if (!loaded || !tpls) return <div className="fixed inset-0 z-40 grid place-items-center bg-plum"><Spinner /></div>;
   const compact = panelDrag === null && panel === "mini";
-  const float = "bg-ink/45 text-cream ring-1 ring-gold/40 backdrop-blur";
+  const float = "bg-head/45 text-cream ring-1 ring-gold/40 backdrop-blur";
   const pct = Math.round(camera.z * 100);
   return (
     <div className="doll-room fixed inset-0 z-40 flex flex-col bg-plum" data-testid="dressing-room" data-dirty={dirty ? "1" : "0"} data-worn={worn.map((w) => itemKey(w) + (w.hidden ? ":hidden" : "")).join(",")} data-resolved={resolved.length} data-pose={JSON.stringify(pose)} data-front={front.join(",")} data-hair={look.hair} data-head={look.head} data-hair-color={look.hair_color} data-model={bodyModel.id} data-model-rev={bodyModel.revision} data-selected={selected ?? ""} data-masked={worn.filter((w) => w.mask).length} data-parts={worn.filter((w) => w.parts).length} data-undo={hist.current.past.length} data-preview={preview ? "1" : "0"} data-gview={view} data-wear={sel ? wearMode(sel.opts) : ""} data-panel={panel}
       data-fits={JSON.stringify(resolved.map((r) => [r.key, Math.round(r.fit.cx * 10) / 10, Math.round(r.fit.cy * 10) / 10, Math.round(r.fit.w * 10) / 10, Math.round(r.fit.rotation * 10) / 10]))}>
       {/* ───── 頂部 ───── */}
-      <div className="safe-top shrink-0 bg-ink">
+      <div className="safe-top shrink-0 bg-head">
         {setup ? (
           <div className="flex h-12 items-center gap-1.5 px-2.5" data-testid="setup-header">
             <button type="button" aria-label="返回衣服設定列表" onClick={() => leave("/dressing/setup" + setupQs)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
@@ -1300,7 +1300,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           <button type="button" aria-label="返回我的穿搭" onClick={() => leave("/outfits")} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
           <input value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} placeholder="未命名造型" aria-label="造型名稱" data-testid="look-name" className="h-9 min-w-0 flex-1 rounded-full border border-transparent bg-transparent px-2 font-serif text-[16px] font-bold tracking-[0.06em] text-gold-soft placeholder:text-mauve/70 focus:border-gold/50 focus:outline-none" />
           {dirty && <span className="shrink-0 text-[10.5px] text-wine">未保存</span>}
-          <button type="button" aria-label={favorite ? "取消收藏" : "收藏"} aria-pressed={favorite} onClick={() => { setFavorite(!favorite); setDirty(true); }} className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[18px] ${favorite ? "text-[#f2a7c3]" : "text-mauve"}`}><IconHeart filled={favorite} /></button>
+          <button type="button" aria-label={favorite ? "取消收藏" : "收藏"} aria-pressed={favorite} onClick={() => { setFavorite(!favorite); setDirty(true); }} className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[18px] ${favorite ? "text-[var(--aw-chart)]" : "text-mauve"}`}><IconHeart filled={favorite} /></button>
           <button type="button" data-testid="save-look" disabled={busy} onClick={() => void save()} className="btn-jewel flex h-9 shrink-0 items-center gap-1 rounded-full px-3.5 text-[13px] disabled:opacity-50"><IconSave className="text-[14px]" />{busy ? "…" : "保存"}</button>
           <button type="button" aria-label="更多" aria-expanded={menu} onClick={() => setMenu(!menu)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconMore /></button>
         </div>
@@ -1349,10 +1349,10 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
               <p className="mt-1.5 text-[10.5px] leading-snug text-mauve">雙指開合＝放大縮小，雙指拖動＝移動畫面。只改變觀看角度，不會改變衣物或造型。</p>
             </div>
           )}
-          {!preview && (!ready || pending.size > 0) && <span data-stage-ui className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-ink/60 px-3 py-1 text-[11px] text-cream">載入中…</span>}
+          {!preview && (!ready || pending.size > 0) && <span data-stage-ui className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-head/60 px-3 py-1 text-[11px] text-cream">載入中…</span>}
           {!preview && renderer.errors.size > 0 && <button data-stage-ui type="button" onClick={() => { renderer.retry(); setAnalyses((m) => new Map(m)); }} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-danger px-3 py-1 text-[11px] text-white">有圖片未能讀取，按此重試</button>}
-          {!preview && notice && <p data-stage-ui role="status" className="pointer-events-none absolute inset-x-14 top-2 rounded-2xl bg-ink/80 px-3 py-2 text-center text-[11px] leading-snug text-gold-soft">{notice}</p>}
-          {!preview && (sourceOn || compareKind) && <span data-stage-ui data-testid="stage-badge" className={`pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full px-3 py-1 text-[11px] ${compareKind ? "bg-danger/85 text-white" : "bg-ink/70 text-gold-soft"}`}>{sourceOn ? "衣物原圖" : "穿著預覽"}{compareKind ? `｜對比：${COMPARE_LABEL[compareKind]}` : sourceOn ? "（塗抹位置＝原圖位置）" : ""}</span>}
+          {!preview && notice && <p data-stage-ui role="status" className="pointer-events-none absolute inset-x-14 top-2 rounded-2xl bg-head/80 px-3 py-2 text-center text-[11px] leading-snug text-gold-soft">{notice}</p>}
+          {!preview && (sourceOn || compareKind) && <span data-stage-ui data-testid="stage-badge" className={`pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full px-3 py-1 text-[11px] ${compareKind ? "bg-danger/85 text-white" : "bg-head/70 text-gold-soft"}`}>{sourceOn ? "衣物原圖" : "穿著預覽"}{compareKind ? `｜對比：${COMPARE_LABEL[compareKind]}` : sourceOn ? "（塗抹位置＝原圖位置）" : ""}</span>}
           {!preview && (
             <div data-stage-ui className="absolute bottom-2 left-2 flex gap-1.5">
               <button type="button" aria-label="撤銷" data-testid="undo" disabled={!canUndo} onClick={() => timeTravel("undo")} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] disabled:opacity-35 ${float}`}>↶</button>
@@ -1360,22 +1360,22 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
             </div>
           )}
           {!preview && posePrompt && !editing && (
-            <div data-stage-ui data-testid="pose-prompt" className="absolute inset-x-2 bottom-12 mx-auto flex max-w-sm items-center gap-1.5 rounded-2xl bg-ink/80 px-3 py-2 text-[11.5px] text-gold-soft ring-1 ring-gold/50">
+            <div data-stage-ui data-testid="pose-prompt" className="absolute inset-x-2 bottom-12 mx-auto flex max-w-sm items-center gap-1.5 rounded-2xl bg-head/80 px-3 py-2 text-[11.5px] text-gold-soft ring-1 ring-gold/50">
               <span className="min-w-0 flex-1 leading-snug">「{posePrompt.label}」有不同的預設姿勢，要套用嗎？</span>
               <button type="button" onClick={() => { setPose(posePrompt.pose, posePrompt.front); setPosePrompt(null); }} className="btn-jewel h-7 shrink-0 rounded-full px-3 text-[11.5px]">套用</button>
               <button type="button" onClick={() => setPosePrompt(null)} className="chip h-7 shrink-0 rounded-full px-2.5 text-[11.5px]">保持</button>
             </div>
           )}
-          {!preview && poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot: false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-2 right-2 max-w-[62%] truncate rounded-full bg-ink/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
+          {!preview && poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot: false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-2 right-2 max-w-[62%] truncate rounded-full bg-head/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
         </Stage>
       </div>
 
       {/* ───── 快捷工具列（Phase 3.8A.1）：放在畫布與面板之間，不遮住人物 ───── */}
       {!preview && !draft && (
-        <div className="relative shrink-0 border-t border-gold/25 bg-ink/85 px-2 pb-1 pt-0.5" data-testid="quick-bar" data-open={quickOpen ? "1" : "0"}>
+        <div className="relative shrink-0 border-t border-gold/25 bg-head/85 px-2 pb-1 pt-0.5" data-testid="quick-bar" data-open={quickOpen ? "1" : "0"}>
           <div className={`flex h-6 items-center gap-1.5 text-[11px] ${shortScreen && quickOpen ? "hidden" : ""}`}>
             <label className="flex min-w-0 items-center gap-1 text-mauve">作用於
-              <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-6 max-w-[7.5rem] rounded-full bg-white/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
+              <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-6 max-w-[7.5rem] rounded-full bg-cream/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
                 {(["item", "set", "all"] as QuickScope[]).map((s) => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
               </select>
             </label>
@@ -1387,7 +1387,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           {quickOpen && (
             <div className={`mt-0.5 grid gap-1 ${shortScreen ? "grid-cols-6" : "grid-cols-5"}`} role="toolbar" aria-label="快捷工具">
               {shortScreen && (
-                <select aria-label="快捷操作的作用範圍" data-testid="quick-scope-short" title={quickState ? `${quickState === "mixed" ? "混合設定" : MODE_LABEL[quickState]} · ${quickList.length} ${unitOf(quickList)}` : "未選衣物"} value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-10 min-w-0 rounded-xl bg-white/10 px-1 text-[10.5px] text-cream ring-1 ring-gold/40">
+                <select aria-label="快捷操作的作用範圍" data-testid="quick-scope-short" title={quickState ? `${quickState === "mixed" ? "混合設定" : MODE_LABEL[quickState]} · ${quickList.length} ${unitOf(quickList)}` : "未選衣物"} value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-10 min-w-0 rounded-xl bg-cream/10 px-1 text-[10.5px] text-cream ring-1 ring-gold/40">
                   {(["item", "set", "all"] as QuickScope[]).map((sc) => <option key={sc} value={sc}>{SCOPE_LABEL[sc]}</option>)}
                 </select>
               )}
@@ -1421,15 +1421,15 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
         const pcs = templateFor(tpls, setupTarget.garment)?.data?.pieces ?? [];
         const cycle = (k: SetupKey) => { const cur = (setupTarget.piece ? setupTarget.piece.status : setupTarget.template?.data?.status)?.[k] ?? null; void markSetup(setupTarget, k, cur === null ? "done" : cur === "done" ? "na" : null); };
         return (
-          <div className="shrink-0 border-t border-gold/30 bg-ink/90 px-2.5 py-1.5" data-testid="setup-strip">
+          <div className="shrink-0 border-t border-gold/30 bg-head/90 px-2.5 py-1.5" data-testid="setup-strip">
             <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto">
               {pcs.length > 0 && (
-                <select aria-label="選擇要設定的部件" data-testid="setup-piece" value={setup.piece ?? ""} onChange={(e) => leave(`/dressing/setup/${setup.gid}${setupQs}${e.target.value ? (setupQs ? "&" : "?") + "piece=" + e.target.value : ""}`)} className="h-7 max-w-[9.5rem] shrink-0 rounded-full bg-white/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
+                <select aria-label="選擇要設定的部件" data-testid="setup-piece" value={setup.piece ?? ""} onChange={(e) => leave(`/dressing/setup/${setup.gid}${setupQs}${e.target.value ? (setupQs ? "&" : "?") + "piece=" + e.target.value : ""}`)} className="h-7 max-w-[9.5rem] shrink-0 rounded-full bg-cream/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
                   <option value="">整件衣物</option>
                   {pcs.map((p) => <option key={p.id} value={p.id}>{p.name}{p.fit ? "" : "（未校正）"}</option>)}
                 </select>
               )}
-              {st && SETUP_KEYS.map((k) => <button key={k} type="button" data-mark={k} data-state={st[k]} disabled={busy} onClick={() => cycle(k)} title="輕按切換：自動判斷 → 已完成 → 不需要" className={`h-7 shrink-0 rounded-full px-2 text-[11px] ${st[k] === "done" ? "bg-ok/30 text-ok-ink" : st[k] === "na" ? "bg-white/10 text-cream/60" : st[k] === "todo" ? "bg-danger/40 text-danger-ink" : "bg-white/5 text-mauve"}`}>{SETUP_LABEL[k]}：{ITEM_LABEL[st[k]].replace("（可選）", "")}</button>)}
+              {st && SETUP_KEYS.map((k) => <button key={k} type="button" data-mark={k} data-state={st[k]} disabled={busy} onClick={() => cycle(k)} title="輕按切換：自動判斷 → 已完成 → 不需要" className={`h-7 shrink-0 rounded-full px-2 text-[11px] ${st[k] === "done" ? "bg-ok/30 text-ok-ink" : st[k] === "na" ? "bg-cream/10 text-cream/60" : st[k] === "todo" ? "bg-danger/40 text-danger-ink" : "bg-cream/5 text-mauve"}`}>{SETUP_LABEL[k]}：{ITEM_LABEL[st[k]].replace("（可選）", "")}</button>)}
             </div>
           </div>
         );
@@ -1446,7 +1446,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
               {TABS.map((t) => {
                 const on = tab === t.id && !sel;
                 return (
-                  <button key={t.id} type="button" role="tab" data-tab={t.id} aria-selected={on} onClick={() => switchTab(t.id)} className={`flex flex-col items-center justify-center gap-0.5 rounded-2xl text-[11.5px] ${compact ? "h-9 flex-row gap-1.5" : "h-12"} ${on ? "chip-on" : "bg-white/5 text-cream/85"}`}>
+                  <button key={t.id} type="button" role="tab" data-tab={t.id} aria-selected={on} onClick={() => switchTab(t.id)} className={`flex flex-col items-center justify-center gap-0.5 rounded-2xl text-[11.5px] ${compact ? "h-9 flex-row gap-1.5" : "h-12"} ${on ? "chip-on" : "bg-cream/5 text-cream/85"}`}>
                     <span className={`relative ${compact ? "text-[15px]" : "text-[18px]"}`}><t.Icon />{t.id === "layers" && worn.length > 0 && <span className="absolute -right-3 -top-1 rounded-full bg-gold px-1 text-[9px] font-bold leading-[14px] text-ink">{worn.length}</span>}</span>
                     {t.label}
                   </button>

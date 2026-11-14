@@ -109,7 +109,7 @@ export default function App() {
           )}
         </div>
       </header>
-      <main className="px-4 pb-32 pt-2">{offline&&<p role="status" className="mb-2 rounded bg-ink p-2 text-xs text-gold-soft">離線瀏覽：顯示已快取的資料和縮圖，連線後才能儲存或載入高清圖。</p>}{page}</main>
+      <main className="px-4 pb-32 pt-2">{offline&&<p role="status" className="mb-2 rounded bg-head p-2 text-xs text-gold-soft">離線瀏覽：顯示已快取的資料和縮圖，連線後才能儲存或載入高清圖。</p>}{page}</main>
       <TabBar path={path} />
       <Toast />
     </div>
@@ -144,7 +144,7 @@ function TabBar({ path }: { path: string }) {
           {TABS.map((t) => {
             const active = t.test(clean);
             return (
-              <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-1 pb-2 pt-2 text-[11px] ${active ? "text-gold-soft" : "text-mauve"}`}>
+              <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-1 pb-2 pt-2 text-[11px] `}>
                 <span className={`grid h-9 w-9 place-items-center rounded-full text-[21px] ${active ? "btn-jewel" : t.to === "/import" ? "border border-gold/60 text-gold-soft" : "border border-transparent"}`} aria-hidden>
                   <t.Icon />
                 </span>

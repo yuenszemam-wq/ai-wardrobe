@@ -98,7 +98,7 @@ export default function Home() {
 /** 讀取失敗：只影響這個元件，保留其他內容，可以局部重試 */
 function SourceError({ d, src, label }: { d: HomeData; src: Source; label: string }) {
   return (
-    <section className="mt-4 flex items-center gap-2 rounded-2xl bg-white/5 px-3 py-2.5 text-[12px]" data-testid={"w-error-" + src}>
+    <section className="mt-4 flex items-center gap-2 rounded-2xl bg-cream/5 px-3 py-2.5 text-[12px]" data-testid={"w-error-" + src}>
       <span className="min-w-0 flex-1 text-mauve">{label}暫時未能讀取（{d.errors[src]}）</span>
       <button type="button" data-retry={src} onClick={() => d.retry(src)} className="chip h-9 shrink-0 rounded-full px-3">重試</button>
     </section>
@@ -117,7 +117,7 @@ function WidgetView({ w, d, onChanged }: { w: Widget; d: HomeData; onChanged: ()
   const failed = need.find((src) => d.errors[src] && !(src === "stats" ? d.s : src === "analysis" ? d.an : src === "garments" ? d.garments : d.looks));
   if (failed) return <SourceError d={d} src={failed} label={LABEL[w.type] ?? "這個元件"} />;
   const s = d.s;
-  if (need.includes("stats") && !s) return <section className="mt-4 h-16 animate-pulse rounded-2xl bg-white/5" data-testid={"w-" + w.type} />;
+  if (need.includes("stats") && !s) return <section className="mt-4 h-16 animate-pulse rounded-2xl bg-cream/5" data-testid={"w-" + w.type} />;
   const pickGarments = (list: Garment[], sort: string | undefined, filter: (g: Garment) => boolean) => {
     const out = list.filter((g) => filter(g) && (!o.category || g.category === o.category) && (!o.subcategory || g.subcategory === o.subcategory) && (!o.favorite || g.is_favorite));
     const by: Record<string, (a: Garment, b: Garment) => number> = {
@@ -213,7 +213,7 @@ function WidgetView({ w, d, onChanged }: { w: Widget; d: HomeData; onChanged: ()
         </WSection>
       );
     }
-    case "analysis": return d.an && d.an.total > 0 ? <AnalysisSummary an={d.an} mode={o.mode ?? "category"} title={o.title !== false} count={o.count ?? 5} chart={o.chart} showPct={o.show_pct !== false} /> : d.an || d.editing ? empty("衣櫃分析摘要") : <section className="mt-4 h-24 animate-pulse rounded-2xl bg-white/5" data-testid="w-analysis" />;
+    case "analysis": return d.an && d.an.total > 0 ? <AnalysisSummary an={d.an} mode={o.mode ?? "category"} title={o.title !== false} count={o.count ?? 5} chart={o.chart} showPct={o.show_pct !== false} /> : d.an || d.editing ? empty("衣櫃分析摘要") : <section className="mt-4 h-24 animate-pulse rounded-2xl bg-cream/5" data-testid="w-analysis" />;
     case "todo": {
       const st = s!;
       const items: [string, number, string][] = [["AI 待整理", st.ai_todo, "/?tab=pending_ai#todo"], ["AI 待確認", st.ai_review, "/?tab=pending_review#todo"], ["缺少圖片", st.missing_image, "/wardrobe?needs_image=1"], ["未填價格", Math.max(0, st.total - st.priced_count), "/wardrobe?priced=0"]];

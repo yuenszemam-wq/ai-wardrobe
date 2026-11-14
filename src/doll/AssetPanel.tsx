@@ -23,8 +23,8 @@ export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, o
   return (
     <div className="flex h-full flex-col text-[12.5px]" data-testid="asset-panel">
       <div className="flex items-center gap-2 pb-2">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={hair ? "髮型名稱" : "頭部名稱"} aria-label="素材名稱" data-testid="asset-name" className="h-9 min-w-0 flex-1 rounded-full bg-white px-3 text-[13px] text-ink ring-1 ring-gold focus:outline-none" />
-        {hair && <input value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} placeholder="分類" aria-label="分類" className="h-9 w-20 rounded-full bg-white px-3 text-[13px] text-ink ring-1 ring-gold focus:outline-none" />}
+        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={hair ? "髮型名稱" : "頭部名稱"} aria-label="素材名稱" data-testid="asset-name" className="h-9 min-w-0 flex-1 rounded-full bg-field px-3 text-[13px] text-ink ring-1 ring-gold focus:outline-none" />
+        {hair && <input value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} placeholder="分類" aria-label="分類" className="h-9 w-20 rounded-full bg-field px-3 text-[13px] text-ink ring-1 ring-gold focus:outline-none" />}
         <button type="button" onClick={onCancel} className="chip h-9 rounded-full px-3">取消</button>
         <button type="button" disabled={busy || !draft.parts.length} data-testid="asset-save" onClick={onSave} className="btn-jewel h-9 rounded-full px-4 disabled:opacity-40">儲存</button>
       </div>
@@ -36,9 +36,9 @@ export function AssetPanel({ draft, setDraft, busy, onFiles, onSave, onCancel, o
         </div>
         {!draft.parts.length && <p className="py-3 text-[11.5px] leading-relaxed text-mauve">{hair ? "上傳透明背景的髮型圖。只有一張圖也可以；有拆件（後髮、瀏海、側髮、馬尾…）的話可一次選多張，各自設定在身體前面或後面。" : "上傳透明背景的頭部圖（臉、妝容或表情）。頭部獨立於頭髮和身體，可隨時更換。"}上傳後在角色身上拖動及縮放，對好位置再儲存。</p>}
         {part && (
-          <div className="rounded-2xl bg-white/5 p-2.5">
+          <div className="rounded-2xl bg-cream/5 p-2.5">
             <div className="flex flex-wrap items-center gap-1.5">
-              {hair && <input value={part.label} onChange={(e) => patch(part.id, { label: e.target.value.slice(0, 30) })} aria-label="部件名稱" className="h-8 w-24 rounded-full bg-white px-3 text-[12.5px] text-ink ring-1 ring-gold focus:outline-none" />}
+              {hair && <input value={part.label} onChange={(e) => patch(part.id, { label: e.target.value.slice(0, 30) })} aria-label="部件名稱" className="h-8 w-24 rounded-full bg-field px-3 text-[12.5px] text-ink ring-1 ring-gold focus:outline-none" />}
               <button type="button" aria-label="放大" onClick={() => scale(part, 1.03)} className="chip grid h-8 w-8 place-items-center rounded-full">＋</button>
               <button type="button" aria-label="縮小" onClick={() => scale(part, 1 / 1.03)} className="chip grid h-8 w-8 place-items-center rounded-full">－</button>
               {(["←", "→", "↑", "↓"] as const).map((a, i) => <button key={a} type="button" aria-label={"微調" + a} onClick={() => patch(part.id, i < 2 ? { x: part.x + (i ? 3 : -3) } : { y: part.y + (i === 3 ? 3 : -3) })} className="chip grid h-8 w-8 place-items-center rounded-full">{a}</button>)}

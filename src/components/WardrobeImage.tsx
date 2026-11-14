@@ -50,6 +50,6 @@ export function WardrobeImage({src,quality='thumbnail',transparentOnly=false,alt
   return <span ref={host} className={`block ${className}`} style={style} data-quality={url?(high?'high':'thumbnail'):'none'}>
     {url?<img {...rest} src={url} alt={alt} decoding="async" className="h-full w-full object-contain" onError={()=>{display('');setError('圖片解碼失敗');}}/>:
       <span role="img" aria-label={alt||'縮圖準備中'} className="flex h-full w-full items-center justify-center text-center text-[11px] text-mauve">{error||'縮圖準備中'}</span>}
-    {error&&<span role="button" data-testid="image-retry" tabIndex={0} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();setRetry(r=>r+1);}}} className="relative z-10 rounded bg-ink px-2 text-[10px] text-gold-soft" title={error} onClick={e=>{e.preventDefault();e.stopPropagation();setRetry(r=>r+1);}}>重試圖片</span>}
+    {error&&<span role="button" data-testid="image-retry" tabIndex={0} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();e.stopPropagation();setRetry(r=>r+1);}}} className="relative z-10 rounded bg-head px-2 text-[10px] text-gold-soft" title={error} onClick={e=>{e.preventDefault();e.stopPropagation();setRetry(r=>r+1);}}>重試圖片</span>}
   </span>;
 }

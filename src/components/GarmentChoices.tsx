@@ -48,7 +48,7 @@ export function BrandInput({ value, onChange, disabled }: { value:string; onChan
       if(e.key==='Enter'&&open&&active>=0&&choices[active]){e.preventDefault();pick(choices[active])}
     }}/>
     <button type="button" disabled={disabled} aria-label="展開品牌選單" aria-expanded={open} className="absolute right-0 top-0 h-full w-10 text-ink" onClick={()=>{setOpen(v=>!v);setFilter(false);setActive(-1)}}>⌄</button>
-    {open&&<div id={listId} role="listbox" aria-label="品牌選項" className="absolute inset-x-0 top-full z-40 mt-1 max-h-60 overflow-y-auto rounded-2xl border border-gold bg-white p-1 text-ink shadow-xl">
+    {open&&<div id={listId} role="listbox" aria-label="品牌選項" className="absolute inset-x-0 top-full z-40 mt-1 max-h-60 overflow-y-auto rounded-2xl border border-gold bg-field p-1 text-ink shadow-xl">
       {choices.map((b,i)=><button type="button" role="option" id={`${listId}-${i}`} aria-selected={value===b} key={b} className={`block w-full px-3 py-3 text-left text-sm ${active===i?'bg-rose':''}`} onMouseDown={e=>e.preventDefault()} onClick={()=>pick(b)}>{b}</button>)}
       {!choices.length&&<p className="p-3 text-sm">可直接使用輸入的品牌</p>}
     </div>}
@@ -107,7 +107,7 @@ export function AttributeChoices(props: { id:string; options:string[]; value:str
     {collapse&&<div ref={measureRef} aria-hidden="true" className="pointer-events-none invisible absolute inset-x-0 top-0 flex flex-wrap gap-1.5">{ranked.map(o=><span key={o} className={`${chipClass} chip`}>{o}</span>)}</div>}
     <div id={region} className={color?'grid grid-cols-8 gap-x-2 gap-y-3':'flex flex-wrap gap-1.5'}>
       {shown.map(o=><button type="button" key={o} aria-pressed={value.includes(o)} disabled={!value.includes(o)&&!!multi&&!!max&&value.length>=max} onClick={()=>toggle(o)} className={color?'flex min-w-0 flex-col items-center gap-1 text-[12px] disabled:opacity-35':`${chipClass} ${value.includes(o)?'chip-on':'chip'}`}>
-        {color&&<span className={`grid aspect-square w-full max-w-12 place-items-center rounded-full border-2 ${value.includes(o)?'border-gold ring-2 ring-gold':'border-mauve/60'}`} style={{background:custom[o]||COLORS[o]||'#746578'}}><span className="grid h-5 w-5 place-items-center rounded-full bg-ink text-white" style={{visibility:value.includes(o)?'visible':'hidden'}}>✓</span></span>}
+        {color&&<span className={`grid aspect-square w-full max-w-12 place-items-center rounded-full border-2 ${value.includes(o)?'border-gold ring-2 ring-gold':'border-mauve/60'}`} style={{background:custom[o]||COLORS[o]||'#746578'}}><span className="grid h-5 w-5 place-items-center rounded-full bg-head text-white" style={{visibility:value.includes(o)?'visible':'hidden'}}>✓</span></span>}
         <span>{o}</span>
       </button>)}
     </div>

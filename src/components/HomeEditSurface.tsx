@@ -182,7 +182,7 @@ export function HomeEditSurface({ layout, render, onDraft, onClose }: {
 
   return (
     <div data-testid="home-editor" data-dragging={dragging ?? ""} className="relative pb-24" ref={box}>
-      <p className="mt-1 rounded-2xl bg-white/5 px-3 py-2 text-[11.5px] leading-snug text-mauve">編輯主頁：按住 <IconGrip className="inline" /> 拖動（或長按元件），放手放下。⚙ 設定、<IconEyeOff className="inline" /> 隱藏；隱藏的元件可在「新增元件」重新加入。</p>
+      <p className="mt-1 rounded-2xl bg-cream/5 px-3 py-2 text-[11.5px] leading-snug text-mauve">編輯主頁：按住 <IconGrip className="inline" /> 拖動（或長按元件），放手放下。⚙ 設定、<IconEyeOff className="inline" /> 隱藏；隱藏的元件可在「新增元件」重新加入。</p>
       {conflict && (
         <div role="alert" data-testid="home-conflict" className="sticky top-14 z-40 mt-2 rounded-2xl bg-wine px-3 py-2 text-[12px] leading-snug text-cream shadow-xl">
           <p>主頁布局已在另一部裝置更新（第 {conflict.server?.rev ?? 0} 版）。你的草稿仍然保留，沒有覆寫。</p>
@@ -198,7 +198,7 @@ export function HomeEditSurface({ layout, render, onDraft, onClose }: {
         return (
           <div key={w.id} ref={(el) => { if (el) nodes.current.set(w.id, el); else nodes.current.delete(w.id); }} data-widget={w.id} data-type={w.type}
             className={`relative mt-3 flow-root rounded-2xl outline-dashed outline-1 outline-offset-2 outline-gold/50 ${dragging === w.id ? "bg-velvet/80" : ""}`} {...handlers(w.id, false)}>
-            <div className="flex items-center gap-0.5 rounded-t-2xl bg-ink/70 px-1 py-0.5 text-[12px]">
+            <div className="flex items-center gap-0.5 rounded-t-2xl bg-head/70 px-1 py-0.5 text-[12px]">
               <span role="button" tabIndex={-1} aria-label={`拖動「${spec.label}」`} data-drag-handle={w.id} style={{ touchAction: "none" }} className="grid h-10 w-10 shrink-0 cursor-grab select-none place-items-center text-[17px] text-gold-soft" {...handlers(w.id, true)}><IconGrip /></span>
               <span className="min-w-0 flex-1 truncate text-gold-soft">{spec.label}{w.opts.category ? `｜${w.opts.category}` : ""}</span>
               <button type="button" aria-label="上移" data-move="up" disabled={i === 0} onClick={() => move(w.id, -1)} className="grid h-10 w-9 place-items-center disabled:opacity-30"><IconChevronUp /></button>

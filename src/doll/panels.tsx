@@ -69,7 +69,7 @@ export function ClothesPanel({ garments, wornIds, wornKeys, pending, onToggle, p
       <div className="flex items-center gap-1.5 pb-1.5">
         <button type="button" aria-label="搜尋衣物" aria-pressed={search} onClick={() => { setSearch(!search); setQ(""); }} className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-[15px] ${search ? "chip-on" : "chip"}`}><IconSearch /></button>
         {search ? (
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="名稱、品牌、顏色、部件…" aria-label="搜尋" className="h-8 min-w-0 flex-1 rounded-full bg-white px-3 text-[13px] text-ink ring-1 ring-gold focus:outline-none" />
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="名稱、品牌、顏色、部件…" aria-label="搜尋" className="h-8 min-w-0 flex-1 rounded-full bg-field px-3 text-[13px] text-ink ring-1 ring-gold focus:outline-none" />
         ) : (
           <div className="scrollbar-none -mr-3 flex min-w-0 flex-1 gap-1.5 overflow-x-auto pr-3" data-testid="doll-cats">
             {["", ...cats, ...(pieces.length ? [PIECE_CAT] : [])].map((c) => <button key={c || "all"} type="button" data-cat={c || "all"} onClick={() => pickCat(c)} className={pill(cat === c)}>{c || "全部"}</button>)}
@@ -78,7 +78,7 @@ export function ClothesPanel({ garments, wornIds, wornKeys, pending, onToggle, p
       </div>
       {!search && subs.length > 1 && (
         <div className="scrollbar-none -mx-3 flex gap-1 overflow-x-auto px-3 pb-1.5" data-testid="doll-subcats">
-          {["", ...subs].map((c) => <button key={c || "all"} type="button" data-subcat={c || "all"} onClick={() => setSub(c)} className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] ${sub === c ? "chip-on" : "bg-white/5 text-cream/80"}`}>{c || "全部"}</button>)}
+          {["", ...subs].map((c) => <button key={c || "all"} type="button" data-subcat={c || "all"} onClick={() => setSub(c)} className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] ${sub === c ? "chip-on" : "bg-cream/5 text-cream/80"}`}>{c || "全部"}</button>)}
         </div>
       )}
       <div ref={scrollRef} className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2">
@@ -191,7 +191,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
         const b = batch.summary, unsaved = b.modified + b.uncalibrated;
         const unit = items.every((r) => r.piece) ? "個部件" : "件";
         return (
-          <div data-testid="batch-bar" data-unsaved={unsaved} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/5 px-2.5 py-1.5">
+          <div data-testid="batch-bar" data-unsaved={unsaved} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-cream/5 px-2.5 py-1.5">
             <div className="min-w-0 flex-1 text-[11px] leading-snug">
               <p className="text-gold-soft">已穿 {b.worn} {unit}｜{unsaved ? `${unsaved} 項設定尚未保存` : "衣物設定已全部保存"}</p>
               <p className="text-mauve">已修改 {b.modified} · 未校正 {b.uncalibrated} · 已保存 {b.saved}{b.other ? ` · 其他 ${b.other}` : ""}{batch.pending ? ` · 載入中 ${batch.pending}` : ""}</p>
@@ -200,13 +200,13 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
           </div>
         );
       })()}
-      {hints.map((h) => <p key={h} role="note" className="mb-1.5 rounded-xl bg-white/5 px-2.5 py-1.5 text-[11px] leading-snug text-gold-soft">提示：{h}</p>)}
+      {hints.map((h) => <p key={h} role="note" className="mb-1.5 rounded-xl bg-cream/5 px-2.5 py-1.5 text-[11px] leading-snug text-gold-soft">提示：{h}</p>)}
       {groups.size > 0 && (
         <div className="mb-1.5 space-y-1" data-testid="layer-groups">
           {[...groups].map(([gid, members]) => {
             const allHidden = members.every((m) => m.worn.hidden);
             return (
-              <div key={gid} data-layer-group={gid} className="flex items-center gap-1.5 rounded-xl bg-white/5 px-2 py-1 text-[11.5px]">
+              <div key={gid} data-layer-group={gid} className="flex items-center gap-1.5 rounded-xl bg-cream/5 px-2 py-1 text-[11.5px]">
                 <button type="button" aria-expanded={!folded.has(gid)} onClick={() => fold(gid)} className="flex min-w-0 flex-1 items-center gap-1 text-left text-gold-soft">
                   <span className="text-[10px]">{folded.has(gid) ? "▸" : "▾"}</span><span className="truncate">{displayName(members[0].garment as Garment)}（{members.length} 個部件・已校正 {members.filter((m) => m.piece?.fit).length}）</span>
                 </button>
@@ -229,7 +229,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
               <div data-layer={"grp:" + group.gid} className={`flex items-center gap-2 rounded-2xl py-1 pl-1.5 pr-1.5 chip ${dragging ? "opacity-70" : ""} ${hidden ? "opacity-60" : ""}`}>
                 <button type="button" {...handle} className="grid h-9 w-7 shrink-0 place-items-center text-[16px] opacity-80"><IconGrip /></button>
                 <button type="button" onClick={() => fold(group.gid)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                  <span className="relative h-10 w-8 shrink-0 overflow-hidden rounded-lg bg-white/85"><TransparentImage src={imageUrl(r.garment.transparent_image_id)} alt="" className="absolute inset-0 h-full w-full object-contain" /></span>
+                  <span className="relative h-10 w-8 shrink-0 overflow-hidden rounded-lg bg-field/85"><TransparentImage src={imageUrl(r.garment.transparent_image_id)} alt="" className="absolute inset-0 h-full w-full object-contain" /></span>
                   <span className="min-w-0">
                     <span className="block truncate text-[13px]">{displayName(r.garment as Garment)}</span>
                     <span className="block text-[10.5px] opacity-75" data-group-calibrated={`${group.members.filter((m) => m.piece?.fit).length}/${group.members.length}`}>套裝群組｜{group.members.length} 個部件｜已校正 {group.members.filter((m) => m.piece?.fit).length}/{group.members.length}（按此展開）</span>
@@ -249,7 +249,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
             <div data-layer={r.key} className={`flex items-center gap-2 rounded-2xl py-1 pl-1.5 pr-1.5 ${on ? "chip-on" : "chip"} ${dragging ? "opacity-70" : ""} ${r.worn.hidden ? "opacity-60" : ""}`}>
               <button type="button" {...handle} className="grid h-9 w-7 shrink-0 place-items-center text-[16px] opacity-80"><IconGrip /></button>
               <button type="button" onClick={() => onSelect(on ? null : r.key)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                <span className="relative h-10 w-8 shrink-0 overflow-hidden rounded-lg bg-white/85">
+                <span className="relative h-10 w-8 shrink-0 overflow-hidden rounded-lg bg-field/85">
                   {/* 套裝部件：用已製作好的部件圖（只在記憶體，不另外讀取高清圖） */}
                   {r.piece && r.image ? <img src={r.piece.file ? refUrl(r.piece.file) : r.image} alt="" data-piece-thumb={r.piece.id} className="absolute inset-0 h-full w-full object-contain p-0.5" /> : <TransparentImage src={imageUrl(r.garment.transparent_image_id)} alt="" className="absolute inset-0 h-full w-full object-contain" />}
                 </span>
@@ -465,7 +465,7 @@ export function FitPanel({ behind, onBind, onApplyBind, r, info, tool, setTool, 
               </div>
               <p className="mt-1.5 text-[11px] leading-snug text-mauve" data-testid="rig-summary">{MODE_INFO.find((m) => m.id === wm)!.hint} {wm !== "fixed" && rigSummary(info, skin)}</p>
               {skin !== "rigid" && wm !== "fixed" && (
-                <div className="mt-2 rounded-xl bg-white/5 p-2" data-testid="bind-pose">
+                <div className="mt-2 rounded-xl bg-cream/5 p-2" data-testid="bind-pose">
                   <div className="flex items-center justify-between gap-2"><span className="text-[11.5px] text-gold-soft">基準姿勢</span>{r.opts.bind ? <span className="rounded-full bg-gold/25 px-2 text-[10.5px] leading-[18px] text-gold-soft">已設定</span> : <span className="text-[10.5px] text-mauve">靜止站姿</span>}</div>
                   <p className="mt-1 text-[11px] leading-snug text-mauve">{r.opts.bind ? "角色擺出基準姿勢時，衣物保持校正時的樣子；移動手臂時只按姿勢的差異跟隨（網格、袖子角度不會重複計算）。" : "先擺好適合這件衣服的手臂姿勢，用位置／變形把衣物調整好，再按下面的按鈕：之後移動手臂時由這個姿勢開始跟隨。"}</p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -477,7 +477,7 @@ export function FitPanel({ behind, onBind, onApplyBind, r, info, tool, setTool, 
                 </div>
               )}
               <button type="button" data-testid="fit-whole" disabled={!modified} onClick={onWhole} className="chip mt-2 h-9 w-full rounded-full text-[12px] disabled:opacity-40">返回完整原圖（清除拆件、網格、遮罩及基準姿勢）</button>
-              {(autoParts || (wm === "body" && skin !== "rigid")) && <button type="button" data-testid="rig-advanced" aria-expanded={adv} onClick={() => setAdv(!adv)} className="mt-2 flex w-full items-center justify-between rounded-xl bg-white/5 px-2.5 py-2 text-[12px] text-gold-soft"><span>進階設定（袖子分區、角度、跟隨範圍、附接位置）</span><span>{adv ? "▾" : "▸"}</span></button>}
+              {(autoParts || (wm === "body" && skin !== "rigid")) && <button type="button" data-testid="rig-advanced" aria-expanded={adv} onClick={() => setAdv(!adv)} className="mt-2 flex w-full items-center justify-between rounded-xl bg-cream/5 px-2.5 py-2 text-[12px] text-gold-soft"><span>進階設定（袖子分區、角度、跟隨範圍、附接位置）</span><span>{adv ? "▾" : "▸"}</span></button>}
               {autoParts && adv && (
                 <>
                   <H>袖子範圍</H>
@@ -529,10 +529,10 @@ export function FitPanel({ behind, onBind, onApplyBind, r, info, tool, setTool, 
             </>
           )}
           {tool === "wear" && r.piece && (
-            <p className="mb-2 rounded-xl bg-white/5 p-2 text-[11px] leading-snug text-mauve" data-testid="piece-info">這是「{displayName(r.garment as Garment)}」拆出來的部件「{r.piece.name}」，不是另一件衣物。按「存為衣物預設」會保存這個部件的預設位置。</p>
+            <p className="mb-2 rounded-xl bg-cream/5 p-2 text-[11px] leading-snug text-mauve" data-testid="piece-info">這是「{displayName(r.garment as Garment)}」拆出來的部件「{r.piece.name}」，不是另一件衣物。按「存為衣物預設」會保存這個部件的預設位置。</p>
           )}
           {tool === "wear" && pieces && (
-            <div className="mb-3 rounded-xl bg-white/5 p-2" data-testid="set-pieces">
+            <div className="mb-3 rounded-xl bg-cream/5 p-2" data-testid="set-pieces">
               <div className="flex items-center justify-between"><span className="text-[11.5px] text-gold-soft">套裝拆件</span><button type="button" data-testid="open-split" onClick={onOpenSplit} className="chip rounded-full px-3 py-1 text-[12px]">{pieces.length ? "編輯拆件" : "拆件編輯器"}</button></div>
               {pieces.length ? (
                 <>
@@ -666,7 +666,7 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
             <>
               <H>正在使用的髮件（{current.length}）</H>
               <div className="space-y-1" data-testid="worn-hair-parts">{current.map((p, i) => (
-                <div key={p.id} className={`flex items-center gap-1 rounded-xl p-1 ${selectedHair === p.id ? "bg-gold/20" : "bg-white/5"}`}>
+                <div key={p.id} className={`flex items-center gap-1 rounded-xl p-1 ${selectedHair === p.id ? "bg-gold/20" : "bg-cream/5"}`}>
                   <button type="button" data-worn-hair={p.id} onClick={() => onSelectHair(selectedHair === p.id ? null : p.id)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
                     <img src={refUrl(p.file)} alt="" className="h-7 w-7 shrink-0 rounded-md bg-cream/80 object-contain" />
                     <span className="min-w-0"><span className="block truncate text-[12px]">{hairPartName(p)}</span><span className="block text-[10px] text-mauve">{HAIR_CAT_LABEL[hairCatOf(p)]}｜{p.layer === "front" ? "臉前面" : p.layer === "mid" ? "衣服前面" : "身體後面"}</span></span>
@@ -678,7 +678,7 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
                 </div>
               ))}</div>
               {selected && (
-                <div className="mt-2 rounded-xl bg-white/5 p-2" data-testid="hair-editor">
+                <div className="mt-2 rounded-xl bg-cream/5 p-2" data-testid="hair-editor">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[11.5px] text-gold-soft">編輯：{hairPartName(selected)}</span>
                     <button type="button" className={pill(hairTool === "place")} onClick={() => setHairTool("place")}>位置</button>
@@ -687,7 +687,7 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
                     <button type="button" disabled={!selected.mesh} className="chip rounded-full px-3 py-1.5 disabled:opacity-40" onClick={() => onHairPatch(selected.id, { mesh: undefined })}>重設變形</button>
                   </div>
                   {hairTool === "mask" && hairBrush && setHairBrush && (
-                    <div className="mt-1.5 rounded-lg bg-ink/40 p-1.5" data-testid="hair-vis-tools">
+                    <div className="mt-1.5 rounded-lg bg-head/40 p-1.5" data-testid="hair-vis-tools">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <button type="button" className={pill(hairBrush.mode === "hide")} onClick={() => setHairBrush({ ...hairBrush, mode: "hide" })}>隱藏</button>
                         <button type="button" className={pill(hairBrush.mode === "show")} onClick={() => setHairBrush({ ...hairBrush, mode: "show" })}>擦走遮罩</button>
@@ -714,7 +714,7 @@ export function AppearancePanel({ tab, setTab, value, onChange, assets, onNew, o
           )}
         </>)}
         {tab === "color" && <>
-          <select aria-label="染色對象" data-testid="hair-color-target" value={colorPart} onChange={e => setColorPart(e.target.value)} className="mb-2 w-full rounded-xl bg-ink p-2 text-cream">
+          <select aria-label="染色對象" data-testid="hair-color-target" value={colorPart} onChange={e => setColorPart(e.target.value)} className="mb-2 w-full rounded-xl bg-head p-2 text-cream">
             <option value="">全部頭髮</option>{current.map(p => <option key={p.id} value={p.id}>{hairPartName(p)}{p.color ? " · 獨立染色" : " · 繼承全局"}</option>)}
           </select>
           {colorPart && current.some(p => p.id === colorPart) ? <>
@@ -785,7 +785,7 @@ function Figure({ rig, pose, width, active, region, onPick }: { rig: Rig; pose: 
       {onPick && body.filter((b) => b.id !== "root" && adjustable(rig, b.id)).map((b) => (
         <g key={b.id} data-mini={b.id} onClick={() => onPick(b.id)} style={{ cursor: "pointer" }}>
           <circle cx={j[b.id][0]} cy={j[b.id][1]} r={95} fill="transparent" />
-          <circle cx={j[b.id][0]} cy={j[b.id][1]} r={active === b.id ? 52 : 34} fill={active === b.id ? "#f28ba3" : "#2a1526"} stroke="#f0d9c0" strokeWidth={12} />
+          <circle cx={j[b.id][0]} cy={j[b.id][1]} r={active === b.id ? 52 : 34} style={{ fill: active === b.id ? "var(--aw-handle)" : "var(--aw-tool)", stroke: "var(--aw-bone)" }} strokeWidth={12} />
         </g>
       ))}
     </svg>
@@ -870,7 +870,7 @@ export function PosePanel({ rig, pose, front, onPose, onFront, skel, setSkel, dr
               </div>
             )}
             <p className="mt-1.5 text-[11px] leading-snug text-mauve" data-testid="pose-hint">{control ? control.hint : skel === "clean" ? SKELETON_MODES[0].hint : DRAG_MODES.find((m) => m.id === drag)!.hint}</p>
-            <div className="mt-2 flex gap-3 rounded-2xl bg-white/5 p-2.5">
+            <div className="mt-2 flex gap-3 rounded-2xl bg-cream/5 p-2.5">
               <div className="shrink-0 text-gold-soft"><Figure rig={rig} pose={pose} width={64} active={joint} region={regionBones(rig, region)} onPick={pick} /></div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap gap-1.5" data-testid="regions">

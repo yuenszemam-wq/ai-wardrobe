@@ -81,7 +81,7 @@ export function GarmentTile({ g, size = "md", selected, onSelect, showPrice, tra
         {badge && size !== "xs" && <span className="chip-on absolute bottom-2.5 left-1/2 max-w-[86%] -translate-x-1/2 truncate rounded-full px-2 py-0.5 text-[10px]">{badge}</span>}
       </div>
       {g.is_favorite && (
-        <span className="absolute right-0 top-0 text-[15px] text-[#f2a7c3] drop-shadow" aria-label="已收藏">
+        <span className="absolute right-0 top-0 text-[15px] text-[var(--aw-chart)] drop-shadow" aria-label="已收藏">
           <IconHeart filled />
         </span>
       )}
@@ -254,7 +254,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 export const inputCls =
-  "w-full rounded-2xl bg-white px-4 py-3 text-ink ring-1 ring-gold placeholder:text-mauve/80 focus:outline-none focus:ring-2 focus:ring-amethyst";
+  "w-full rounded-2xl bg-field px-4 py-3 text-ink ring-1 ring-gold placeholder:text-mauve/80 focus:outline-none focus:ring-2 focus:ring-amethyst";
 
 export function Toast() {
   const [msg, setMsg] = useState<{ text: string; tone: "ok" | "err" } | null>(null);

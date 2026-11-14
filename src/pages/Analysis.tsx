@@ -134,7 +134,7 @@ export default function Analysis() {
             {catValue.length > 0 && (
               <>
                 <Sub>各分類總值</Sub>
-                <Bars rows={catValue.map((c) => ({ name: c.name, n: c.value, sub: `${c.n} 件` }))} format={money} color="linear-gradient(90deg, #a8855f, #f0d9c0)" onPick={go("category")} />
+                <Bars rows={catValue.map((c) => ({ name: c.name, n: c.value, sub: `${c.n} 件` }))} format={money} color="linear-gradient(90deg, var(--aw-chart-3), var(--color-gold-soft))" onPick={go("category")} />
               </>
             )}
             {d.priced_count > 0 && (
@@ -146,7 +146,7 @@ export default function Analysis() {
                     return (
                       <div key={b.label} className="flex h-full flex-1 flex-col items-center justify-end">
                         <span className="text-[11px] tabular-nums text-mauve">{b.n || ""}</span>
-                        <div className="mt-0.5 w-full rounded-t-md" style={{ height: `${(b.n / top) * 72}px`, minHeight: 2, background: "linear-gradient(180deg, #f2a7c3, #8f4d7c)" }} />
+                        <div className="mt-0.5 w-full rounded-t-md" style={{ height: `${(b.n / top) * 72}px`, minHeight: 2, background: "linear-gradient(180deg, var(--aw-chart), var(--aw-primary))" }} />
                       </div>
                     );
                   })}
@@ -195,7 +195,7 @@ export default function Analysis() {
           {(brands.length > 0 || noBrand > 0) && (
             <Card title="品牌">
               {brands.length > 0 ? (
-                <Bars rows={brands.map((x) => ({ name: x.name, n: x.n, sub: x.value ? money(x.value) : undefined }))} format={(n) => `${n} 件`} onPick={go("brand")} color="linear-gradient(90deg, #7a5bb0, #b98ae0)" />
+                <Bars rows={brands.map((x) => ({ name: x.name, n: x.n, sub: x.value ? money(x.value) : undefined }))} format={(n) => `${n} 件`} onPick={go("brand")} color="linear-gradient(90deg, var(--aw-chart-2), color-mix(in srgb, var(--aw-chart-2) 60%, #fff))" />
               ) : (
                 <p className="text-[13px] text-mauve">仍未有已填品牌的衣物。</p>
               )}

@@ -285,7 +285,7 @@ function ThumbnailStatus() {
   const load=()=>api<any>("/api/thumbnails/status").then(setStatus).catch(()=>{});
   useEffect(()=>{void load();},[]);
   if(!status)return null;
-  return <section className="mb-5 rounded-2xl bg-ink p-4 text-sm">
+  return <section className="mb-5 rounded-2xl bg-head p-4 text-sm">
     <h2 className="font-serif text-lg text-gold-soft">圖片與離線縮圖</h2>
     <p className="mt-2">已建立 {status.storage.count} 張縮圖 · {(status.storage.bytes/1048576).toFixed(1)} MB</p>
     <p>待處理 {status.jobs.filter((j:any)=>j.state!=="failed").reduce((s:number,j:any)=>s+j.count,0)} 張 · 失敗 {status.jobs.find((j:any)=>j.state==="failed")?.count??0} 張</p>

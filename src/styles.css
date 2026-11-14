@@ -1,25 +1,29 @@
 @import "tailwindcss";
 
 /*
- * 主題：絲絨衣帽間。
- * 深紫絲絨作舞台，玫瑰金細線作框，奶油色卡片放衣物，蕾絲、條紋、波點作點綴。
+ * 主題：絲絨衣帽間（Phase 3.8A.2 語意化色彩）。
+ * 每個顏色只代表一種用途；所有裝飾（緞帶、蕾絲、波點、框線、條紋、陰影、畫布）都讀取主題變數，
+ * 沒有寫死的粉紅、奶油或金色。主題由 src/theme.ts 以最終數值寫入 root 或預覽容器，
+ * 下方 :root 的數值＝預設「玫瑰桑紫」（未載入 JS 時的後備）。
+ * 錯誤、成功、警告及遮罩標示保留固定功能色。
  */
 @theme {
-  --color-ink: #1c0e1a;          /* 絲絨最深處：頁首、選單、深色文字 */
+  --color-ink: #1c0e1a;          /* 淺色表面上的深色文字（衣物名稱等） */
+  --color-head: #1c0e1a;         /* 頁首／深色面板背景（3.8A.2 起與文字分開） */
+  --color-field: #fffaf6;        /* 輸入框及淺色彈出表面 */
   --color-plum: #2a1526;         /* 頁面底色 */
-  --color-velvet: #3b1f35;       /* 深色面板 */
-  --color-amethyst: #8f4d7c;     /* 桑紫：主要動作 */
-  --color-amethyst-deep: #e8bfd3;/* 連結文字（深色底上是粉金；淺色卡片內會換成深桑紫，見下） */
-  --color-rose: #f3dcd8;         /* 胭脂粉 */
-  --color-rose-soft: #f9ece7;    /* 奶油卡片 */
-  --color-lace: #fdf6f1;         /* 蕾絲白 */
-  --color-white: #fffaf6;        /* 「白」統一帶暖調，避免在絲絨底上刺眼 */
-  --color-mauve: #b79bae;        /* 次要文字（隨底色切換） */
-  --color-wine: #f28ba3;         /* 錯誤／刪除（隨底色切換） */
-  --color-gold: #d9b391;         /* 玫瑰金：框線、標題 */
-  --color-gold-soft: #f0d9c0;
-  --color-cream: #f6e7df;        /* 深色底上的主要文字 */
-  /* Phase 3.8A.1 狀態語意色（已完成／錯誤、未校正）：淺色主題自動換成深色文字，保持對比 */
+  --color-velvet: #3b1f35;       /* 次層卡片 */
+  --color-amethyst: #8f4d7c;     /* 主要動作 */
+  --color-amethyst-deep: #e8bfd3;/* 連結文字 */
+  --color-rose: #f3dcd8;         /* 圖片框漸層 */
+  --color-rose-soft: #f9ece7;    /* 圖片框背景 */
+  --color-lace: #fdf6f1;         /* 蕾絲 */
+  --color-white: #fffaf6;        /* 主要按鈕上的文字 */
+  --color-mauve: #b79bae;        /* 次要文字（隨表面切換） */
+  --color-wine: #f28ba3;         /* 錯誤／刪除（隨深淺切換） */
+  --color-gold: #d9b391;         /* 邊框 */
+  --color-gold-soft: #f0d9c0;    /* 標題 */
+  --color-cream: #f6e7df;        /* 主要文字 */
   --color-ok: #6fbf8f;
   --color-ok-ink: #d6f5e1;
   --color-danger: #a12c4b;
@@ -31,381 +35,402 @@
 @layer base {
   :root {
     color-scheme: dark;
-    /* Phase 3.8 語意色彩（預設＝玫瑰桑紫，與原本介面相同）；介面主題以 inline style 覆蓋 */
-    --aw-header: var(--color-ink);
+    --color-plum: #2a1526;
+    --aw-bg: #2a1526;
+    --aw-header: #1c0e1a;
+    --color-head: #1c0e1a;
     --aw-nav: #3b1f35;
     --aw-card: #4a2742;
     --aw-primary: #8f4d7c;
+    --color-amethyst: #8f4d7c;
     --aw-secondary: #4a2742;
     --aw-selected: #a35c8f;
+    --color-cream: #f6e7df;
+    --aw-text: #f6e7df;
     --aw-text2: #b79bae;
+    --color-mauve: #b79bae;
+    --color-gold-soft: #f0d9c0;
+    --aw-title: #f0d9c0;
+    --color-gold: #d9b391;
+    --aw-border: #d9b391;
     --aw-image: #f9ece7;
+    --color-rose-soft: #f9ece7;
     --aw-chart: #f2a7c3;
+    --aw-chart-1: #f2a7c3;
+    --aw-card2: #3b1f35;
+    --color-velvet: #3b1f35;
+    --aw-pop: #3b1f35;
+    --aw-sheet: #2a1526;
+    --aw-input: #fffaf6;
+    --color-field: #fffaf6;
+    --aw-link: #e8bfd3;
+    --color-amethyst-deep: #e8bfd3;
+    --aw-icon: #b79bae;
+    --aw-icon-on: #f0d9c0;
+    --aw-input-text: #1c0e1a;
+    --aw-placeholder: #8a6d80;
+    --aw-disabled: #7d6474;
+    --aw-on-primary: #fffaf6;
+    --color-white: #fffaf6;
+    --aw-on-secondary: #f6e7df;
+    --aw-on-selected: #fffaf6;
+    --aw-check: #8f4d7c;
+    --aw-slider: #c9789f;
+    --aw-focus: #d9b391;
+    --aw-image2: #f3dcd8;
+    --color-rose: #f3dcd8;
+    --aw-image-hi: #fffaf6;
+    --aw-image-border: #d9b391;
+    --aw-dots: #c97aa0;
+    --aw-image-deco: #c97aa0;
+    --aw-on-image: #1c0e1a;
+    --color-ink: #1c0e1a;
+    --aw-ribbon: #f2a7c3;
+    --aw-on-ribbon: #1c0e1a;
+    --aw-lace: #fdf6f1;
+    --color-lace: #fdf6f1;
+    --aw-star: #d9b391;
+    --aw-line: #d9b391;
     --aw-stripe: #321b2e;
+    --aw-shadow: #000000;
+    --aw-canvas: #efe3ef;
+    --aw-canvas-pattern: #c97aa0;
+    --aw-tool: #1c0e1a;
+    --aw-tool-icon: #f6e7df;
+    --aw-bone: #e0569a;
+    --aw-handle: #f0d9c0;
+    --aw-mesh: #8f4d7c;
+    --aw-chart-2: #c9a0dc;
+    --aw-chart-3: #d9b391;
+    --aw-chart-4: #8fb8de;
+    --aw-chart-5: #9ad4b8;
     --aw-radius: 18px;
     --aw-border-w: 1px;
+    --aw-arch-radius: 999px 999px 14px 14px;
+    --aw-lace-on: block;
+    --aw-pad: 1rem;
+    --aw-shadow-soft: rgb(0 0 0 / 0.28);
+    --aw-shadow-strong: rgb(0 0 0 / 0.4);
+    --aw-scheme: dark;
+    --color-ok-ink: #d6f5e1;
+    --color-danger-ink: #ffd3df;
+    --color-wine: #f28ba3;
+
+    --aw-body-pattern: repeating-linear-gradient(90deg, #2a1526 0 12px, #321b2e 12px 24px);
+    --aw-body-pattern-size: auto;
   }
-  :root[data-scheme="light"] { color-scheme: light; --color-ok-ink: #1f5a36; --color-danger-ink: #7a1530; }
-  /* html 與 body 都用深色實底：iOS 把網頁加到主畫面後，狀態列後面的模糊色取自這裡，
-     以前是白色所以頂部會出現一片模糊白邊。 */
-  html {
-    background-color: var(--color-ink);
-  }
-  html,
-  body,
-  #root {
-    min-height: 100%;
-  }
+  :root[data-scheme="light"] { color-scheme: light; }
+  /* html 與 body 都用實底：iOS 主畫面 App 狀態列後的模糊色取自這裡 */
+  html { background-color: var(--aw-header); accent-color: var(--aw-check); }
+  html, body, #root { min-height: 100%; }
   body {
     margin: 0;
     background-color: var(--color-plum);
-    /* 原本 index.html 的內聯樣式令條紋不顯示：預設維持純色；主題選擇「條紋」時才顯示 */
     background-image: none;
     color: var(--color-cream);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
   }
-  :root[data-pattern="stripe"] body { background-image: repeating-linear-gradient(90deg, var(--color-plum) 0 12px, var(--aw-stripe) 12px 24px); }
-  :root[data-canvas] .doll-stage { background: var(--aw-canvas); }
-  :root[data-pattern="dots"] body { background-image: radial-gradient(circle, var(--aw-stripe) 1.6px, transparent 2.2px); background-size: 16px 16px; }
-  :root[data-lace="0"] .lace-b::after, :root[data-lace="0"] .lace-t::before, :root[data-lace="0"] .lace-trim, :root[data-lace="0"] .lace-trim-up { display: none; }
-  :root[data-frame="round"] .arch { border-radius: var(--aw-radius) !important; }
-  :root[data-density="compact"] main { padding-left: 0.6rem; padding-right: 0.6rem; }
-  :root[data-density="loose"] main { padding-left: 1.4rem; padding-right: 1.4rem; }
-  /* 絲絨布幕：直向的柔和褶紋，固定在背景 */
-  body::before {
-    content: none;
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background:
-      radial-gradient(110% 55% at 50% 0%, rgb(143 77 124 / 0.3), transparent 62%),
-      repeating-linear-gradient(90deg, transparent 0 34px, rgb(0 0 0 / 0.13) 52px, transparent 70px, rgb(255 255 255 / 0.022) 86px, transparent 104px),
-      var(--color-plum);
-  }
+  :root[data-pattern="stripe"] body, :root[data-pattern="dots"] body { background-image: var(--aw-body-pattern); background-size: var(--aw-body-pattern-size); }
+  main { padding-left: var(--aw-pad, 1rem); padding-right: var(--aw-pad, 1rem); }
+  input, select, textarea { font-size: 16px; /* 防止 iPhone 自動放大 */ }
+  :focus-visible { outline: 2px solid var(--aw-focus); outline-offset: 2px; }
+  ::selection { background: color-mix(in srgb, var(--aw-selected) 60%, transparent); color: var(--aw-on-selected); }
 
-  input,
-  select,
-  textarea {
-    font-size: 16px; /* 防止 iPhone 自動放大 */
+  /* 原生控件：勾選框、單選、滑桿使用主題色，不再是瀏覽器預設藍色 */
+  input[type="checkbox"], input[type="radio"], progress { accent-color: var(--aw-check); }
+  input[type="checkbox"] { width: 1.05em; height: 1.05em; }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; background: transparent; height: 28px; accent-color: var(--aw-slider);
+    --aw-track: linear-gradient(90deg, var(--aw-slider), color-mix(in srgb, var(--aw-slider) 35%, var(--aw-card)));
   }
-  :focus-visible {
-    outline: 2px solid var(--color-gold);
-    outline-offset: 2px;
-  }
+  input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: var(--aw-track); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aw-line) 40%, transparent); }
+  input[type="range"]::-moz-range-track { height: 6px; border-radius: 999px; background: var(--aw-track); }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -8px; border-radius: 999px; background: var(--aw-slider); border: 2px solid var(--aw-on-primary); box-shadow: 0 1px 4px var(--aw-shadow-soft); }
+  input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 999px; background: var(--aw-slider); border: 2px solid var(--aw-on-primary); }
+  input[type="range"]:disabled { opacity: 0.45; }
+  /* 色彩滑桿：軌道本身就是漸層（色相＝彩虹，飽和度／明度＝按目前顏色） */
+  input[type="range"].hue-track { --aw-track: linear-gradient(90deg, #f00, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00); }
+  input[type="range"].grad-track { --aw-track: var(--grad); }
+  input[type="range"].hue-track::-webkit-slider-thumb, input[type="range"].grad-track::-webkit-slider-thumb { background: var(--thumb, #fff); border-color: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.45), 0 1px 4px rgb(0 0 0 / 0.4); }
+  input[type="range"].hue-track::-moz-range-thumb, input[type="range"].grad-track::-moz-range-thumb { background: var(--thumb, #fff); border-color: #fff; }
 }
 
 @layer components {
-  /* ── 底色範圍：淺色卡片內自動用深色字，深色面板內自動用淺色字 ── */
-  [class^="bg-white"], [class*=" bg-white"],
-  [class^="bg-rose"], [class*=" bg-rose"],
-  [class^="bg-lace"], [class*=" bg-lace"],
-  .paper, .arch, .checker {
-    --color-mauve: #8a6d80;
-    --color-amethyst-deep: #6b3059;
-    --color-wine: #a12c4b;
-    --chip-bg: rgb(255 250 246 / 0.85);
-    --chip-line: rgb(28 14 26 / 0.14);
-    color: var(--color-ink);
-    color-scheme: light;
-  }
-  [class^="bg-ink"], [class*=" bg-ink"],
-  [class^="bg-velvet"], [class*=" bg-velvet"],
-  [class^="bg-plum"], [class*=" bg-plum"],
-  [class^="bg-amethyst"], [class*=" bg-amethyst"],
-  .frame, .btn-jewel {
-    --color-mauve: var(--aw-text2);
-    --color-amethyst-deep: #e8bfd3;
-    --color-wine: #f28ba3;
-    --chip-bg: rgb(255 255 255 / 0.05);
-    --chip-line: rgb(217 179 145 / 0.45);
-    color: var(--color-cream);
-    color-scheme: dark;
-  }
+  /* 主題範圍容器（主題預覽）：與 body 相同的底色及圖案 */
+  .theme-scope { background-color: var(--color-plum); color: var(--color-cream); font-family: var(--font-sans); }
+  .theme-scope[data-pattern="stripe"], .theme-scope[data-pattern="dots"] { background-image: var(--aw-body-pattern); background-size: var(--aw-body-pattern-size); }
 
-  /* 玫瑰金雙線框的深色面板 */
+  /* ── 表面範圍：只按明確的實底 class 判斷（bg-cream/5 等低透明度不再被誤當淺色表面） ── */
+  [class~="bg-field"], [class*=" bg-field/"], [class^="bg-field/"], .field {
+    --color-ink: var(--aw-input-text);
+    --color-mauve: var(--aw-placeholder);
+    --color-amethyst-deep: color-mix(in srgb, var(--aw-primary) 70%, var(--aw-input-text));
+    --chip-bg: color-mix(in srgb, var(--aw-input-text) 6%, transparent);
+    --chip-line: color-mix(in srgb, var(--aw-input-text) 18%, transparent);
+    color: var(--aw-input-text);
+  }
+  [class~="bg-rose"], [class~="bg-rose-soft"], [class~="bg-lace"], .paper, .arch, .checker {
+    --color-ink: var(--aw-on-image);
+    --color-mauve: color-mix(in srgb, var(--aw-on-image) 62%, var(--aw-image));
+    --color-amethyst-deep: color-mix(in srgb, var(--aw-primary) 65%, var(--aw-on-image));
+    --chip-bg: color-mix(in srgb, var(--aw-image-hi) 85%, transparent);
+    --chip-line: color-mix(in srgb, var(--aw-on-image) 14%, transparent);
+    color: var(--aw-on-image);
+  }
+  [class~="bg-head"], [class*=" bg-head/"], [class^="bg-head/"],
+  [class~="bg-velvet"], [class~="bg-plum"], .frame, .pop, .btn-dark, .sheet-surface {
+    --color-mauve: var(--aw-text2);
+    --color-amethyst-deep: var(--aw-link);
+    --chip-bg: color-mix(in srgb, var(--color-cream) 5%, transparent);
+    --chip-line: color-mix(in srgb, var(--aw-line) 45%, transparent);
+    color: var(--color-cream);
+  }
+  [class~="bg-amethyst"], .btn-jewel { --color-mauve: color-mix(in srgb, var(--aw-on-primary) 75%, var(--aw-primary)); color: var(--aw-on-primary); }
+
+  /* 雙線框面板 */
   .frame {
     position: relative;
     border-radius: var(--aw-radius);
     border: var(--aw-border-w) solid color-mix(in srgb, var(--color-gold) 55%, transparent);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--aw-card) 92%, transparent), color-mix(in srgb, color-mix(in srgb, var(--aw-card) 38%, var(--color-ink)) 94%, transparent));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--aw-card) 92%, transparent), color-mix(in srgb, color-mix(in srgb, var(--aw-card) 38%, var(--aw-header)) 94%, transparent));
     box-shadow:
-      inset 0 0 0 3px rgb(28 14 26 / 0.45),
-      inset 0 0 0 4px rgb(217 179 145 / 0.2),
-      0 10px 24px rgb(0 0 0 / 0.28);
+      inset 0 0 0 3px color-mix(in srgb, var(--aw-header) 45%, transparent),
+      inset 0 0 0 4px color-mix(in srgb, var(--aw-line) 20%, transparent),
+      0 10px 24px var(--aw-shadow-soft);
   }
-  .frame-hot {
-    background: linear-gradient(180deg, var(--aw-selected), color-mix(in srgb, var(--aw-selected) 75%, #000));
-    border-color: var(--color-gold-soft);
-  }
+  .frame-hot { background: linear-gradient(180deg, var(--aw-selected), color-mix(in srgb, var(--aw-selected) 75%, #000)); border-color: var(--color-gold-soft); color: var(--aw-on-selected); --color-mauve: color-mix(in srgb, var(--aw-on-selected) 75%, var(--aw-selected)); }
 
-  /* 奶油色卡片：放衣物和內容 */
+  /* 內容卡片（圖片色系） */
   .paper {
     position: relative;
     border-radius: 20px;
-    border: 1px solid var(--color-gold);
-    background: radial-gradient(130% 80% at 50% 0%, var(--color-white), var(--color-rose-soft) 55%, var(--color-rose));
+    border: 1px solid var(--aw-image-border);
+    background: radial-gradient(130% 80% at 50% 0%, var(--aw-image-hi), var(--aw-image) 55%, var(--aw-image2));
     box-shadow:
-      inset 0 0 0 3px rgb(255 250 246 / 0.7),
-      inset 0 0 0 4px rgb(217 179 145 / 0.45),
-      0 10px 24px rgb(0 0 0 / 0.3);
+      inset 0 0 0 3px color-mix(in srgb, var(--aw-image-hi) 70%, transparent),
+      inset 0 0 0 4px color-mix(in srgb, var(--aw-line) 45%, transparent),
+      0 10px 24px var(--aw-shadow-soft);
   }
 
-  /* 衣物框：圓拱形窗（列表、詳情、表單內的小預覽）。頂部是半圓，奶油底配淡淡的波點 */
+  /* 衣物框：圓拱形窗；底色、漸層、波點、邊框全部跟隨主題 */
   .arch {
     position: relative;
-    border-radius: 999px 999px 14px 14px;
+    border-radius: var(--aw-arch-radius);
     background:
-      radial-gradient(circle at 50% 50%, rgb(201 122 160 / 0.13) 1.3px, transparent 1.8px) 0 0 / 13px 13px,
-      radial-gradient(circle at 50% 50%, rgb(201 122 160 / 0.13) 1.3px, transparent 1.8px) 6.5px 6.5px / 13px 13px,
-      radial-gradient(120% 70% at 50% 8%, var(--color-white) 0%, var(--color-rose-soft) 55%, var(--color-rose) 100%);
-    border: 1px solid var(--color-gold);
+      radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--aw-dots) 16%, transparent) 1.3px, transparent 1.8px) 0 0 / 13px 13px,
+      radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--aw-dots) 16%, transparent) 1.3px, transparent 1.8px) 6.5px 6.5px / 13px 13px,
+      radial-gradient(120% 70% at 50% 8%, var(--aw-image-hi) 0%, var(--aw-image) 55%, var(--aw-image2) 100%);
+    border: 1px solid var(--aw-image-border);
     box-shadow:
-      inset 0 0 0 3px rgb(255 250 246 / 0.75),
-      inset 0 0 0 4px rgb(217 179 145 / 0.5),
-      0 8px 18px rgb(0 0 0 / 0.3);
+      inset 0 0 0 3px color-mix(in srgb, var(--aw-image-hi) 75%, transparent),
+      inset 0 0 0 4px color-mix(in srgb, var(--aw-line) 50%, transparent),
+      0 8px 18px var(--aw-shadow-soft);
   }
   /* 拱窗底部的蕾絲台座 */
   .arch-base::after {
     content: "";
-    position: absolute;
-    left: 6%;
-    right: 6%;
-    bottom: 5px;
-    height: 7px;
-    pointer-events: none;
-    opacity: 0.7;
-    background: radial-gradient(circle at 50% 0, transparent 3.2px, rgb(201 122 160 / 0.55) 3.6px, rgb(201 122 160 / 0.55) 4.3px, transparent 4.7px) 50% 0 / 10px 7px repeat-x;
+    display: var(--aw-lace-on, block);
+    position: absolute; left: 6%; right: 6%; bottom: 5px; height: 7px;
+    pointer-events: none; opacity: 0.7;
+    background: radial-gradient(circle at 50% 0, transparent 3.2px, color-mix(in srgb, var(--aw-image-deco) 55%, transparent) 3.6px, color-mix(in srgb, var(--aw-image-deco) 55%, transparent) 4.3px, transparent 4.7px) 50% 0 / 10px 7px repeat-x;
   }
-  /* 拱形銘牌：首頁的衣物總數、登入頁 */
+  /* 拱形銘牌 */
   .arch-dark {
     position: relative;
     border-radius: 50% 50% 12px 12px / 28% 28% 12px 12px;
     border: 1px solid var(--color-gold);
-    background: linear-gradient(180deg, #5a2f50, #2f1729);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--aw-card) 85%, var(--aw-primary)), var(--aw-card2));
     box-shadow:
-      inset 0 0 0 3px rgb(28 14 26 / 0.5),
-      inset 0 0 0 4px rgb(217 179 145 / 0.3),
-      0 12px 26px rgb(0 0 0 / 0.35);
+      inset 0 0 0 3px color-mix(in srgb, var(--aw-header) 50%, transparent),
+      inset 0 0 0 4px color-mix(in srgb, var(--aw-line) 30%, transparent),
+      0 12px 26px var(--aw-shadow-strong);
     color: var(--color-cream);
+    --color-mauve: var(--aw-text2);
   }
 
   /* 蕾絲荷葉邊：頁首下緣 */
   .lace-b::after {
     content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 100%;
-    height: 9px;
+    display: var(--aw-lace-on, block);
+    position: absolute; left: 0; right: 0; top: 100%; height: 9px;
     pointer-events: none;
     background:
-      radial-gradient(circle at 50% -1px, transparent 5.5px, rgb(217 179 145 / 0.5) 6px, rgb(217 179 145 / 0.5) 6.8px, transparent 7.3px) 0 0 / 16px 9px repeat-x,
-      radial-gradient(circle at 50% 0, var(--color-ink) 6.2px, transparent 6.8px) 0 0 / 16px 9px repeat-x;
+      radial-gradient(circle at 50% -1px, transparent 5.5px, color-mix(in srgb, var(--aw-line) 50%, transparent) 6px, color-mix(in srgb, var(--aw-line) 50%, transparent) 6.8px, transparent 7.3px) 0 0 / 16px 9px repeat-x,
+      radial-gradient(circle at 50% 0, var(--aw-header) 6.2px, transparent 6.8px) 0 0 / 16px 9px repeat-x;
+  }
+  /* 蕾絲荷葉邊（向上）：底部選單上緣 */
+  .lace-t::before {
+    content: "";
+    display: var(--aw-lace-on, block);
+    position: absolute; left: 0; right: 0; bottom: 100%; height: 9px;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 50% 10px, transparent 5.5px, color-mix(in srgb, var(--aw-line) 50%, transparent) 6px, color-mix(in srgb, var(--aw-line) 50%, transparent) 6.8px, transparent 7.3px) 0 0 / 16px 9px repeat-x,
+      radial-gradient(circle at 50% 9px, var(--aw-nav) 6.2px, transparent 6.8px) 0 0 / 16px 9px repeat-x;
   }
 
-
-  /* ── 圖案：條紋、波點（都很淡，只作底紋） ── */
-  .pat-stripe {
-    background-image: repeating-linear-gradient(90deg, rgb(242 167 195 / 0.1) 0 6px, transparent 6px 12px);
-  }
-  .pat-stripe-bold {
-    background-image: repeating-linear-gradient(90deg, #2a1526 0 7px, #f2a7c3 7px 14px);
-  }
+  /* ── 圖案：條紋、波點 ── */
+  .pat-stripe { background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--aw-chart) 10%, transparent) 0 6px, transparent 6px 12px); }
+  .pat-stripe-bold { background-image: repeating-linear-gradient(90deg, var(--color-plum) 0 7px, var(--aw-chart) 7px 14px); }
   .pat-dots {
-    background-image:
-      radial-gradient(circle, rgb(242 167 195 / 0.22) 1.6px, transparent 2.1px),
-      radial-gradient(circle, rgb(242 167 195 / 0.22) 1.6px, transparent 2.1px);
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--aw-dots) 22%, transparent) 1.6px, transparent 2.1px), radial-gradient(circle, color-mix(in srgb, var(--aw-dots) 22%, transparent) 1.6px, transparent 2.1px);
     background-size: 16px 16px;
     background-position: 0 0, 8px 8px;
   }
 
-  /* 蕾絲花邊：貼在面板上緣或下緣的一條白蕾絲（扇形邊＋小孔） */
+  /* 蕾絲花邊：貼在面板上緣或下緣 */
   .lace-trim {
+    display: var(--aw-lace-on, block);
     height: 12px;
     pointer-events: none;
     background:
-      radial-gradient(circle at 50% 3px, rgb(42 21 38 / 0.55) 1.2px, transparent 1.7px) 0 0 / 14px 12px repeat-x,
-      radial-gradient(circle at 50% 0, var(--color-lace) 6.4px, transparent 7px) 0 0 / 14px 12px repeat-x;
-    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.25));
+      radial-gradient(circle at 50% 3px, color-mix(in srgb, var(--color-plum) 55%, transparent) 1.2px, transparent 1.7px) 0 0 / 14px 12px repeat-x,
+      radial-gradient(circle at 50% 0, var(--aw-lace) 6.4px, transparent 7px) 0 0 / 14px 12px repeat-x;
+    filter: drop-shadow(0 1px 1px var(--aw-shadow-soft));
   }
-  .lace-trim-up {
-    transform: scaleY(-1);
-  }
+  .lace-trim-up { transform: scaleY(-1); }
 
-  /* 緞帶標題：條紋緞帶上的標題，兩端剪成燕尾 */
+  /* 緞帶標題：底色及文字由主題控制 */
   .ribbon {
     position: relative;
     display: inline-flex;
     align-items: center;
     gap: 0.4em;
     padding: 0.28em 1.5em 0.3em;
-    color: var(--color-ink);
+    color: var(--aw-on-ribbon);
     background:
-      linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 45%),
-      repeating-linear-gradient(90deg, #f6b8d2 0 8px, #f2a7c3 8px 16px);
+      linear-gradient(180deg, color-mix(in srgb, var(--aw-on-ribbon) 0%, rgb(255 255 255 / 0.3)), transparent 45%),
+      repeating-linear-gradient(90deg, color-mix(in srgb, var(--aw-ribbon) 82%, #fff) 0 8px, var(--aw-ribbon) 8px 16px);
     clip-path: polygon(0 0, 100% 0, calc(100% - 0.6em) 50%, 100% 100%, 0 100%, 0.6em 50%);
-    filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.3));
-  }
-
-  /* 蕾絲荷葉邊（向上）：底部選單上緣 */
-  .lace-t::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 100%;
-    height: 9px;
-    pointer-events: none;
-    background:
-      radial-gradient(circle at 50% 10px, transparent 5.5px, rgb(217 179 145 / 0.5) 6px, rgb(217 179 145 / 0.5) 6.8px, transparent 7.3px) 0 0 / 16px 9px repeat-x,
-      radial-gradient(circle at 50% 9px, var(--color-ink) 6.2px, transparent 6.8px) 0 0 / 16px 9px repeat-x;
+    filter: drop-shadow(0 2px 2px var(--aw-shadow-soft));
+    --color-mauve: color-mix(in srgb, var(--aw-on-ribbon) 70%, var(--aw-ribbon));
   }
 
   /* 標題兩側的小星飾 */
-  .orn::before,
-  .orn::after {
+  .orn::before, .orn::after {
     content: "";
     display: inline-block;
-    width: 0.62em;
-    height: 0.62em;
+    width: 0.62em; height: 0.62em;
     vertical-align: 0.08em;
-    background: var(--color-gold);
+    background: var(--aw-star);
     clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
   }
-  .orn::before {
-    margin-right: 0.45em;
-  }
-  .orn::after {
-    margin-left: 0.45em;
-  }
-  .orn-l::after {
-    display: none;
-  }
+  .orn::before { margin-right: 0.45em; }
+  .orn::after { margin-left: 0.45em; }
+  .orn-l::after { display: none; }
 
-  /* 主要按鈕：桑紫緞面＋金邊 */
+  /* 主要按鈕 */
   .btn-jewel {
     border: 1px solid var(--color-gold);
     background: linear-gradient(180deg, color-mix(in srgb, var(--aw-primary) 86%, #fff) 0%, var(--aw-primary) 45%, color-mix(in srgb, var(--aw-primary) 78%, #000) 100%);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.28),
-      inset 0 0 0 2px rgb(28 14 26 / 0.22),
-      0 6px 14px rgb(0 0 0 / 0.3);
-    color: var(--color-white);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), inset 0 0 0 2px color-mix(in srgb, var(--aw-shadow) 22%, transparent), 0 6px 14px var(--aw-shadow-soft);
   }
-  .btn-jewel:active {
-    filter: brightness(0.9);
-  }
+  .btn-jewel:active { filter: brightness(0.9); }
   .btn-dark {
-    border: 1px solid rgb(217 179 145 / 0.6);
+    border: 1px solid color-mix(in srgb, var(--aw-line) 60%, transparent);
     background: linear-gradient(180deg, var(--aw-secondary), color-mix(in srgb, var(--aw-secondary) 64%, #000));
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 6px 14px rgb(0 0 0 / 0.3);
-    color: var(--color-cream);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 6px 14px var(--aw-shadow-soft);
+    color: var(--aw-on-secondary);
   }
-  .btn-dark:active {
-    filter: brightness(1.2);
-  }
+  .btn-dark:active { filter: brightness(1.2); }
 
   /* 選擇標籤 */
-  .chip {
-    border: 1px solid var(--chip-line, rgb(217 179 145 / 0.45));
-    background: var(--chip-bg, rgb(255 255 255 / 0.05));
-    color: inherit;
-  }
+  .chip { border: 1px solid var(--chip-line, color-mix(in srgb, var(--aw-line) 45%, transparent)); background: var(--chip-bg, color-mix(in srgb, var(--color-cream) 5%, transparent)); color: inherit; }
   .chip-on {
     border: 1px solid var(--color-gold);
     background: linear-gradient(180deg, var(--aw-selected), color-mix(in srgb, var(--aw-selected) 75%, #000));
-    color: var(--color-white);
+    color: var(--aw-on-selected);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
+    --color-mauve: color-mix(in srgb, var(--aw-on-selected) 75%, var(--aw-selected));
   }
 
-  /* Phase 3.8：統一的彈出選單／彈層及輸入框 */
+  /* 彈出選單／彈層及輸入框 */
   .pop {
     border: 1px solid color-mix(in srgb, var(--color-gold) 55%, transparent);
-    background: color-mix(in srgb, var(--color-velvet) 96%, transparent);
-    color: var(--color-cream);
-    box-shadow: 0 12px 30px rgb(0 0 0 / 0.35);
+    background: color-mix(in srgb, var(--aw-pop) 96%, transparent);
+    box-shadow: 0 12px 30px var(--aw-shadow-strong);
     backdrop-filter: blur(6px);
   }
-  .field {
-    background: var(--color-white);
-    color: var(--color-ink);
-    box-shadow: inset 0 0 0 1px var(--color-gold);
-  }
-  .field::placeholder { color: color-mix(in srgb, var(--color-mauve) 80%, transparent); }
-  .field:focus { outline: none; box-shadow: inset 0 0 0 2px var(--color-amethyst); }
+  .field { background: var(--aw-input); box-shadow: inset 0 0 0 1px var(--color-gold); }
+  .field::placeholder, [class~="bg-field"]::placeholder { color: var(--aw-placeholder); }
+  .field:focus { outline: none; box-shadow: inset 0 0 0 2px var(--aw-focus); }
+  :disabled { --aw-dis: 1; }
 
-  /* 透明圖片的棋盤底，用於檢查去背及穿搭畫布 */
+  /* 開關（取代原生 checkbox 的大型切換） */
+  .switch { position: relative; display: inline-block; width: 42px; height: 24px; flex: none; border-radius: 999px; background: color-mix(in srgb, var(--color-cream) 18%, transparent); transition: background 0.15s; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 999px; background: var(--color-cream); transition: transform 0.15s; }
+  .switch[aria-checked="true"] { background: var(--aw-check); }
+  .switch[aria-checked="true"]::after { transform: translateX(18px); background: var(--aw-on-selected); }
+
+  /* 透明圖片的棋盤底 */
   .checker {
-    background-color: var(--color-white);
+    background-color: var(--aw-image-hi);
     background-image:
-      linear-gradient(45deg, #efdfe0 25%, transparent 25%),
-      linear-gradient(-45deg, #efdfe0 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #efdfe0 75%),
-      linear-gradient(-45deg, transparent 75%, #efdfe0 75%);
+      linear-gradient(45deg, color-mix(in srgb, var(--aw-on-image) 9%, var(--aw-image)) 25%, transparent 25%),
+      linear-gradient(-45deg, color-mix(in srgb, var(--aw-on-image) 9%, var(--aw-image)) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--aw-on-image) 9%, var(--aw-image)) 75%),
+      linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--aw-on-image) 9%, var(--aw-image)) 75%);
     background-size: 20px 20px;
     background-position: 0 0, 0 10px, 10px -10px, -10px 0;
   }
   /* 穿搭畫布的對位格線 */
   .guides::after {
     content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 999;
-    pointer-events: none;
+    position: absolute; inset: 0; z-index: 999; pointer-events: none;
     background:
-      linear-gradient(90deg, transparent calc(50% - 0.5px), rgb(143 77 124 / 0.7) calc(50% - 0.5px), rgb(143 77 124 / 0.7) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
-      linear-gradient(90deg, rgb(143 77 124 / 0.28) 1px, transparent 1px) 0 0 / 25% 100%,
-      linear-gradient(0deg, rgb(143 77 124 / 0.28) 1px, transparent 1px) 0 0 / 100% 12.5%;
+      linear-gradient(90deg, transparent calc(50% - 0.5px), color-mix(in srgb, var(--aw-primary) 70%, transparent) calc(50% - 0.5px), color-mix(in srgb, var(--aw-primary) 70%, transparent) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+      linear-gradient(90deg, color-mix(in srgb, var(--aw-primary) 28%, transparent) 1px, transparent 1px) 0 0 / 25% 100%,
+      linear-gradient(0deg, color-mix(in srgb, var(--aw-primary) 28%, transparent) 1px, transparent 1px) 0 0 / 100% 12.5%;
   }
 }
 
-.safe-bottom {
-  padding-bottom: calc(env(safe-area-inset-bottom) + 0.4rem);
-}
-:root {
-  --tabbar-height: calc(73px + env(safe-area-inset-bottom, 0px));
-}
-.app-tabbar { padding-bottom: env(safe-area-inset-bottom, 0px); background: #3b1f35; }
+.safe-bottom { padding-bottom: calc(env(safe-area-inset-bottom) + 0.4rem); }
+:root { --tabbar-height: calc(73px + env(safe-area-inset-bottom, 0px)); }
+.app-tabbar { padding-bottom: env(safe-area-inset-bottom, 0px); background: var(--aw-nav); border-top: 1px solid color-mix(in srgb, var(--aw-line) 40%, transparent); }
+.app-tabbar .tab-off { color: var(--aw-icon); }
+.app-tabbar .tab-on { color: var(--aw-icon-on); }
 .detail-actions {
   position: fixed;
   bottom: var(--tabbar-height);
-  left: 0;
-  right: 0;
+  left: 0; right: 0;
   max-width: 64rem;
   margin: 0 auto;
-  background: var(--color-ink);
+  background: var(--aw-header);
 }
-.app-tabbar { border-top: 1px solid rgb(217 179 145 / 0.4); }
-.safe-top {
-  padding-top: env(safe-area-inset-top);
-}
+.safe-top { padding-top: env(safe-area-inset-top); }
+/* 底部固定工具列（主題編輯等）：留出底部選單及安全區，內容不被遮住 */
+.sticky-actions { position: sticky; bottom: calc(var(--tabbar-height, 4rem) + 0.5rem); z-index: 20; }
+.sticky-spacer { height: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-    animation: none !important;
-  }
+  * { transition: none !important; animation: none !important; }
 }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { scrollbar-width: none; }
 
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
-.scrollbar-none {
-  scrollbar-width: none;
-}
+/* 底部抽屜：底色跟隨主題，並保留 iPhone 底部安全區 */
+.sheet-surface { background: var(--aw-sheet); background-image: none; box-shadow: 0 -8px 36px var(--aw-shadow-strong); padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem); }
 
-.sheet-surface { background: var(--color-plum); background-image: none; box-shadow: 0 -8px 36px rgb(0 0 0 / 0.4); }
-
-/* ───── 角色換裝工作室：魔法人偶館的舞台 ───── */
+/* ───── 角色換裝工作室：畫布、浮動工具、骨架及控制點顏色 ───── */
 .doll-stage {
   background:
-    radial-gradient(60% 34% at 50% 100%, rgb(143 77 124 / 0.28), transparent 70%),
-    radial-gradient(circle at 50% 50%, rgb(201 122 160 / 0.1) 1.2px, transparent 1.7px) 0 0 / 18px 18px,
-    linear-gradient(180deg, #f8f1f6 0%, #efe3ef 55%, #e2d0e6 100%);
-  box-shadow: inset 0 10px 18px -12px rgb(28 14 26 / 0.55), inset 0 -10px 18px -12px rgb(28 14 26 / 0.45);
+    radial-gradient(60% 34% at 50% 100%, color-mix(in srgb, var(--aw-primary) 28%, transparent), transparent 70%),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--aw-canvas-pattern) 12%, transparent) 1.2px, transparent 1.7px) 0 0 / 18px 18px,
+    linear-gradient(180deg, color-mix(in srgb, var(--aw-canvas) 70%, #fff) 0%, var(--aw-canvas) 55%, color-mix(in srgb, var(--aw-canvas) 88%, var(--aw-canvas-pattern)) 100%);
+  box-shadow: inset 0 10px 18px -12px var(--aw-shadow-strong), inset 0 -10px 18px -12px var(--aw-shadow-soft);
 }
-.doll-panel { box-shadow: 0 -10px 26px rgb(0 0 0 / 0.35); }
-.doll-room input[type="range"] { accent-color: #c9789f; height: 28px; }
+.doll-panel { box-shadow: 0 -10px 26px var(--aw-shadow-strong); }
+.doll-room input[type="range"] { height: 28px; }
+.doll-tool { background: color-mix(in srgb, var(--aw-tool) 82%, transparent); color: var(--aw-tool-icon); border: 1px solid color-mix(in srgb, var(--aw-line) 45%, transparent); backdrop-filter: blur(4px); --color-mauve: color-mix(in srgb, var(--aw-tool-icon) 70%, var(--aw-tool)); }
+.doll-tool-on { background: var(--aw-selected); color: var(--aw-on-selected); }
+/* 換裝畫布上的控制 SVG（網格、框、骨架）顏色跟隨主題 */
+.sv-mesh { stroke: var(--aw-mesh); }
+.sv-mesh-pt { fill: color-mix(in srgb, var(--aw-image-hi) 85%, transparent); stroke: var(--aw-mesh); }
+.sv-frame { stroke: var(--aw-handle); }
+.sv-handle { fill: var(--aw-primary); stroke: var(--aw-handle); }
+.sv-handle-icon { stroke: var(--aw-on-primary); }
+.sv-handle-ring { stroke: var(--aw-handle); }
+.sv-bone-shadow { stroke: var(--aw-shadow); }
+.sv-bone { stroke: var(--aw-bone); }

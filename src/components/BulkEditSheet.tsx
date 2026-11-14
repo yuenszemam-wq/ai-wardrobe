@@ -64,6 +64,6 @@ export function BulkEditSheet({ garments, onClose, onUpdated }: { garments:Garme
       {modes[field.id]==='clear'&&<p className="mt-2 text-sm text-wine">將清空所選衣物的這個欄位</p>}
     </div>)}</div>
     {error&&<p role="alert" className="my-3 text-sm text-wine">{error}</p>}
-    <div className="sticky bottom-0 bg-ink p-3"><p className="mb-2 text-xs">將修改 {garments.length} 件：{changed.map(f=>f.name).join('、')||'尚未選擇欄位'}</p><Button disabled={busy||!changed.length||!garments.length} onClick={save}>{busy?`修改中…${progress}`:'套用至所選衣物'}</Button></div>
+    <div className="sticky bottom-0 bg-head p-3"><p className="mb-2 text-xs">將修改 {garments.length} 件：{changed.map(f=>f.name).join('、')||'尚未選擇欄位'}</p><Button disabled={busy||!changed.length||!garments.length} onClick={save}>{busy?`修改中…${progress}`:'套用至所選衣物'}</Button></div>
   </Sheet>;
 }

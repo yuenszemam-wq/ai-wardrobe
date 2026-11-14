@@ -47,7 +47,7 @@ export function PoseLibrary({ model, rig, pose, front, onApply, renderer, scene 
             const on = samePose(rig, clampPose(rig, p.pose), pose);
             return (
               <div key={p.id} className="relative">
-                <button type="button" data-my-pose={p.id} aria-pressed={on} onClick={() => onApply(p.pose, p.front)} className={`block w-full rounded-xl p-1 text-center ${on ? "chip-on" : "bg-white/5"}`}>
+                <button type="button" data-my-pose={p.id} aria-pressed={on} onClick={() => onApply(p.pose, p.front)} className={`block w-full rounded-xl p-1 text-center ${on ? "chip-on" : "bg-cream/5"}`}>
                   <div className="aspect-[2/3] overflow-hidden rounded-lg bg-cream/70">{p.thumb ? <img src={p.thumb} alt="" loading="lazy" className="h-full w-full object-contain" /> : null}</div>
                   <div className="truncate pt-0.5 text-[10.5px]">{p.name}{p.model_id ? " ●" : ""}</div>
                 </button>

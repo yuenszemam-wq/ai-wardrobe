@@ -15,7 +15,7 @@ export function GarmentDetailCard({g,tax,selected,onSelect}:{g:Garment;tax:Taxon
     </Link>
     <div className="flex items-start justify-between gap-2">
       <Link to={`/g/${g.id}`} className="min-w-0 break-words font-serif text-[15px] font-bold text-gold-soft">{displayName(g)}</Link>
-      {onSelect&&<input type="checkbox" aria-label={`選擇${displayName(g)}`} checked={!!selected} onChange={onSelect} className="mt-1 h-5 w-5 shrink-0 accent-amethyst"/>}
+      {onSelect&&<input type="checkbox" aria-label={`選擇${displayName(g)}`} checked={!!selected} onChange={onSelect} className="mt-1 h-5 w-5 shrink-0 accent-[var(--aw-check)]"/>}
     </div>
     {text(attrs.original_name)&&<p className="break-words text-mauve">{text(attrs.original_name)}</p>}
     {(g.brand||g.price!=null)&&<p className="break-words">{[g.brand,g.price!=null?`HK${money(g.price)}`:''].filter(Boolean).join(' · ')}</p>}

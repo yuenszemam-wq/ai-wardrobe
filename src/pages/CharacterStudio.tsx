@@ -30,7 +30,7 @@ function AssetCard({ testid, id, thumb, name, sub, tags = [], badge, dim, onOpen
       <button type="button" onClick={onOpen} disabled={!onOpen} aria-label={onOpen ? `開啟 ${name}` : name} className="flex flex-1 flex-col text-left disabled:cursor-default">
         <span className="relative block aspect-[3/4] w-full overflow-hidden rounded-xl bg-cream/85">
           {thumb ? <img src={thumb} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-1.5" /> : <span className="absolute inset-0 grid place-items-center text-[14px] text-mauve">{name.slice(0, 2)}</span>}
-          {badge && <span className="absolute left-1.5 top-1.5 rounded-full bg-ink/75 px-1.5 text-[9.5px] leading-[16px] text-gold-soft">{badge}</span>}
+          {badge && <span className="absolute left-1.5 top-1.5 rounded-full bg-head/75 px-1.5 text-[9.5px] leading-[16px] text-gold-soft">{badge}</span>}
         </span>
         <span className="mt-1.5 block truncate text-[13px] font-medium leading-tight">{name}</span>
         <span className="block h-4 truncate text-[10.5px] leading-4 text-mauve">{sub}</span>
@@ -38,7 +38,7 @@ function AssetCard({ testid, id, thumb, name, sub, tags = [], badge, dim, onOpen
       </button>
       {menu.length > 0 && (
         <div className="absolute right-1.5 top-1.5" data-menu-for={id}>
-          <button type="button" aria-label={`${name}：更多操作`} aria-expanded={open} data-testid="asset-more" onClick={() => setOpen(!open)} className="grid h-8 w-8 place-items-center rounded-full bg-ink/70 text-[15px] text-cream"><IconMore /></button>
+          <button type="button" aria-label={`${name}：更多操作`} aria-expanded={open} data-testid="asset-more" onClick={() => setOpen(!open)} className="grid h-8 w-8 place-items-center rounded-full bg-head/70 text-[15px] text-cream"><IconMore /></button>
           {open && (
             <div role="menu" className="pop absolute right-0 top-9 z-30 w-44 overflow-hidden rounded-2xl py-1 text-[13px]">
               {menu.map((m, i) => m.node ? <div key={i} className="px-3 py-2">{m.node}</div> : (

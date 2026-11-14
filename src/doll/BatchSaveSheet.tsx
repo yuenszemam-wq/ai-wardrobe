@@ -12,8 +12,8 @@ export interface BatchResult { saved: string[]; failed: BatchFailure[] }
 const STATE_TONE: Record<BatchState, string> = {
   modified: "bg-gold/20 text-gold-soft",
   uncalibrated: "bg-wine/40 text-cream",
-  saved: "bg-white/10 text-mauve",
-  hidden: "bg-white/10 text-mauve",
+  saved: "bg-cream/10 text-mauve",
+  hidden: "bg-cream/10 text-mauve",
   blocked: "bg-black/30 text-mauve line-through",
 };
 
@@ -71,11 +71,11 @@ export function BatchSaveSheet({ entries, bodyName, selectedGid, onSave, onClose
         </div>
         <div className="space-y-2" data-testid="batch-list">
           {groups.map(([gid, list]) => (
-            <div key={gid} data-batch-group={gid} className="rounded-2xl bg-white/5 p-2">
+            <div key={gid} data-batch-group={gid} className="rounded-2xl bg-cream/5 p-2">
               <p className="mb-1 truncate px-1 text-[12px] font-bold text-gold-soft">{groupName(gid)}{list.some((e) => e.pieceId) ? `（${list.length} 個部件）` : ""}</p>
               {list.map((e) => (
                 <label key={e.key} data-batch-item={e.key} data-state={e.state} className={`flex min-h-11 items-center gap-2 rounded-xl px-1.5 py-1 ${e.state === "blocked" ? "opacity-60" : ""}`}>
-                  <input type="checkbox" className="h-5 w-5 shrink-0 accent-[var(--color-gold)]" checked={on.has(e.key)} disabled={e.state === "blocked" || busy} onChange={() => toggle(e.key)} />
+                  <input type="checkbox" className="h-5 w-5 shrink-0 accent-[var(--aw-check)]" checked={on.has(e.key)} disabled={e.state === "blocked" || busy} onChange={() => toggle(e.key)} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{e.pieceId ? e.label : "整件衣物"}</span>
                     {(e.reason || (e.overwrite && on.has(e.key))) && <span className="block text-[10.5px] leading-snug text-mauve">{e.reason ?? "會覆寫現有預設"}</span>}
@@ -85,7 +85,7 @@ export function BatchSaveSheet({ entries, bodyName, selectedGid, onSave, onClose
               ))}
               {sets.includes(gid) && (
                 <label className="mt-1 flex min-h-10 items-center gap-2 border-t border-gold/15 px-1.5 pt-1 text-[11.5px]">
-                  <input type="checkbox" data-batch-layout={gid} className="h-5 w-5 shrink-0 accent-[var(--color-gold)]" checked={layouts.has(gid)} disabled={busy} onChange={() => setLayouts((cur) => { const n = new Set(cur); if (n.has(gid)) n.delete(gid); else n.add(gid); return n; })} />
+                  <input type="checkbox" data-batch-layout={gid} className="h-5 w-5 shrink-0 accent-[var(--aw-check)]" checked={layouts.has(gid)} disabled={busy} onChange={() => setLayouts((cur) => { const n = new Set(cur); if (n.has(gid)) n.delete(gid); else n.add(gid); return n; })} />
                   <span className="leading-snug">同時保存整套穿著配置（部件的相對圖層次序及建議姿勢；不包括其他衣物）</span>
                 </label>
               )}
