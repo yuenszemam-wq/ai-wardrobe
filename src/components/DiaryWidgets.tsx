@@ -72,7 +72,7 @@ export function DiaryWidget({ w, editing }: { w: Widget; editing: boolean }) {
         <p className="mt-1 text-[11px] text-mauve">本月 {by.size} 日有紀錄</p>
       </Link>);
   }
-  const s = m.data as Stats;
+  const s = m.data as unknown as Stats;
   if (w.type === "diary_usage" && w.display === "count") return box(<Link to="/diary/stats" className="block text-center"><b className="font-serif text-[24px] text-gold-soft">{s.distinct_garments}</b><span className="block text-[11px] text-mauve">本月穿過的衣物</span></Link>);
   if (w.type === "diary_usage" && w.display === "bar") return box(<Link to="/diary/stats" className="block text-[12px]"><span className="flex justify-between"><span>本月使用率</span><b>{s.usage_rate == null ? "—" : Math.round(s.usage_rate * 100) + "%"}</b></span><span className="mt-1 block h-2 overflow-hidden rounded-full bg-cream/10"><span className="block h-full rounded-full bg-[var(--aw-chart-1)]" style={{ width: `${Math.min(100, (s.usage_rate ?? 0) * 100)}%` }} /></span><span className="mt-0.5 block text-[11px] text-mauve">{s.distinct_garments}／{s.active_garments} 件</span></Link>);
   if (w.type === "diary_usage") return box(
