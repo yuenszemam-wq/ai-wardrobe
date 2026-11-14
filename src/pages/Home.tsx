@@ -1,4 +1,5 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { DiaryWidget, LABELS as DIARY_LABELS, isDiaryWidget } from "../components/DiaryWidgets";
 import { api, Garment } from "../api";
 import { Bars, Donut, pct, SERIES, swatch, topWithOther } from "../components/charts";
 import { BgImage, HomeBgEditor } from "../components/HomeBackground";
@@ -150,6 +151,7 @@ function WidgetView({ w, d, onChanged }: { w: Widget; d: HomeData; onChanged: ()
     return out.sort(by[sort ?? "created"] ?? by.created).slice(0, disp === "hero" ? 1 : o.count ?? 8);
   };
   const reroll = <button type="button" data-reroll={w.id} onClick={() => setSeed(Math.random())} className="chip h-8 shrink-0 rounded-full px-3 text-[12px]">重新推薦</button>;
+  if (isDiaryWidget(w.type)) return <DiaryWidget w={w} editing={d.editing} />;
   switch (w.type) {
     case "cover": return <Cover w={w} s={s!} />;
     case "overview": {
@@ -284,7 +286,7 @@ function GarmentDisplay({ items, disp, half, compact, o }: { items: Garment[]; d
   return <Row items={items} compact={compact || half} detail={!!o.detail} />;
 }
 
-const LABEL: Record<string, string> = { cover: "背景封面", overview: "衣櫃概覽", value: "衣櫃總價", todo: "待處理事項", analysis: "衣櫃分析", recent: "最近加入", updated: "最近修改", favorites: "收藏衣物", random_garment: "隨機推薦", recent_looks: "最近穿搭", fav_looks: "收藏穿搭", random_look: "隨機穿搭" };
+const LABEL: Record<string, string> = { cover: "背景封面", overview: "衣櫃概覽", value: "衣櫃總價", todo: "待處理事項", analysis: "衣櫃分析", recent: "最近加入", updated: "最近修改", favorites: "收藏衣物", random_garment: "隨機推薦", recent_looks: "最近穿搭", fav_looks: "收藏穿搭", random_look: "隨機穿搭", ...DIARY_LABELS };
 const hash = (id: string, seed: number) => { let h = Math.floor(seed * 1e9); for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 2654435761); return h >>> 0; };
 
 /**

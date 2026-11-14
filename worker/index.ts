@@ -14,6 +14,7 @@ import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, de
 import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
+import { createEntry, deleteEntry, deletePhoto, diaryStats, duplicateEntry, garmentWear, getEntry, listDiary, servePhoto, serveSnap, updateEntry, uploadPhoto } from "./diary";
 import { Counter, DEFAULT_ALERTS, PURPOSES, R2_PRICING, alertSettings, appUsage, backgroundAllowed, estimateCost, flushUsage, forecast, freeTierUse, meteredBucket, officialUsage } from "./r2usage";
 
 export default {
@@ -426,6 +427,31 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     requireScope(actor, "import");
     return json(await createUploadLink(env, actor, url.origin, await readJson(req)));
   }
+
+  // ───── Phase 3.9A.1：穿搭日誌（私人；需要登入） ─────
+  if (path === "/api/diary") {
+    if (method === "GET") { requireScope(actor, "read"); return json(await listDiary(env, url.searchParams)); }
+    if (method === "POST") { requireSession(actor); return json(await createEntry(env, actor, await readJson(req)), 201); }
+  }
+  if (path === "/api/diary/stats" && method === "GET") { requireScope(actor, "read"); return json(await diaryStats(env, url.searchParams.get("today") ?? "", url.searchParams.get("month"))); }
+  m = path.match(/^\/api\/diary\/photos\/(dph_[\w-]+)(\/thumb)?$/);
+  if (m && method === "GET") { requireScope(actor, "read"); return servePhoto(req, env, m[1], !!m[2]); }
+  m = path.match(/^\/api\/diary\/snaps\/([\w-]+)$/);
+  if (m && method === "GET") { requireScope(actor, "read"); return serveSnap(req, env, m[1]); }
+  m = path.match(/^\/api\/diary\/(dia_[\w-]+)$/);
+  if (m) {
+    if (method === "GET") { requireScope(actor, "read"); return json(await getEntry(env, m[1])); }
+    if (method === "PATCH") { requireSession(actor); return json(await updateEntry(env, actor, m[1], await readJson(req))); }
+    if (method === "DELETE") { requireSession(actor); return json(await deleteEntry(env, actor, m[1])); }
+  }
+  m = path.match(/^\/api\/diary\/(dia_[\w-]+)\/duplicate$/);
+  if (m && method === "POST") { requireSession(actor); return json(await duplicateEntry(env, actor, m[1], await readJson(req)), 201); }
+  m = path.match(/^\/api\/diary\/(dia_[\w-]+)\/photos$/);
+  if (m && method === "POST") { requireSession(actor); return json(await uploadPhoto(env, actor, req, m[1]), 201); }
+  m = path.match(/^\/api\/diary\/(dia_[\w-]+)\/photos\/(dph_[\w-]+)$/);
+  if (m && method === "DELETE") { requireSession(actor); return json(await deletePhoto(env, actor, m[1], m[2])); }
+  m = path.match(/^\/api\/garments\/([\w-]+)\/wear$/);
+  if (m && method === "GET") { requireScope(actor, "read"); return json(await garmentWear(env, m[1], url.searchParams.get("today") ?? "")); }
 
   // ───── 穿搭 ─────
   if (path === "/api/outfits") {

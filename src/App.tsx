@@ -8,6 +8,9 @@ import { IconCrown, IconDress, IconGear, IconHome, IconPencil, IconPlus, IconSpa
 import { Link, Spinner, Toast, setSettingsCache } from "./components/ui";
 import { match, navigate, usePath } from "./router";
 import GarmentDetail from "./pages/GarmentDetail";
+import Diary from "./pages/Diary";
+import DiaryEditor from "./pages/DiaryEditor";
+import { DiaryDetail, DiaryStats } from "./pages/DiaryDetail";
 import Analysis from "./pages/Analysis";
 import Home from "./pages/Home";
 import ImportCenter from "./pages/ImportCenter";
@@ -96,6 +99,11 @@ export default function App() {
     page = <Spinner />;
   } else if (match("/taxonomy", path)) page = <TaxonomyManager />;
   else if ((p = match("/import/:id", path))) page = <BatchDetail id={p.id} />;
+  else if (match("/diary", path)) page = <Diary />;
+  else if (match("/diary/new", path)) page = <DiaryEditor />;
+  else if (match("/diary/stats", path)) page = <DiaryStats />;
+  else if ((p = match("/diary/:id/edit", path))) page = <DiaryEditor key={p.id} id={p.id} />;
+  else if ((p = match("/diary/:id", path))) page = <DiaryDetail key={p.id} id={p.id} />;
   else if (match("/outfits", path)) page = <Outfits />;
   else if (match("/outfits/new", path)) page = <OutfitStudio />;
   else if ((p = match("/outfits/:id", path))) page = <OutfitStudio id={p.id} />;
@@ -160,7 +168,7 @@ const TABS = [
   { to: "/", label: "首頁", Icon: IconHome, test: (p: string) => p === "/" || p.startsWith("/analysis") },
   { to: "/wardrobe", label: "衣櫃", Icon: IconCrown, test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
   { to: "/import", label: "上傳", Icon: IconPlus, test: (p: string) => p.startsWith("/import") },
-  { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") || p.startsWith("/dressing") },
+  { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") || p.startsWith("/dressing") || p.startsWith("/diary") },
   { to: "/settings", label: "設定", Icon: IconGear, test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
 ];
 

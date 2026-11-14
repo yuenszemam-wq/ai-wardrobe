@@ -14,6 +14,7 @@ import { fillQueue } from "../fillQueue";
 import { useTaxonomy } from "../taxonomy";
 import { makeThumbnail, prepareForUpload } from "../imageProcessing";
 import { navigate } from "../router";
+import { WearInfo, fmtDate, loadWear } from "../diary";
 
 const FIELD_LABEL: Record<string, string> = {
   name: "名稱",
@@ -321,6 +322,7 @@ export default function GarmentDetail({ id }: { id: string }) {
               {g.locked_fields && g.locked_fields.length > 0 && (
                 <p className="mt-4 text-[12px] text-mauve">已人工修正（AI 不會覆寫）：{g.locked_fields.map((f) => FIELD_LABEL[f] || f).join("、")}</p>
               )}
+              <WearStats gid={g.id} />
               {g.outfits && g.outfits.length > 0 && (
                 <div className="mt-4 text-sm">
                   <span className="text-mauve">出現在穿搭：</span>
@@ -633,5 +635,28 @@ function EditForm({
         </button>
       </div>
     </form>
+  );
+}
+
+/** Phase 3.9A.1：衣物穿著統計（只計「已穿著」紀錄；同一日只計一次） */
+function WearStats({ gid }: { gid: string }) {
+  const [w, setW] = useState<WearInfo | null>(null);
+  useEffect(() => { let live = true; loadWear(gid).then((r) => live && setW(r.data)).catch(() => live && setW(null)); return () => { live = false; }; }, [gid]);
+  if (!w) return null;
+  const none = w.worn_days === 0;
+  return (
+    <div className="mt-4 rounded-2xl bg-cream/5 p-3 text-[13px]" data-testid="wear-stats" data-worn={w.worn_days}>
+      <div className="mb-1 flex items-center justify-between"><span className="font-serif text-gold-soft">穿著紀錄</span><Link to={`/diary/new?garment=${gid}`} className="text-[12px] text-amethyst-deep underline" data-testid="wear-record">記錄穿著</Link></div>
+      {none ? <p className="text-[12.5px] text-mauve">尚未有穿搭紀錄{w.diary_since ? `（日誌由 ${w.diary_since} 開始；之前的穿著未有紀錄）` : ""}。</p> : (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">
+          <dt className="text-mauve">累計穿著</dt><dd data-testid="wear-days">{w.worn_days} 次（{w.entries} 筆紀錄）</dd>
+          <dt className="text-mauve">第一次／最近</dt><dd>{w.first ? fmtDate(w.first) : "—"}／{w.last ? fmtDate(w.last) : "—"}</dd>
+          <dt className="text-mauve">本月／本年</dt><dd>{w.month}／{w.year} 次</dd>
+          <dt className="text-mauve">距離上次</dt><dd>{w.days_since ?? "—"} 日</dd>
+        </dl>
+      )}
+      <p className="mt-1 text-[12.5px]" data-testid="wear-cpw">每次穿著成本：{w.cost_per_wear != null ? `HK$${w.cost_per_wear}` : "尚未有足夠資料"}{w.cost_per_wear == null && w.price == null && !none ? "（未填價格）" : ""}</p>
+      {w.related.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{w.related.slice(0, 6).map((e) => <Link key={e.id} to={`/diary/${e.id}`} className="chip rounded-full px-2 py-0.5 text-[11.5px]">{e.worn_date}</Link>)}</div>}
+    </div>
   );
 }

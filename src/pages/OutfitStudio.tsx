@@ -285,8 +285,8 @@ export default function OutfitStudio({ id }: { id?: string }) {
     update((cur) => [...cur.filter((p) => p.garment_id !== gid), cur.find((p) => p.garment_id === gid)!]);
   }
 
-  async function save() {
-    if (!picked.length && !id) return toast("請先揀選單品", "err");
+  async function save(): Promise<string | undefined> {
+    if (!picked.length && !id) { toast("請先揀選單品", "err"); return; }
     setSaving(true);
     const r2 = (n: number) => Math.round(n * 100) / 100;
     const body = {
@@ -301,6 +301,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
       toast("已儲存穿搭");
       setDirty(false);
       if (!id) navigate(`/outfits/${res.id}`, true);
+      return res.id ?? id;
     } catch (e) {
       toast((e as Error).message, "err");
     } finally {
@@ -582,8 +583,9 @@ export default function OutfitStudio({ id }: { id?: string }) {
         </label>
       </section>
 
-      <div className={`mt-4 grid gap-2 ${id ? "grid-cols-4" : "grid-cols-2"}`}>
-        <ActionBtn primary onClick={save} disabled={saving} label={saving ? "儲存中…" : "保存穿搭"}><IconSave /></ActionBtn>
+      <div className={`mt-4 grid gap-2 ${id ? "grid-cols-5" : "grid-cols-3"}`}>
+        <ActionBtn primary onClick={() => void save()} disabled={saving} label={saving ? "儲存中…" : "保存穿搭"}><IconSave /></ActionBtn>
+        <ActionBtn onClick={async () => { const oid = dirty || !id ? await save() : id; if (oid) navigate(`/diary/new?outfit=${oid}`); }} disabled={saving || (!id && !picked.length)} label="加入日誌"><IconDress /></ActionBtn>
         <ActionBtn onClick={exportImage} disabled={busy} label="導出圖片"><IconImage /></ActionBtn>
         {id && <ActionBtn onClick={duplicate} disabled={busy} label="複製組合"><IconCopy /></ActionBtn>}
         {id && <ActionBtn onClick={remove} disabled={busy} label="刪除組合"><IconTrash /></ActionBtn>}
