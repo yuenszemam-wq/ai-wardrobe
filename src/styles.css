@@ -434,3 +434,13 @@
 .sv-handle-ring { stroke: var(--aw-handle); }
 .sv-bone-shadow { stroke: var(--aw-shadow); }
 .sv-bone { stroke: var(--aw-bone); }
+
+/* Phase 3.8B.1：主題預覽中點擊選色時短暫標示正在修改的元素 */
+.theme-scope [data-picked] { outline: 2px dashed var(--aw-focus); outline-offset: 2px; transition: outline-color 0.2s; }
+
+/* Phase 3.8B.1：衣櫃頁向下捲動時收合全站頁首，由衣櫃頁首接手（只用 transform，不影響版面、不重新載入圖片） */
+.app-header { transition: transform 0.2s ease; will-change: transform; }
+html[data-header-collapsed="1"] .app-header { transform: translateY(-100%); }
+.wardrobe-head { background: var(--aw-header); transition: top 0.2s ease, padding 0.2s ease; }
+.wardrobe-head[data-collapsed="1"] { box-shadow: 0 1px 0 color-mix(in srgb, var(--aw-line) 40%, transparent), 0 6px 14px var(--aw-shadow-soft); }
+.hscroll { overscroll-behavior-x: contain; touch-action: pan-x pan-y; }

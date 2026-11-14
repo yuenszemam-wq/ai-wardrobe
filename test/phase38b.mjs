@@ -108,12 +108,18 @@ try {
   check("正式與預覽 Bucket 分開顯示", u.official.buckets["ai-wardrobe-images"].class_b === 900000 && u.official.buckets["ai-wardrobe-preview-images"].class_a === 300);
   check("免費額度內：預計費用 US$0", u.cost.total === 0 && u.free_use.source === "official");
   check("Class B 已用 9% → 未達 70% 警告門檻", Math.round(u.free_use.class_b * 100) === 9);
+  // 手動重新整理有 30 秒冷卻：測試時把快取時間調早（模擬已過冷卻時間）
+  const age = (sec) => env.DB.prepare("UPDATE app_settings SET updated_at = ? WHERE key = 'r2_official_cache'").bind(new Date(Date.now() - sec * 1000).toISOString()).run();
   const c1 = calls;
   await call("GET", "/api/r2/usage", null, envOff);
   check("結果快取 10 分鐘：再次開啟用量頁不會重複呼叫 Cloudflare API", calls === c1);
+  u = (await call("GET", "/api/r2/usage?refresh=1", null, envOff)).body;
+  check("30 秒內重複按重新整理：沿用快取並提示冷卻（不重複呼叫 API）", calls === c1 && u.official.cooldown_s > 0);
+  await age(31);
   await call("GET", "/api/r2/usage?refresh=1", null, envOff);
   check("按重新整理才重新取得", calls === c1 + 1);
   // 接近免費額度：軟上限保護
+  await age(31);
   globalThis.fetch = async (url, init) => String(url).startsWith("https://api.cloudflare.com/") ? Response.json({ data: { viewer: { accounts: [{ ops: [{ sum: { requests: 9_500_000 }, dimensions: { actionType: "GetObject", bucketName: "ai-wardrobe-images" } }], st: [] }] } } }) : realFetch(url, init);
   u = (await call("GET", "/api/r2/usage?refresh=1", null, envOff)).body;
   check("用量 95%：超過軟上限 90%，暫停非必要背景工作", u.background.allowed === false && /軟上限/.test(u.background.reason));
@@ -124,12 +130,14 @@ try {
   u = (await call("GET", "/api/r2/usage", null, envOff)).body;
   check("可設定警告比例及軟上限", u.alerts.warn.join() === "60,80" && u.alerts.soft_limit === 99 && u.background.allowed === true);
   // 權限不足、暫時失敗
+  await age(31);
   globalThis.fetch = async (url, init) => String(url).startsWith("https://api.cloudflare.com/") ? new Response("{}", { status: 403 }) : realFetch(url, init);
   u = (await call("GET", "/api/r2/usage?refresh=1", null, envOff)).body;
-  check("官方 API 權限不足：清楚說明需要的權限", u.official.available === false && u.official.reason === "permission" && /Account Analytics/.test(u.official.message));
+  check("官方 API 權限不足：保留最後一次成功數據並標明可能已過時，清楚說明需要的權限", u.official.stale === true && u.official.stale_reason === "permission" && /Account Analytics/.test(u.official.stale_message) && u.official.account.class_b === 9_500_000);
+  await age(31);
   globalThis.fetch = async (url, init) => String(url).startsWith("https://api.cloudflare.com/") ? new Response("busy", { status: 503 }) : realFetch(url, init);
   u = (await call("GET", "/api/r2/usage?refresh=1", null, envOff)).body;
-  check("官方 API 暫時失敗：如實回報，沒有虛構數字", u.official.available === false && u.official.reason === "api_error" && u.cost === null);
+  check("官方 API 暫時失敗：保留最後成功數據（標示過時），費用亦標示過時", u.official.stale === true && u.official.stale_reason === "api_error" && u.cost?.stale === true);
   globalThis.fetch = realFetch;
   check("R2 用量 API 需要登入（Token 不會給 AI 連接器）", (await worker.fetch(new Request("http://localhost/api/r2/usage"), envOff)).status === 401);
 } catch (e) {

@@ -14,7 +14,7 @@ import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, de
 import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
-import { Counter, DEFAULT_ALERTS, PURPOSES, R2_PRICING, alertSettings, appUsage, backgroundAllowed, estimateCost, flushUsage, freeTierUse, meteredBucket, officialUsage } from "./r2usage";
+import { Counter, DEFAULT_ALERTS, PURPOSES, R2_PRICING, alertSettings, appUsage, backgroundAllowed, estimateCost, flushUsage, forecast, freeTierUse, meteredBucket, officialUsage } from "./r2usage";
 
 export default {
   async fetch(req: Request, rawEnv: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -162,7 +162,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (path === "/api/r2/usage" && method === "GET") {
     requireSession(actor);
     const [official, app, alerts] = await Promise.all([officialUsage(env, url.searchParams.get("refresh") === "1"), appUsage(env), alertSettings(env)]);
-    return json({ pricing: R2_PRICING, purposes: PURPOSES, official, app, alerts, free_use: freeTierUse(official, app), cost: estimateCost(official), background: await backgroundAllowed(env) });
+    return json({ pricing: R2_PRICING, purposes: PURPOSES, official, app, alerts, free_use: freeTierUse(official, app), cost: estimateCost(official), forecast: forecast(official), background: await backgroundAllowed(env) });
   }
   if (path === "/api/r2/alerts" && method === "PUT") {
     requireSession(actor);

@@ -124,6 +124,7 @@ try {
   await page.fill('[data-testid="theme-hex"]', "#3a2030");
   await page.locator('[data-testid="theme-hex"]').blur();
   check("低對比時顯示可讀性提示", (await page.locator('[data-testid="theme-issues"]').count()) === 1);
+  await page.click('[data-testid="theme-sheet-done"]');
   await page.click('[data-testid="theme-auto-text"]');
   check("自動文字顏色修正對比", (await page.locator('[data-testid="theme-issues"]').count()) === 0);
   await page.fill('[data-testid="theme-name"]', "我的夜色");

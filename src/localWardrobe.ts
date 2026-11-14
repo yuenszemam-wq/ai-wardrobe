@@ -83,9 +83,14 @@ async function loadMemory(g: number) {
     await reqP(t.objectStore("meta").get("sync") as IDBRequest<{ lastSync: string | null; digest: string | null; fps: [string, string][] } | undefined>),
   ] as const);
   if (g !== gen) return;
-  memory = rows.length || meta ? rows : null;
-  fps = new Map(meta?.fps ?? []);
-  status = { ...status, count: rows.length, lastSync: meta?.lastSync ?? null, digest: meta?.digest ?? null, ready: true };
+  // Phase 3.8B.1：完整性檢查。iOS 可能只清除部分本機資料（例如衣物資料被清空但同步紀錄仍在）；
+  // 若指紋數目與實際衣物不一致，視為「未完整同步」：保留現有衣物，令下一次同步重新核對全部，不會一直顯示 0 件。
+  const fpList = meta?.fps ?? [];
+  const fpIds = new Set(fpList.map(([id]) => id));
+  const consistent = !meta || (fpList.length === rows.length && rows.every((r) => fpIds.has(r.id)));
+  memory = consistent ? (rows.length || meta ? rows : null) : rows.length ? rows : null;
+  fps = consistent ? new Map(fpList) : new Map();
+  status = { ...status, count: rows.length, lastSync: meta?.lastSync ?? null, digest: consistent ? meta?.digest ?? null : null, ready: true, ...(consistent ? {} : { error: "本機資料不完整，正在重新同步" }) };
 }
 /** 登出：刪除該帳戶的本機資料庫（私人資料不留在手機） */
 export async function deleteLocalAccount(acc: string | null) {
@@ -127,7 +132,13 @@ export function syncWardrobe(opts: { throttleMs?: number; full?: boolean } = {})
         await saveMeta(g, man.at, man.digest);
         return { changed: 0, removed: 0, total: memory?.length ?? 0, same: true };
       }
-      const next = new Map(man.items!);
+      let next = new Map(man.items!);
+      // 伺服器清單突然變成 0 件而本機仍有衣物：再完整核對一次才接受（避免暫時錯誤清除全部本機資料）
+      if (!next.size && memory?.length) {
+        const again = await api<{ count: number; items?: [string, string][] }>("/api/sync/garments/manifest");
+        if (g !== gen) throw new Error("帳戶已切換");
+        next = new Map(again.items ?? []);
+      }
       const need = opts.full ? [...next.keys()] : [...next].filter(([id, fp]) => fps.get(id) !== fp).map(([id]) => id);
       const gone = [...fps.keys()].filter((id) => !next.has(id));
       if (!opts.full && memory) for (const g2 of memory) if (!next.has(g2.id) && !gone.includes(g2.id)) gone.push(g2.id);

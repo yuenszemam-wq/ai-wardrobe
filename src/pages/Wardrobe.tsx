@@ -7,7 +7,7 @@ import { BulkCutoutSheet } from "../components/BulkCutoutSheet";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, Garment, STATUS_LABEL } from "../api";
 import { IconClose, IconFilter, IconGrid, IconMore, IconSearch, IconSort } from "../components/icons";
-import { Button, Chips, Empty, GarmentTile, GRID_COLS, Link, Spinner, useColumns, toast } from "../components/ui";
+import { Button, Chips, Empty, GarmentTile, GRID_COLS, Link, Sheet, Spinner, useColumns, toast } from "../components/ui";
 import { navigate, usePath } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
 import { cachedList, capturePosition, loadFullList, readPosition, restorePosition, savePosition } from "../wardrobeList";
@@ -35,10 +35,47 @@ export default function Wardrobe() {
   const [revision, setRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [stale, setStale] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const tax = useTaxonomy();
   const [cols, setCols] = useColumns("aw:wardrobe-cols", 3);
   const listRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  // Phase 3.8B.1：頁首收合（門檻＋累積距離，避免反覆抖動）；佔位高度只在展開時量度，收合時不改變版面
+  // 返回深處的位置時直接以收合狀態開始，令恢復位置與離開時的頁首高度一致
+  const [collapsed, setCollapsed] = useState(() => (readPosition("wardrobe?" + params.toString())?.y ?? 0) > 96);
+  const collapsedRef = useRef(false);
+  collapsedRef.current = collapsed;
+  const [headH, setHeadH] = useState(128);
+  useLayoutEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const measure = () => { if (!collapsedRef.current) setHeadH(Math.round(el.getBoundingClientRect().height)); };
+    measure();
+    const ob = new ResizeObserver(measure);
+    ob.observe(el);
+    return () => ob.disconnect();
+  }, []);
+  useEffect(() => {
+    let last = window.scrollY, acc = 0, raf = 0;
+    const tick = () => {
+      raf = 0;
+      const y = window.scrollY, dy = y - last;
+      last = y;
+      if (y < 48) { acc = 0; setCollapsed(false); return; }
+      acc = Math.sign(dy) === Math.sign(acc) ? acc + dy : dy;
+      if (acc > 16 && y > 96) setCollapsed(true);
+      else if (acc < -48) setCollapsed(false);
+    };
+    const on = () => { if (!raf) raf = requestAnimationFrame(tick); };
+    window.addEventListener("scroll", on, { passive: true });
+    return () => { window.removeEventListener("scroll", on); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+  useEffect(() => {
+    const el = document.documentElement;
+    if (collapsed) el.dataset.headerCollapsed = "1"; else delete el.dataset.headerCollapsed;
+    if (collapsed) { setDisplayOpen(false); setMoreOpen(false); }
+  }, [collapsed]);
+  useEffect(() => () => { delete document.documentElement.dataset.headerCollapsed; }, []);
 
   const category = params.get("category") || "";
   const subcategory = params.get("subcategory") || "";
@@ -59,6 +96,10 @@ export default function Wardrobe() {
   const [all, setAll] = useState<Garment[] | null>(initial?.items ?? null);
   const savedPos = useRef(readPosition(posKey));
   const [shown, setShown] = useState(() => Math.max(BATCH, savedPos.current?.shown ?? 0));
+  const allRef = useRef<Garment[] | null>(all);
+  allRef.current = all;
+  const shownRef = useRef(0);
+  shownRef.current = shown;
   const [brands, setBrands] = useState<string[]>([]);
   useEffect(() => {
     // 品牌選項：已登入（本機衣櫃）時由本機資料推導，不另外讀取伺服器
@@ -91,12 +132,18 @@ export default function Wardrobe() {
     if (lastQuery.current !== queryKey) { lastQuery.current = queryKey; setSelected(new Set()); }
     loadFullList(serverQuery, undefined, { fresh: revision > 0 && refreshingRef.current }).then((items) => {
       if (run !== generation.current) return; // 快速切換篩選：不混入舊結果
-      setAll(items); setStale(false);
+      // 重新同步後清單有變動：以畫面最上方的衣物 ID 作為捲動錨點（而不是舊的 scrollY）
+      const prev = allRef.current;
+      const changed = !!prev && window.scrollY > 40 && (prev.length !== items.length || prev.some((g, i) => g.id !== items[i]?.id));
+      const anchor = changed ? capturePosition(listRef.current, prev!, shownRef.current, barRef.current?.getBoundingClientRect().bottom ?? 0) : null;
+      setAll(items); setStale(false); setLoadError(null);
+      if (anchor?.anchor) requestAnimationFrame(() => requestAnimationFrame(() => restorePosition(listRef.current, items, anchor, barRef.current?.getBoundingClientRect().bottom ?? 0)));
     }).catch((e) => {
       if (run !== generation.current) return;
       // 網絡失敗：保留已有清單，不顯示成零件
       const why = (e as Error)?.message ? `（${(e as Error).message}）` : "";
-      if (cached) setStale(true); else { setAll((cur) => cur ?? []); setStale(true); toast(`讀取失敗，請按重新整理再試${why}`, "err"); }
+      // 「尚未載入」「讀取失敗」「真正沒有衣服」是三種不同狀態：失敗且沒有任何已有資料時顯示錯誤及重試，不顯示成空衣櫃
+      if (cached || allRef.current) setStale(true); else { setLoadError(`讀取失敗${why}`); toast(`讀取失敗，請按重新整理再試${why}`, "err"); }
     }).finally(() => { if (run === generation.current) setRefreshing(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, revision]);
@@ -158,54 +205,51 @@ export default function Wardrobe() {
 
   return (
     <div ref={pull.ref}>
-      <div role="status" className="overflow-hidden text-center text-[12px] text-gold-soft" style={{ height: pull.distance }}>
-        {pull.distance > 0 && <span className="inline-block pt-3">{pull.distance >= 60 ? "放開即可刷新" : "向下拉以刷新"}</span>}
-      </div>
-      {/* 標題列（不固定）：我的衣櫃＋搜尋＋篩選＋更多 */}
-      <div className="flex min-h-11 items-center gap-1.5 pb-1 pt-3">
-        {searchOpen ? (
-          <div className="relative min-w-0 flex-1">
-            <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[var(--aw-placeholder)]" />
-            <input type="search" autoFocus className="field h-9 w-full rounded-full pl-9 pr-3" placeholder="搜尋名稱、品牌、圖案…" aria-label="搜尋衣物" value={q}
-              onChange={(e) => { const v = e.target.value; setQ(v); clearTimeout(debounce.current); debounce.current = window.setTimeout(() => setParam("q", v.trim()), 350); }} />
-          </div>
-        ) : <h1 className="min-w-0 flex-1 truncate font-serif text-[21px] font-bold tracking-[0.08em] text-gold-soft">我的衣櫃</h1>}
-        <button type="button" aria-label={searchOpen ? "關閉搜尋" : "搜尋"} aria-pressed={searchOpen} data-testid="wardrobe-search" onClick={() => { if (searchOpen && q) { setQ(""); setParam("q", ""); } setSearchOpen(!searchOpen); }} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[15px]">{searchOpen ? <IconClose /> : <IconSearch />}</button>
-        <button type="button" aria-label="篩選" aria-expanded={showFilters} data-testid="wardrobe-filter" onClick={() => setShowFilters((v) => !v)} className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-[15px] ${activeFilters || showFilters ? "chip-on" : "chip"}`}>
-          <IconFilter />{activeFilters > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-wine px-1 text-[9.5px] text-white">{activeFilters}</span>}
-        </button>
-        <div className="relative">
-          <button type="button" aria-label="更多" aria-expanded={moreOpen} data-testid="wardrobe-more" onClick={() => setMoreOpen(!moreOpen)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconMore /></button>
-          {moreOpen && (
-            <div role="menu" className="pop absolute right-0 top-11 z-40 w-44 overflow-hidden rounded-2xl text-[13px]" onClick={() => setMoreOpen(false)}>
-              <button type="button" role="menuitem" data-testid="wardrobe-select" className="block w-full px-4 py-2.5 text-left" onClick={() => { setSelecting((v) => !v); setSelected(new Set()); }}>{selecting ? "結束多選" : "批量修改"}</button>
-              <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left disabled:opacity-50" disabled={refreshing} onClick={refresh}>{refreshing ? "刷新中…" : "重新整理"}</button>
-              <Link to="/taxonomy" className="block px-4 py-2.5">管理分類</Link>
+      {/* Phase 3.8B.1：統一衣櫃頁首（固定定位＋固定高度佔位：收合／展開不會令清單跳位或重新載入圖片） */}
+      <div aria-hidden style={{ height: headH }} data-testid="wardrobe-head-spacer" />
+      <div ref={barRef} data-testid="wardrobe-toolbar" data-collapsed={collapsed ? "1" : "0"} className={`wardrobe-head fixed inset-x-0 z-20 mx-auto max-w-5xl px-4 ${collapsed ? "" : "lace-b"}`}
+        style={{ top: collapsed ? 0 : "var(--app-header-h, 0px)", paddingTop: collapsed ? "env(safe-area-inset-top)" : 0 }}>
+        <div className={`flex items-center gap-1.5 ${collapsed ? "h-9 pt-0.5" : "h-11 pt-1.5"}`}>
+          {searchOpen ? (
+            <div className="relative min-w-0 flex-1">
+              <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[var(--aw-placeholder)]" />
+              <input type="search" autoFocus className="field h-8 w-full rounded-full pl-9 pr-3 text-[16px]" placeholder="搜尋名稱、品牌、圖案…" aria-label="搜尋衣物" value={q}
+                onChange={(e) => { const v = e.target.value; setQ(v); clearTimeout(debounce.current); debounce.current = window.setTimeout(() => setParam("q", v.trim()), 350); }} />
             </div>
-          )}
+          ) : <h1 className={`min-w-0 flex-1 truncate font-serif font-bold tracking-[0.08em] text-gold-soft transition-[font-size] ${collapsed ? "text-[16px]" : "text-[20px]"}`} data-testid="wardrobe-title">我的衣櫃</h1>}
+          <button type="button" aria-label={searchOpen ? "關閉搜尋" : "搜尋"} aria-pressed={searchOpen} data-testid="wardrobe-search" onClick={() => { if (searchOpen && q) { setQ(""); setParam("q", ""); } setSearchOpen(!searchOpen); }} className="chip grid h-8 w-8 shrink-0 place-items-center rounded-full text-[14px]">{searchOpen ? <IconClose /> : <IconSearch />}</button>
+          <button type="button" aria-label="篩選" aria-expanded={showFilters} data-testid="wardrobe-filter" onClick={() => setShowFilters((v) => !v)} className={`relative grid h-8 w-8 shrink-0 place-items-center rounded-full text-[14px] ${activeFilters || showFilters ? "chip-on" : "chip"}`}>
+            <IconFilter />{activeFilters > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-wine px-1 text-[9.5px] text-white" data-status-color>{activeFilters}</span>}
+          </button>
+          <div className="relative">
+            <button type="button" aria-label="更多" aria-expanded={moreOpen} data-testid="wardrobe-more" onClick={() => { setMoreOpen(!moreOpen); setDisplayOpen(false); }} className="chip grid h-8 w-8 shrink-0 place-items-center rounded-full text-[16px]"><IconMore /></button>
+            {moreOpen && (
+              <div role="menu" className="pop absolute right-0 top-10 z-40 w-44 overflow-hidden rounded-2xl text-[13px]" onClick={() => setMoreOpen(false)}>
+                <button type="button" role="menuitem" data-testid="wardrobe-select" className="block w-full px-4 py-2.5 text-left" onClick={() => { setSelecting((v) => !v); setSelected(new Set()); }}>{selecting ? "結束多選" : "批量修改"}</button>
+                <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left disabled:opacity-50" disabled={refreshing} onClick={refresh}>{refreshing ? "刷新中…" : "重新整理"}</button>
+                <Link to="/taxonomy" className="block px-4 py-2.5">管理分類</Link>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* 緊湊固定工具列：主分類＋（子分類、顯示方式、排序、數量），約 86px */}
-      <div ref={barRef} data-testid="wardrobe-toolbar" className="lace-b sticky z-20 -mx-4 bg-head/95 px-4 pb-1.5 pt-1.5 backdrop-blur" style={{ top: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
-        <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4" data-testid="wardrobe-cats">
+        <div className="hscroll scrollbar-none -mx-4 mt-1 flex gap-1.5 overflow-x-auto px-4" data-testid="wardrobe-cats">
           {["", ...tax.categories.map((c) => c.name)].map((c) => (
-            <button key={c || "__all"} type="button" data-cat={c || "all"} aria-pressed={category === c} onClick={() => setParam("category", c)} className={`h-8 shrink-0 rounded-full px-3 text-[12.5px] ${category === c ? "chip-on" : "chip"}`}>{c || "全部"}</button>
+            <button key={c || "__all"} type="button" data-cat={c || "all"} aria-pressed={category === c} onClick={() => setParam("category", c)} className={`h-7 shrink-0 rounded-full px-3 text-[12.5px] ${category === c ? "chip-on" : "chip"}`}>{c || "全部"}</button>
           ))}
         </div>
-        <div className="mt-1.5 flex items-center gap-1.5">
-          {category ? (
-            <select aria-label="子分類" data-testid="wardrobe-sub" value={subcategory} onChange={(e) => setParam("subcategory", e.target.value)} className="chip h-8 min-w-0 max-w-[45%] flex-1 truncate rounded-full bg-transparent px-2.5 text-[12px] text-cream">
-              <option value="">全部{category}</option>
-              {subOptions.map((s) => <option key={s.name} value={s.name}>{s.name}（{s.n}）</option>)}
-            </select>
-          ) : <span className="min-w-0 flex-1" />}
-          <span className="ml-auto shrink-0 text-[12px] tabular-nums text-mauve" data-testid="wardrobe-count">{items ? `${category ? subcategory || category : "全部"} ${total} 件` : ""}{stale ? "（本機）" : ""}</span>
-          <button type="button" aria-label={view === "grid" ? "改為詳細模式" : "改為圖片模式"} data-testid="wardrobe-view" onClick={() => changeView(view === "grid" ? "detail" : "grid")} className="chip grid h-8 w-8 shrink-0 place-items-center rounded-full text-[14px]">{view === "grid" ? <IconGrid /> : <IconSort />}</button>
+        {category && subOptions.length > 0 && (
+          <div className="hscroll scrollbar-none -mx-4 mt-1 flex gap-1.5 overflow-x-auto px-4" data-testid="wardrobe-subs">
+            {[{ name: "", n: all?.length ?? 0 }, ...subOptions].map((sub) => (
+              <button key={sub.name || "__all"} type="button" data-sub={sub.name || "all"} aria-pressed={subcategory === sub.name} onClick={() => setParam("subcategory", sub.name)} className={`h-6 shrink-0 rounded-full px-2.5 text-[11.5px] ${subcategory === sub.name ? "chip-on" : "chip"}`}>{sub.name || "全部" + category}<span className="ml-1 opacity-70">{sub.n}</span></button>
+            ))}
+          </div>
+        )}
+        <div className="flex h-8 items-center gap-1.5 pb-1">
+          <span className="min-w-0 flex-1 truncate text-[11.5px] tabular-nums text-mauve" data-testid="wardrobe-count">{items ? `${category ? subcategory || category : "全部"} ${total} 件` : ""}{stale ? "（本機）" : ""}<span className="ml-1.5" data-testid="wardrobe-sort-label">· {SORT_LABEL[sort] ?? "排序"}</span></span>
           <div className="relative">
-            <button type="button" aria-label="顯示設定：每排數量及排序" aria-expanded={displayOpen} data-testid="wardrobe-display" onClick={() => setDisplayOpen(!displayOpen)} className={`flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12px] ${displayOpen ? "chip-on" : "chip"}`}><IconSort className="text-[13px]" />{SORT_LABEL[sort] ?? "排序"}</button>
+            <button type="button" aria-label="顯示設定：顯示方式、每排數量及排序" aria-expanded={displayOpen} data-testid="wardrobe-display" onClick={() => { setDisplayOpen(!displayOpen); setMoreOpen(false); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11.5px] ${displayOpen ? "chip-on" : "chip"}`}>{view === "grid" ? <IconGrid className="text-[12px]" /> : <IconSort className="text-[12px]" />}{view === "grid" ? `${cols} 欄` : "詳細"}</button>
             {displayOpen && (
-              <div data-testid="wardrobe-display-pop" className="pop absolute right-0 top-10 z-40 w-60 rounded-2xl p-3 text-[12.5px]">
+              <div data-testid="wardrobe-display-pop" className="pop absolute right-0 top-9 z-40 w-60 rounded-2xl p-3 text-[12.5px]">
                 <p className="mb-1 text-[11px] text-mauve">顯示方式</p>
                 <div className="grid grid-cols-2 gap-1">
                   {(["grid", "detail"] as const).map((v) => <button key={v} type="button" data-display-view={v} aria-pressed={view === v} onClick={() => changeView(v)} className={`h-8 rounded-full ${view === v ? "chip-on" : "chip"}`}>{v === "grid" ? "圖片" : "詳細"}</button>)}
@@ -225,19 +269,24 @@ export default function Wardrobe() {
           </div>
         </div>
       </div>
+      <div role="status" className="overflow-hidden text-center text-[12px] text-gold-soft" style={{ height: pull.distance }}>
+        {pull.distance > 0 && <span className="inline-block pt-3">{pull.distance >= 60 ? "放開即可刷新" : "向下拉以刷新"}</span>}
+      </div>
 
       {showFilters && (
-        <div className="paper mt-3 space-y-3 p-4" data-testid="wardrobe-filters">
-          <div><p className="mb-1 text-[13px] text-mauve">風格</p><Chips options={optionNames(tax, "style")} value={style} onChange={(v) => setParam("style", v)} /></div>
-          <div><p className="mb-1 text-[13px] text-mauve">顏色</p><AttributeChoices id="primary_color" options={optionNames(tax, "primary_color")} value={color ? [color] : []} onChange={(v) => setParam("color", v[0] || "")} /></div>
-          <div><p className="mb-1 text-[13px] text-mauve">季節</p><Chips options={optionNames(tax, "season")} value={season} onChange={(v) => setParam("season", v)} /></div>
-          <div><p className="mb-1 text-[13px] text-mauve">狀態</p><Chips options={["active", "review", "archived"] as const} value={status as never} onChange={(v) => setParam("status", v)} allLabel="未封存" labels={STATUS_LABEL} /></div>
-          <div><p className="mb-1 text-[13px] text-mauve">品牌</p><Chips options={["__none__", ...brands] as string[]} value={brand} onChange={(v) => setParam("brand", v)} labels={{ __none__: "未有品牌" }} /></div>
-          <div><p className="mb-1 text-[13px] text-mauve">價錢</p><Chips options={["1", "0"] as const} value={priced as never} onChange={(v) => setParam("priced", v)} labels={{ "1": "已填價錢", "0": "未填價錢" }} /></div>
-          <div><p className="mb-1 text-[13px] text-mauve">是否已辨認</p><Chips options={["1", "0"] as const} value={identified as never} onChange={(v) => setParam("identified", v)} labels={{ "1": "已辨認", "0": "未辨認" }} /></div>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={favorite} onChange={(e) => setParam("favorite", e.target.checked ? "1" : "")} className="h-5 w-5 accent-[var(--aw-check)]" />只看收藏</label>
-          <div className="flex gap-2"><Button variant="ghost" onClick={() => setShowFilters(false)}>完成</Button><Link to="/taxonomy" className="self-center text-[13px] text-amethyst-deep underline underline-offset-4">管理分類</Link></div>
-        </div>
+        <Sheet title="篩選" onClose={() => setShowFilters(false)}>
+          <div className="space-y-3" data-testid="wardrobe-filters">
+            <div><p className="mb-1 text-[13px] text-mauve">風格</p><Chips options={optionNames(tax, "style")} value={style} onChange={(v) => setParam("style", v)} /></div>
+            <div><p className="mb-1 text-[13px] text-mauve">顏色</p><AttributeChoices id="primary_color" options={optionNames(tax, "primary_color")} value={color ? [color] : []} onChange={(v) => setParam("color", v[0] || "")} /></div>
+            <div><p className="mb-1 text-[13px] text-mauve">季節</p><Chips options={optionNames(tax, "season")} value={season} onChange={(v) => setParam("season", v)} /></div>
+            <div><p className="mb-1 text-[13px] text-mauve">狀態</p><Chips options={["active", "review", "archived"] as const} value={status as never} onChange={(v) => setParam("status", v)} allLabel="未封存" labels={STATUS_LABEL} /></div>
+            <div><p className="mb-1 text-[13px] text-mauve">品牌</p><Chips options={["__none__", ...brands] as string[]} value={brand} onChange={(v) => setParam("brand", v)} labels={{ __none__: "未有品牌" }} /></div>
+            <div><p className="mb-1 text-[13px] text-mauve">價錢</p><Chips options={["1", "0"] as const} value={priced as never} onChange={(v) => setParam("priced", v)} labels={{ "1": "已填價錢", "0": "未填價錢" }} /></div>
+            <div><p className="mb-1 text-[13px] text-mauve">是否已辨認</p><Chips options={["1", "0"] as const} value={identified as never} onChange={(v) => setParam("identified", v)} labels={{ "1": "已辨認", "0": "未辨認" }} /></div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={favorite} onChange={(e) => setParam("favorite", e.target.checked ? "1" : "")} className="h-5 w-5 accent-[var(--aw-check)]" />只看收藏</label>
+            <div className="flex gap-2"><Button variant="ghost" onClick={() => setShowFilters(false)} data-testid="wardrobe-filters-done">完成</Button><Link to="/taxonomy" className="self-center text-[13px] text-amethyst-deep underline underline-offset-4">管理分類</Link></div>
+          </div>
+        </Sheet>
       )}
 
       {selecting && items && (
@@ -251,7 +300,13 @@ export default function Wardrobe() {
       )}
 
       <div className="mt-3" ref={listRef}>
-        {!items ? <Spinner /> : items.length === 0 ? (
+        {!items && loadError ? (
+          <div className="frame space-y-2 p-4 text-center text-[13px]" role="alert" data-testid="wardrobe-load-error">
+            <p>未能讀取衣櫃：{loadError}</p>
+            <p className="text-[11.5px] text-mauve">這不代表衣櫃是空的。已保存的衣物不受影響。</p>
+            <Button variant="ghost" onClick={() => { setLoadError(null); setRevision((v) => v + 1); }}>重試</Button>
+          </div>
+        ) : !items ? <Spinner /> : items.length === 0 ? (
           <Empty title="沒有符合的衣物">試試清除篩選，或到「匯入」新增衣物。</Empty>
         ) : (
           <>
