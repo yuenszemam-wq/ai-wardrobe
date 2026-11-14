@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { HomeLayout, WIDGETS, Widget, WidgetType, defaultHomeLayout, normalizeHomeLayout, widgetSpec } from "../../shared/homeLayout";
-import { saveHomeLayout } from "../homeLayoutStore";
-import { useTaxonomy } from "../taxonomy";
-import { IconChevronDown, IconChevronUp, IconEye, IconEyeOff, IconGrip, IconTrash } from "./icons";
+import { LayoutConflict, adoptServerLayout, baseOf, saveHomeLayout } from "../homeLayoutStore";
+import { IconChevronDown, IconChevronUp, IconEye, IconEyeOff, IconGrip } from "./icons";
+import { WidgetSettings } from "./WidgetSettings";
 import { SortableList } from "./Sortable";
 import { Button, toast } from "./ui";
 
@@ -16,7 +16,9 @@ export function HomeEditor({ layout, onDraft, onClose, inline }: { layout: HomeL
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
-  const tax = useTaxonomy();
+  // 開始編輯時凍結版本：期間另一部裝置保存時，不會靜默覆蓋
+  const [base, setBase] = useState(() => baseOf(normalizeHomeLayout(layout)));
+  const [conflict, setConflict] = useState<LayoutConflict | null>(null);
   useEffect(() => { onDraft?.(draft); }, [draft, onDraft]);
   const changed = useMemo(() => JSON.stringify(normalizeHomeLayout(layout).widgets) !== JSON.stringify(draft.widgets), [layout, draft]);
   const set = (widgets: Widget[]) => setDraft({ ...draft, widgets });
@@ -34,8 +36,8 @@ export function HomeEditor({ layout, onDraft, onClose, inline }: { layout: HomeL
   };
   async function save() {
     setBusy(true);
-    try { await saveHomeLayout(draft); toast("已保存主頁布局"); onDraft?.(null); onClose(); }
-    catch (e) { toast((e as Error).message, "err"); }
+    try { await saveHomeLayout(draft, base); toast("已保存主頁布局"); onDraft?.(null); onClose(); }
+    catch (e) { if (e instanceof LayoutConflict) setConflict(e); else toast((e as Error).message + "（草稿已保留）", "err"); }
     finally { setBusy(false); }
   }
   const cancel = () => { onDraft?.(null); onClose(); };
@@ -46,6 +48,15 @@ export function HomeEditor({ layout, onDraft, onClose, inline }: { layout: HomeL
         <button type="button" onClick={() => { setDraft(defaultHomeLayout()); setOpen(null); }} data-testid="home-reset" className="chip h-8 rounded-full px-3 text-[12px]">還原預設</button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+        {conflict && (
+          <div role="alert" data-testid="home-conflict" className="mb-2 rounded-2xl bg-wine/40 px-3 py-2 text-[12px] leading-snug">
+            <p>主頁布局已在另一部裝置更新（第 {conflict.server?.rev ?? 0} 版）。你的草稿仍然保留。</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <button type="button" data-testid="home-conflict-reload" onClick={() => { adoptServerLayout(conflict.server); setDraft(normalizeHomeLayout(conflict.server ?? defaultHomeLayout())); setBase(baseOf(conflict.server ?? defaultHomeLayout())); setConflict(null); }} className="chip h-8 rounded-full px-3">載入伺服器版本（放棄草稿）</button>
+              <button type="button" data-testid="home-conflict-overwrite" onClick={() => { setBase(baseOf(conflict.server ?? defaultHomeLayout())); setConflict(null); toast("再按「保存」即以你的草稿覆寫"); }} className="chip h-8 rounded-full px-3">以我的草稿覆寫</button>
+            </div>
+          </div>
+        )}
         <SortableList<Widget> items={draft.widgets} onReorder={(ids) => set(ids.map((id) => draft.widgets.find((w) => w.id === id)!))} className="space-y-1.5"
           render={(w, handle) => {
             const spec = widgetSpec(w.type)!;
@@ -63,24 +74,8 @@ export function HomeEditor({ layout, onDraft, onClose, inline }: { layout: HomeL
                   <button type="button" aria-label={w.visible ? "隱藏" : "顯示"} data-toggle={w.id} onClick={() => patch(w.id, { visible: !w.visible })} className="grid h-9 w-9 place-items-center text-[16px]">{w.visible ? <IconEye /> : <IconEyeOff />}</button>
                 </div>
                 {open === w.id && (
-                  <div className="space-y-2 border-t border-gold/20 px-3 py-2.5 text-[12.5px]" data-widget-settings={w.id}>
-                    <p className="text-[11px] text-mauve">{spec.hint}</p>
-                    {w.type !== "cover" && <label className="flex items-center gap-2"><input type="checkbox" checked={w.opts.title !== false} onChange={(e) => patch(w.id, { opts: { title: e.target.checked } })} />顯示標題</label>}
-                    <div className="flex items-center gap-2">大小
-                      {(["compact", "standard"] as const).map((sz) => <button key={sz} type="button" aria-pressed={w.size === sz} onClick={() => patch(w.id, { size: sz })} className={`h-7 rounded-full px-3 ${w.size === sz ? "chip-on" : "chip"}`}>{sz === "compact" ? "緊湊" : "標準"}</button>)}
-                    </div>
-                    {spec.count !== undefined && <label className="flex items-center gap-2">顯示數量<input type="number" min={1} max={spec.maxCount} value={w.opts.count ?? spec.count} data-opt="count" onChange={(e) => patch(w.id, { opts: { count: Math.max(1, Math.min(spec.maxCount ?? 24, Number(e.target.value) || 1)) } })} className="field h-8 w-16 rounded-full px-2 text-center text-[14px]" /></label>}
-                    {spec.sorts && <label className="flex items-center gap-2">{w.type === "analysis" ? "顯示內容" : "排序"}<select value={(w.type === "analysis" ? w.opts.mode : w.opts.sort) ?? spec.sorts[0][0]} data-opt="sort" onChange={(e) => patch(w.id, { opts: w.type === "analysis" ? { mode: e.target.value } : { sort: e.target.value } })} className="chip h-8 rounded-full bg-transparent px-2 text-[12.5px] text-cream">{spec.sorts.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>}
-                    {spec.category && <label className="flex items-center gap-2">分類篩選<select value={w.opts.category ?? ""} data-opt="category" onChange={(e) => patch(w.id, { opts: { category: e.target.value || undefined } })} className="chip h-8 rounded-full bg-transparent px-2 text-[12.5px] text-cream"><option value="">全部</option>{tax.categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}</select></label>}
-                    {spec.onlyWhen && <label className="flex items-center gap-2"><input type="checkbox" checked={!!w.opts.only_when_content} onChange={(e) => patch(w.id, { opts: { only_when_content: e.target.checked } })} />只在有內容時顯示</label>}
-                    {w.type === "cover" && <>
-                      <label className="flex items-center gap-2"><input type="checkbox" checked={w.opts.show_name !== false} onChange={(e) => patch(w.id, { opts: { show_name: e.target.checked } })} />顯示衣櫃名稱</label>
-                      <label className="flex items-center gap-2">名稱<input value={w.opts.name ?? ""} placeholder="我的衣櫃" maxLength={20} onChange={(e) => patch(w.id, { opts: { name: e.target.value } })} className="field h-8 flex-1 rounded-full px-3 text-[14px]" /></label>
-                      <label className="flex items-center gap-2"><input type="checkbox" checked={w.opts.show_stats !== false} onChange={(e) => patch(w.id, { opts: { show_stats: e.target.checked } })} />顯示統計資訊</label>
-                      <label className="flex items-center gap-2">文字陰影<input type="range" min={0} max={0.9} step={0.05} value={w.opts.shade ?? 0.55} onChange={(e) => patch(w.id, { opts: { shade: Number(e.target.value) } })} className="flex-1" /></label>
-                      <p className="text-[11px] text-mauve">背景圖片、比例、裁切位置、縮放及封面高度：在主頁按「背景」調整（原有背景保留）。</p>
-                    </>}
-                    {spec.multi && draft.widgets.filter((x) => x.type === w.type).length > 1 && <button type="button" onClick={() => set(draft.widgets.filter((x) => x.id !== w.id))} className="flex items-center gap-1 text-wine"><IconTrash />移除這個元件</button>}
+                  <div className="border-t border-gold/20 px-3 py-2.5">
+                    <WidgetSettings w={w} onPatch={(p) => patch(w.id, p)} onRemove={spec.multi && draft.widgets.filter((x) => x.type === w.type).length > 1 ? () => set(draft.widgets.filter((x) => x.id !== w.id)) : undefined} />
                   </div>
                 )}
               </div>

@@ -67,7 +67,11 @@ export default function Settings({ username, onLogout, section }: { username: st
           <button type="button" aria-label="返回設定" onClick={() => navigate("/settings")} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconChevronLeft /></button>
           <h1 className="font-serif text-[21px] font-bold tracking-[0.1em] text-gold-soft">{row?.label ?? "設定"}</h1>
         </div>
-        {section === "home" && <HomeEditor layout={layout} inline onClose={() => navigate("/settings")} />}
+        {section === "home" && <>
+          <button type="button" data-testid="home-edit-inplace" onClick={() => navigate("/?edit=home")} className="btn-jewel mb-3 h-11 w-full rounded-full text-[13.5px]">在主頁直接編輯（拖動真實元件）</button>
+          <p className="mb-2 text-[11.5px] leading-snug text-mauve">以下是列表排序（進階／無障礙後備），與主頁編輯使用同一份布局及設定。</p>
+          <HomeEditor layout={layout} inline onClose={() => navigate("/settings")} />
+        </>}
         {section === "theme" && <ThemeEditor />}
         {section === "background" && <BackgroundSection />}
         {section === "wardrobe" && <WardrobeDisplay />}
