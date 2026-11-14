@@ -607,7 +607,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     }
     prevMode.current.set(qt.key, wearMode(qt.opts));
     if (info.kind === "arm-piece") {
-      setItem(qt.key, rebone(qt, { ...qt.opts, follow: "none", bone: info.bone }));
+      setItem(qt.key, rebone(qt, { ...qt.opts, follow: "none", bone: info.bone ?? null }));
       toast(`「${nameOf(qt)}」已附接${/_r$/.test(info.bone ?? "") ? "右" : "左"}${/^wrist/.test(info.bone ?? "") ? "手腕" : "前臂"}，會跟隨手臂移動`);
       return;
     }
@@ -1335,6 +1335,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   if (!loaded || !tpls) return <div className="fixed inset-0 z-40 grid place-items-center bg-plum"><Spinner /></div>;
   const compact = panelDrag === null && panel === "mini";
   const float = "doll-tool";
+  /** 調整衣物位置時，右下角是縮放把手：快捷改到左邊（撤銷按鈕上方），避免與把手衝突 */
+  const quickLeft = !!sel && mode === "dress" && !hand;
+
   const pct = Math.round(camera.z * 100);
   return (
     <div className="doll-room fixed inset-0 z-40 flex flex-col bg-plum" data-testid="dressing-room" data-dirty={dirty ? "1" : "0"} data-worn={worn.map((w) => itemKey(w) + (w.hidden ? ":hidden" : "")).join(",")} data-resolved={resolved.length} data-pose={JSON.stringify(pose)} data-front={front.join(",")} data-hair={look.hair} data-head={look.head} data-hair-color={look.hair_color} data-model={bodyModel.id} data-model-rev={bodyModel.revision} data-selected={selected ?? ""} data-masked={worn.filter((w) => w.mask).length} data-parts={worn.filter((w) => w.parts).length} data-undo={hist.current.past.length} data-preview={preview ? "1" : "0"} data-gview={view} data-wear={sel ? wearMode(sel.opts) : ""} data-rig={(() => { try { return selItem && ready ? renderer.info(selItem).mode : ""; } catch { return ""; } })()} data-bind={sel?.opts.bind ? "1" : "0"} data-bone={sel?.opts.bone ?? ""} data-panel={panel}
@@ -1419,9 +1422,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           )}
           {/* Phase 3.8A.2：畫布右下角的小型浮動快捷（還原衣物姿勢、保存衣服設定、跟隨手臂、⋯ 更多）；不另外佔用一行 */}
           {!preview && !draft && (
-            <div data-stage-ui className="absolute bottom-2 right-2 z-20 flex flex-col items-end gap-1" data-testid="quick-bar" data-open="1">
+            <div data-stage-ui className={`absolute z-20 flex flex-col gap-1 ${quickLeft ? "bottom-12 left-2 items-start" : "bottom-2 right-2 items-end"}`} data-testid="quick-bar" data-open="1" data-side={quickLeft ? "left" : "right"}>
               {quickMore && (
-                <div role="menu" data-testid="quick-menu" className="pop absolute bottom-full right-0 mb-1 w-64 overflow-y-auto overscroll-contain rounded-2xl text-[12.5px]" style={{ maxHeight: Math.max(150, stageSize.h - 100) }}>
+                <div role="menu" data-testid="quick-menu" className={`pop absolute bottom-full ${quickLeft ? "left-0" : "right-0"} mb-1 w-64 overflow-y-auto overscroll-contain rounded-2xl text-[12.5px]`} style={{ maxHeight: Math.max(150, stageSize.h - 100) }}>
                   <div className="flex items-center gap-1.5 border-b border-gold/20 px-3 py-2 text-[11px]">
                     <label className="flex min-w-0 items-center gap-1 text-mauve">作用於
                       <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-7 max-w-[7.5rem] rounded-full bg-cream/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">

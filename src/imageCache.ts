@@ -26,9 +26,42 @@ export function setHdCacheLimit(bytes: number) { try { localStorage.setItem(HD_L
 
 /** 下拉重新整理：清除記憶體，之後讀取的縮圖會先核對版本，只更新有改動的（未改動的縮圖及高清圖保留） */
 export async function refreshImageCache() { clearImageMemory(); staleBefore = Date.now(); window.dispatchEvent(new Event("aw:refresh-images")); }
-/** 設定 →「修復圖片快取」：明確刪除本機縮圖及高清圖（只影響這部手機，不會刪除伺服器圖片或未同步修改） */
-export async function clearImageCaches() { clearImageMemory(); try { await caches.delete(CACHE); await caches.delete(HD_CACHE); } catch { /* ignore */ } window.dispatchEvent(new Event("aw:refresh-images")); }
-export function clearImageMemory() { epoch++; memory.clear(); flights.clear(); hdFlights.clear(); for (const p of pending.values()) p.reject(new Error("圖片快取已清除")); pending.clear(); }
+export interface ClearResult { thumbs: { count: number; bytes: number }; hd: { count: number; bytes: number }; keptPinned: number; errors: string[] }
+/**
+ * 設定 →「清除本機圖片快取」（3.8A.2 起改名，以前叫「修復圖片快取」但實際是清除）。
+ * 只刪除這部手機的縮圖及／或高清圖片快取；不會刪除 R2 原圖、D1 縮圖、衣物、穿搭、角色資料、未同步修改、未上傳圖片或離線佇列。
+ * 已指定保留（離線下載）的高清圖預設保留，需要明確選擇才一併刪除。如實回報實際清除的數量及錯誤。
+ */
+export async function clearImageCaches(opts: { thumbs?: boolean; hd?: boolean; includePinned?: boolean } = { thumbs: true, hd: true }): Promise<ClearResult> {
+  const out: ClearResult = { thumbs: { count: 0, bytes: 0 }, hd: { count: 0, bytes: 0 }, keptPinned: 0, errors: [] };
+  clearImageMemory();
+  if (typeof caches === "undefined") { out.errors.push("這個瀏覽器不支援 Cache Storage"); return out; }
+  if (opts.thumbs) {
+    try {
+      const c = await caches.open(CACHE), keys = await c.keys();
+      for (const k of keys) { const r = await c.match(k); out.thumbs.bytes += r ? (await r.blob()).size : 0; }
+      out.thumbs.count = keys.length;
+      if (!(await caches.delete(CACHE)) && keys.length) out.errors.push("縮圖快取未能刪除");
+    } catch (e) { out.errors.push("縮圖：" + ((e as Error).message || "刪除失敗")); }
+  }
+  if (opts.hd) {
+    try {
+      const c = await caches.open(HD_CACHE), keys = await c.keys();
+      for (const k of keys) {
+        const r = await c.match(k);
+        const pinned = r?.headers.get("x-aw-pinned") === "1";
+        if (pinned && !opts.includePinned) { out.keptPinned++; continue; }
+        const size = Number(r?.headers.get("x-aw-size")) || 0;
+        if (await c.delete(k)) { out.hd.count++; out.hd.bytes += size; } else out.errors.push("高清圖未能刪除：" + new URL(k.url).pathname);
+      }
+    } catch (e) { out.errors.push("高清圖：" + ((e as Error).message || "刪除失敗")); }
+  }
+  window.dispatchEvent(new Event("aw:refresh-images"));
+  return out;
+}
+/** 「檢查及更新圖片」：只核對版本，只重新下載有改動的圖片（不清除快取） */
+export const checkImageUpdates = refreshImageCache;
+export function clearImageMemory() { epoch++; memory.clear(); flights.clear(); hdFlights.clear(); hdSharedReset(); for (const p of pending.values()) p.reject(new Error("圖片快取已清除")); pending.clear(); }
 if (typeof window !== "undefined") { window.addEventListener("aw:unauthorized", clearImageMemory); }
 function remember(id: string, b: Blob) { memory.delete(id); memory.set(id, b); while (memory.size > 64) memory.delete(memory.keys().next().value!); }
 export function imageIdOf(src?: string) { return src?.match(/^\/api\/images\/(img_[a-z2-7]+)(?:\?|$)/)?.[1]; }
@@ -111,6 +144,7 @@ export function thumbnailBlob(id: string): Promise<Blob> {
 let hdActive = 0;
 const hdWaiters: Array<() => void> = [];
 const hdFlights = new Map<string, Promise<Blob>>();
+const hdSharedReset = () => { for (const f of hdShared.values()) f.controller.abort(); hdShared.clear(); };
 /** 已保存在手機的高清圖片（沒有＝undefined）。讀取時更新最後使用時間。 */
 export async function cachedHighResolution(src: string): Promise<Blob | undefined> {
   try {
@@ -134,39 +168,74 @@ async function trimHd() {
     for (const r of rows.filter((r) => !r.pinned).sort((a, b) => a.used - b.used)) { if (total <= limit) break; await c.delete(r.req); total -= r.size; }
   } catch { /* ignore */ }
 }
-async function putHd(src: string, blob: Blob, pinned = false) {
-  try { await (await caches.open(HD_CACHE)).put(src, new Response(blob, { headers: hdHeaders(blob, pinned) })); void trimHd(); } catch { /* 容量不足或私人瀏覽：只是不保存 */ }
+async function putHd(src: string, blob: Blob, pinned: boolean, runEpoch: number) {
+  // 清除快取或登出之後才完成的舊下載，不會重新寫入已清除的快取
+  if (runEpoch !== epoch) return;
+  try {
+    const c = await caches.open(HD_CACHE);
+    // 已指定保留的高清圖：更新時保留「保留」標記
+    const was = pinned || (await c.match(src))?.headers.get("x-aw-pinned") === "1";
+    if (runEpoch !== epoch) return;
+    await c.put(src, new Response(blob, { headers: hdHeaders(blob, was) }));
+    if (runEpoch !== epoch) { await c.delete(src); return; }
+    void trimHd();
+  } catch { /* 容量不足或私人瀏覽：只是不保存 */ }
 }
-/** 讀取高清圖片：先用手機已保存的版本；同一張圖片同時只下載一次；最多兩張同時下載；失敗會重試一次 */
+/** 把已在手機的高清圖標記為「保留」（離線下載）；不需要重新下載 */
+export async function pinHighResolution(src: string, pinned = true): Promise<boolean> {
+  try { const c = await caches.open(HD_CACHE), hit = await c.match(src); if (!hit) return false; const blob = await hit.blob(); await c.put(src, new Response(blob, { headers: hdHeaders(blob, pinned) })); return true; } catch { return false; }
+}
+interface HdFlight { promise: Promise<Blob>; controller: AbortController; users: number; pin: boolean }
+const hdShared = new Map<string, HdFlight>();
+/**
+ * 讀取高清圖片：先用手機已保存的版本；同一張圖片同時只下載一次；最多兩張同時下載；失敗會重試一次。
+ * 多個元件共用同一個下載：其中一個取消只影響它自己，全部使用者都取消才真正中止下載。
+ */
 export function highResolutionBlob(src: string, opts: { signal?: AbortSignal; pin?: boolean } = {}): Promise<Blob> {
-  const existing = hdFlights.get(src);
-  if (existing) return existing;
-  const p = (async () => {
-    const hit = await cachedHighResolution(src);
-    if (hit) return hit;
-    if (hdActive >= 2) await new Promise<void>((r) => hdWaiters.push(r));
-    else hdActive++;
-    try {
-      if (opts.signal?.aborted) throw new DOMException("已取消", "AbortError");
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 25000);
-          const stop = () => controller.abort(); opts.signal?.addEventListener("abort", stop);
+  let f = hdShared.get(src);
+  if (!f) {
+    const controller = new AbortController(), runEpoch = epoch;
+    const flight: HdFlight = { controller, users: 0, pin: !!opts.pin, promise: null as unknown as Promise<Blob> };
+    flight.promise = (async () => {
+      const hit = await cachedHighResolution(src);
+      if (hit) { if (flight.pin) void pinHighResolution(src); return hit; }
+      if (hdActive >= 2) await new Promise<void>((r) => hdWaiters.push(r));
+      else hdActive++;
+      try {
+        if (controller.signal.aborted) throw new DOMException("已取消", "AbortError");
+        for (let attempt = 0; attempt < 2; attempt++) {
           try {
-            const res = await fetch(src, { credentials: "same-origin", signal: controller.signal });
-            if (!res.ok) { const error = new Error(`高清圖片讀取失敗（${res.status}）`); if (res.status < 500) throw Object.assign(error, { permanent: true }); throw error; }
-            if (!res.headers.get("content-type")?.startsWith("image/")) throw Object.assign(new Error("圖片格式不正確"), { permanent: true });
-            const blob = await res.blob();
-            void putHd(src, blob, opts.pin);
-            return blob;
-          } finally { clearTimeout(timeout); opts.signal?.removeEventListener("abort", stop); }
-        } catch (e) { if (attempt || (e as { permanent?: boolean }).permanent || opts.signal?.aborted) throw e; await new Promise((r) => setTimeout(r, 450)); }
-      }
-      throw new Error("高清圖片讀取失敗");
-    } finally { const next = hdWaiters.shift(); if (next) next(); else hdActive--; }
-  })();
-  hdFlights.set(src, p); p.finally(() => hdFlights.delete(src)).catch(() => {});
-  return p;
+            const timeout = new AbortController(); const t = setTimeout(() => timeout.abort(), 25000);
+            const stop = () => timeout.abort(); controller.signal.addEventListener("abort", stop);
+            try {
+              const res = await fetch(src, { credentials: "same-origin", signal: timeout.signal });
+              if (!res.ok) { const error = new Error(`高清圖片讀取失敗（${res.status}）`); if (res.status < 500) throw Object.assign(error, { permanent: true }); throw error; }
+              if (!res.headers.get("content-type")?.startsWith("image/")) throw Object.assign(new Error("圖片格式不正確"), { permanent: true });
+              const blob = await res.blob();
+              void putHd(src, blob, flight.pin, runEpoch);
+              return blob;
+            } finally { clearTimeout(t); controller.signal.removeEventListener("abort", stop); }
+          } catch (e) { if (attempt || (e as { permanent?: boolean }).permanent || controller.signal.aborted) throw e; await new Promise((r) => setTimeout(r, 450)); }
+        }
+        throw new Error("高清圖片讀取失敗");
+      } finally { const next = hdWaiters.shift(); if (next) next(); else hdActive--; }
+    })();
+    hdShared.set(src, flight);
+    hdFlights.set(src, flight.promise);
+    flight.promise.finally(() => { if (hdShared.get(src) === flight) { hdShared.delete(src); hdFlights.delete(src); } }).catch(() => {});
+    f = flight;
+  }
+  const flight = f;
+  if (opts.pin) flight.pin = true;
+  flight.users++;
+  return new Promise<Blob>((resolve, reject) => {
+    let done = false;
+    const leave = () => { if (done) return; done = true; opts.signal?.removeEventListener("abort", onAbort); flight.users--; };
+    const onAbort = () => { leave(); if (flight.users <= 0) flight.controller.abort(); reject(new DOMException("已取消", "AbortError")); };
+    if (opts.signal?.aborted) { onAbort(); return; }
+    opts.signal?.addEventListener("abort", onAbort);
+    flight.promise.then((b) => { if (!done) { leave(); resolve(b); } }, (e) => { if (!done) { leave(); reject(e); } });
+  });
 }
 /** Export has no thumbnail fallback. Caller must fail the entire export if this throws. */
 export async function loadHighResolution(src: string): Promise<HTMLImageElement> {
