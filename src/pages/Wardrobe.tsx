@@ -92,10 +92,11 @@ export default function Wardrobe() {
     loadFullList(serverQuery, undefined, { fresh: revision > 0 && refreshingRef.current }).then((items) => {
       if (run !== generation.current) return; // 快速切換篩選：不混入舊結果
       setAll(items); setStale(false);
-    }).catch(() => {
+    }).catch((e) => {
       if (run !== generation.current) return;
       // 網絡失敗：保留已有清單，不顯示成零件
-      if (cached) setStale(true); else { setAll((cur) => cur ?? []); setStale(true); toast("讀取失敗，請按重新整理再試", "err"); }
+      const why = (e as Error)?.message ? `（${(e as Error).message}）` : "";
+      if (cached) setStale(true); else { setAll((cur) => cur ?? []); setStale(true); toast(`讀取失敗，請按重新整理再試${why}`, "err"); }
     }).finally(() => { if (run === generation.current) setRefreshing(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, revision]);

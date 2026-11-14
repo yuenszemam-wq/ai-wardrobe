@@ -99,7 +99,11 @@ export async function deleteLocalAccount(acc: string | null) {
 export function localGarments(): Garment[] | null { return memory; }
 export async function whenLocalReady(): Promise<void> {
   if (status.ready || !dbp) return;
-  await new Promise<void>((res) => { const off = onLocalStatus((s) => { if (s.ready) { off(); res(); } }); });
+  // 本機資料庫開啟逾時（iOS 偶爾卡住）：5 秒後放棄，呼叫者改用伺服器資料
+  await new Promise<void>((res, rej) => {
+    const timer = setTimeout(() => { off(); rej(new Error("本機資料庫開啟逾時")); }, 5000);
+    const off = onLocalStatus((s) => { if (s.ready) { clearTimeout(timer); off(); res(); } });
+  });
 }
 
 export interface SyncResult { changed: number; removed: number; total: number; same: boolean }
@@ -137,20 +141,29 @@ export function syncWardrobe(opts: { throttleMs?: number; full?: boolean } = {})
       const got = new Set(rows.map((r) => r.id));
       for (const id of need) if (!got.has(id)) { gone.push(id); next.delete(id); }
       if (g !== gen) throw new Error("帳戶已切換");
-      await tx(["garments", "meta"], "readwrite", (t) => {
-        const st = t.objectStore("garments");
-        if (opts.full) st.clear();
-        for (const r of rows) { const { _fp, ...row } = r; st.put(row); if (_fp) next.set(r.id, _fp); }
-        for (const id of gone) st.delete(id);
-        t.objectStore("meta").put({ lastSync: man.at, digest: man.digest, fps: [...next] }, "sync");
-      });
+      for (const r of rows) if (r._fp) next.set(r.id, r._fp);
+      let saveError: string | null = null;
+      try {
+        await tx(["garments", "meta"], "readwrite", (t) => {
+          const st = t.objectStore("garments");
+          if (opts.full) st.clear();
+          for (const r of rows) { const { _fp, ...row } = r; void _fp; st.put(row); }
+          for (const id of gone) st.delete(id);
+          t.objectStore("meta").put({ lastSync: man.at, digest: man.digest, fps: [...next] }, "sync");
+        });
+      } catch (e) {
+        // 手機本機資料庫寫入失敗（例如 iOS 儲存限制）：資料仍保留在記憶體，畫面照常顯示，下次再嘗試保存
+        saveError = "本機儲存失敗：" + ((e as Error)?.message || String(e));
+        console.warn("[wardrobe] IndexedDB 寫入失敗", e);
+      }
       if (g !== gen) throw new Error("帳戶已切換");
       fps = next;
       const byId = new Map((opts.full ? [] : memory ?? []).map((x) => [x.id, x]));
       for (const id of gone) byId.delete(id);
       for (const r of rows) { const { _fp, ...row } = r; void _fp; byId.set(r.id, row as Garment); }
       memory = [...byId.values()];
-      status = { ...status, count: memory.length, lastSync: man.at, digest: man.digest };
+      status = { ...status, count: memory.length, lastSync: man.at, digest: saveError ? null : man.digest, error: saveError };
+      if (saveError) fps = new Map();
       lastRun = Date.now();
       const res = { changed: rows.length, removed: new Set(gone).size, total: memory.length, same: false };
       if (typeof window !== "undefined" && (res.changed || res.removed)) window.dispatchEvent(new CustomEvent("aw:wardrobe-synced", { detail: res }));
