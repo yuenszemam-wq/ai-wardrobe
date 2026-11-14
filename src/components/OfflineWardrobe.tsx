@@ -1,5 +1,6 @@
 // Phase 3.8B：設定 →「離線衣櫃」。同步狀態、本機容量、離線下載（可暫停／取消）、容量及 R2 讀取估算。
 import { useEffect, useState } from "react";
+import { api } from "../api";
 import { clearImageCaches, imageCacheUsage } from "../imageCache";
 import { localDataBytes, localGarments, storageEstimate, syncWardrobe } from "../localWardrobe";
 import { JobState, Plan, cancelJob, currentJob, onJob, pauseJob, planAssets, planHd, planThumbs, retryFailed, startJob } from "../offlineDownloads";
@@ -15,7 +16,7 @@ export function OfflineWardrobe() {
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof imageCacheUsage>> | null>(null);
   const [est, setEst] = useState<Awaited<ReturnType<typeof storageEstimate>> | null>(null);
   const [job, setJob] = useState<JobState | null>(currentJob);
-  const [plan, setPlan] = useState<{ title: string; kind: "thumbs" | "hd" | "assets"; plan: Plan } | null>(null);
+  const [plan, setPlan] = useState<{ title: string; kind: "thumbs" | "hd" | "assets"; plan: Plan; guard?: string } | null>(null);
   const [cat, setCat] = useState("");
   const [busy, setBusy] = useState(false);
   const reload = () => { void imageCacheUsage().then(setUsage); void storageEstimate().then(setEst); };
@@ -24,7 +25,12 @@ export function OfflineWardrobe() {
   async function prepare(kind: "thumbs" | "hd" | "assets", title: string, filter?: (g: (typeof garments)[number]) => boolean) {
     if (!navigator.onLine) { toast("目前離線：連線後才可以下載", "err"); return; }
     setBusy(true);
-    try { setPlan({ title, kind, plan: kind === "thumbs" ? planThumbs() : kind === "assets" ? await planAssets() : await planHd(filter ?? (() => true)) }); }
+    try {
+      const p = kind === "thumbs" ? planThumbs() : kind === "assets" ? await planAssets() : await planHd(filter ?? (() => true));
+      // 非必要批量下載保護：接近免費額度軟上限時提示（不是官方硬上限）
+      const guard = kind === "thumbs" ? undefined : await api<{ background: { allowed: boolean; reason?: string } }>("/api/r2/usage").then((u) => (u.background.allowed ? undefined : u.background.reason)).catch(() => undefined);
+      setPlan({ title, kind, plan: p, guard });
+    }
     catch (e) { toast((e as Error).message, "err"); } finally { setBusy(false); }
   }
   async function sync(full: boolean) {
@@ -77,6 +83,7 @@ export function OfflineWardrobe() {
             <p>共 {plan.plan.items.length} 項；手機已有 {plan.plan.cached} 項，需要下載 <b>{plan.plan.toDownload}</b> 項。</p>
             <p>預計下載容量：約 <b data-testid="dl-bytes">{mb(plan.plan.estBytes)}</b></p>
             <p>Cloudflare R2 讀取：約 <b>{plan.plan.r2Reads}</b> 次 Class B 操作{plan.kind === "thumbs" ? "（縮圖保存在 D1，不經 R2）" : "（每月免費 1,000 萬次，帳戶共用；這只是估算）"}</p>
+            {plan.guard && <p role="alert" data-status-color data-testid="dl-guard" className="rounded-xl bg-danger/30 px-3 py-2 text-[12px] text-danger-ink">{plan.guard}。建議等下個月或確認用量後才批量下載。</p>}
             <p className="text-[11.5px] text-mauve">下載期間可以暫停或取消；已下載的項目會保留。</p>
             <div className="flex gap-2"><Button variant="ghost" onClick={() => setPlan(null)}>取消</Button><Button className="flex-1" data-testid="dl-start" disabled={!plan.plan.items.length} onClick={() => { startJob(plan.kind, plan.title, plan.plan.items); setPlan(null); }}>開始下載</Button></div>
           </div>

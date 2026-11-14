@@ -24,6 +24,7 @@ import Settings from "./pages/Settings";
 import TaxonomyManager from "./pages/TaxonomyManager";
 import Wardrobe from "./pages/Wardrobe";
 import { setLocalAccount } from "./localWardrobe";
+import { ApiError } from "./api";
 import { OfflineBanner } from "./components/OfflineBanner";
 
 const AUTH_KEY = "aw:last-auth";
@@ -59,9 +60,10 @@ export default function App() {
   const refresh = useCallback(() => {
     api<AuthState>("/api/auth/status")
       .then(a=>{setAuth(a);if(a.logged_in&&a.username){if(navigator.onLine)rememberAuth(a.username);void setLocalAccount(a.username);}if(!a.logged_in){void setLocalAccount(null);clearImageMemory();clearCachedLists();clearHomeLayoutCache();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});}})
-      .catch(() => {
+      .catch((e) => {
         const last = offlineAccount();
-        if (last && !navigator.onLine) { void setLocalAccount(last); setAuth({ setup_required: false, logged_in: true, username: last }); }
+        // 網絡失敗（不是伺服器回覆）：視為離線，使用最近成功登入的帳戶（唯讀本機資料）
+        if (last && (!navigator.onLine || !(e instanceof ApiError))) { void setLocalAccount(last); setAuth({ setup_required: false, logged_in: true, username: last }); }
         else setAuth({ setup_required: false, logged_in: false, username: null });
       });
   }, []);

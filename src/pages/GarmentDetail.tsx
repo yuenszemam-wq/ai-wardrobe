@@ -1,3 +1,4 @@
+import { localGarments } from "../localWardrobe";
 import { dropCachedGarment, patchCachedGarment } from "../wardrobeList";
 import { WardrobeImage } from "../components/WardrobeImage";
 import { AttributeChoices, BrandInput } from "../components/GarmentChoices";
@@ -6,7 +7,7 @@ import { CutoutSheet } from "../components/CutoutSheet";
 import { cutoutSource } from "../cutoutFlow";
 import { useEffect, useState } from "react";
 import { attributesFor, attributeValues, isColumnAttribute, Taxonomy } from "../../shared/taxonomy";
-import { AI_STATUS_LABEL, api, displayName, formatBytes, formatDate, Garment, GarmentImage, imageUrl, STATUS_LABEL, uploadImage } from "../api";
+import { AI_STATUS_LABEL, api, ApiError, displayName, formatBytes, formatDate, Garment, GarmentImage, imageUrl, STATUS_LABEL, uploadImage } from "../api";
 import { IconChevronLeft, IconClose, IconHeart, IconMerge, IconPencil } from "../components/icons";
 import { AiHandoffButton, Button, Field, inputCls, Link, money, PickChips, ProgressBar, Sheet, Spinner, toast } from "../components/ui";
 import { fillQueue } from "../fillQueue";
@@ -49,6 +50,15 @@ export default function GarmentDetail({ id }: { id: string }) {
       setG(data);
       return data;
     } catch (e) {
+      // Phase 3.8B：離線或網絡失敗時，使用本機衣櫃的資料（唯讀顯示；已下載的高清圖仍可查看）
+      const local = !(e instanceof ApiError) ? localGarments()?.find((x) => x.id === id) : undefined;
+      if (local) {
+        const pid = local.primary_image_id;
+        const images: GarmentImage[] = pid ? [{ id: pid, image_type: (local.transparent_image_id === pid ? "processed" : "original") as GarmentImage["image_type"], mime_type: "image/png", width: 0, height: 0, file_size: 0, has_alpha: local.transparent_image_id === pid, is_primary: true, derived_from: null, r2_key: "", url: `/api/images/${pid}`, created_at: local.created_at }] : [];
+        const data = { ...local, images } as Garment;
+        setG(data); setErr("");
+        return data;
+      }
       setErr((e as Error).message);
       return null;
     }

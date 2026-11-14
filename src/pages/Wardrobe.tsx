@@ -11,7 +11,7 @@ import { Button, Chips, Empty, GarmentTile, GRID_COLS, Link, Spinner, useColumns
 import { navigate, usePath } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
 import { cachedList, capturePosition, loadFullList, readPosition, restorePosition, savePosition } from "../wardrobeList";
-import { localGarments } from "../localWardrobe";
+import { localAccount, localGarments } from "../localWardrobe";
 
 /** 每批顯示數量：接近底部時自動顯示下一批（不需要按「載入更多」） */
 const BATCH = 48;
@@ -61,9 +61,8 @@ export default function Wardrobe() {
   const [shown, setShown] = useState(() => Math.max(BATCH, savedPos.current?.shown ?? 0));
   const [brands, setBrands] = useState<string[]>([]);
   useEffect(() => {
-    // 品牌選項：由本機衣櫃推導（不另外讀取伺服器；未有本機資料時才讀取）
-    const local = localGarments();
-    if (local) { setBrands([...new Set(local.map((g) => g.brand).filter((b): b is string => Boolean(b)))].sort()); return; }
+    // 品牌選項：已登入（本機衣櫃）時由本機資料推導，不另外讀取伺服器
+    if (localAccount()) return;
     api<{ garments: Garment[] }>("/api/garments?limit=200&status=all")
       .then((r) => setBrands([...new Set(r.garments.map((g) => g.brand).filter((b): b is string => Boolean(b)))].sort()))
       .catch(() => undefined);
@@ -111,6 +110,7 @@ export default function Wardrobe() {
     await refreshImageCache();
     setRevision((v) => v + 1);
   }, [refreshing]);
+  useEffect(() => { if (localAccount() && all) setBrands([...new Set((localGarments() ?? all).map((g) => g.brand).filter((b): b is string => Boolean(b)))].sort()); }, [all]);
   const pull = usePullRefresh(refresh, refreshing || bulkOpen || all === null);
 
   const subOptions = useMemo(() => {
