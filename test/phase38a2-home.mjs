@@ -69,7 +69,10 @@ try {
   await page.click('[data-add="overview"]');
   await page.click('[data-gallery-display="single"]');
   await page.click('[data-testid="gallery-detail"] details summary');
+  await page.waitForFunction(() => { const d = document.querySelector('[data-testid="gallery-detail"]'); return d?.dataset.display === "single" && d?.dataset.size === "small"; });
   for (const k of ["total", "ai_todo", "ai_review", "ai_done"]) await page.click(`[data-testid="gallery-detail"] [data-testid="overview-items"] [data-item="${k}"] input`);
+  await page.waitForTimeout(400);
+  check("加入前仍然是單一數字＋小型", (await page.getAttribute('[data-testid="gallery-detail"]', "data-display")) === "single" && (await page.getAttribute('[data-testid="gallery-detail"]', "data-size")) === "small");
   await page.click('[data-testid="gallery-add"]');
   await page.waitForFunction(() => document.querySelectorAll('[data-widget^="overview"]').length === 3);
   const o3 = (await page.locator("[data-widget]").evaluateAll((els) => els.map((e) => e.dataset.widget))).find((x) => x.startsWith("overview_") && x !== o2);
