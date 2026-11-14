@@ -42,11 +42,12 @@ try {
   await page.selectOption('[data-widget-settings="recent"] [data-opt="category"]', "半身裙");
   await page.waitForTimeout(200);
   await page.click('[role="dialog"] [aria-label="關閉"]');
-  const recentN = await page.locator('[data-testid="w-recent"] .shrink-0').count();
+  const recentN = await page.locator('[data-testid="w-recent"] a[href^="/g/"]').count();
   check("元件獨立設定：數量及分類篩選", recentN === 3, recentN);
   // 新增一個「收藏衣物」，並設定獨立排序
   await page.click('[data-testid="home-add"]');
   await page.click('[data-add="favorites"]');
+  await page.click('[data-testid="gallery-add"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="home"]').dataset.layout.includes("favorites")).catch(() => undefined);
   check("新增元件", (await layoutOf()).split(",").includes("favorites"), await layoutOf());
   await shot("02-editor");
@@ -54,7 +55,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-testid="home-editor"]'));
   const row = await env.DB.prepare("SELECT value FROM app_settings WHERE key='home_layout'").first();
   const saved = JSON.parse(row.value);
-  check("保存到伺服器（版本化 home_layout）", saved.v === 1 && saved.widgets.find((w) => w.type === "recent").opts.count === 3 && saved.widgets.find((w) => w.type === "quick").visible === false && !!saved.updated_at, saved.widgets.slice(0, 3));
+  check("保存到伺服器（版本化 home_layout）", saved.v === 2 && saved.widgets.find((w) => w.type === "recent").opts.count === 3 && saved.widgets.find((w) => w.type === "quick").visible === false && !!saved.updated_at, saved.widgets.slice(0, 3));
   // 重新開啟：伺服器回應很慢時，仍然直接顯示本機布局（不先顯示預設）
   await page.route("**/api/settings", async (r) => { await new Promise((res) => setTimeout(res, 2500)); await r.continue().catch(() => undefined); });
   await page.goto(A.base + "/");

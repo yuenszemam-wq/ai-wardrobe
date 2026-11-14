@@ -24,10 +24,10 @@ try {
   check("不再打開佔據畫面的大型名稱列表", (await page.locator('[aria-label="主頁佈局編輯器"]').count()) === 0);
   check("元件留在原位並顯示真實內容（最近加入衣物縮圖）", (await page.locator('[data-widget="recent"] [data-testid="w-recent"] img, [data-widget="recent"] [data-testid="w-recent"] a').count()) > 0);
   check("每個元件有拖動把手、設定、隱藏、上下移", (await page.locator('[data-widget="value"] [data-drag-handle]').count()) === 1 && (await page.locator('[data-widget="value"] [data-settings]').count()) === 1 && (await page.locator('[data-widget="value"] [data-toggle]').count()) === 1 && (await page.locator('[data-widget="value"] [data-move="up"]').count()) === 1);
-  check("底部緊湊工具列：新增元件｜取消｜完成", (await page.textContent('[data-testid="home-edit-bar"]')).replace(/\s/g, "").includes("新增元件取消完成"));
+  check("底部緊湊工具列：新增元件｜取消｜完成", (await page.textContent('[data-testid="home-edit-bar"]')).replace(/\s/g, "").includes("新增小工具取消完成"));
   // 點擊元件內容不會進入衣物詳情
   await page.locator('[data-widget="recent"]').scrollIntoViewIfNeeded();
-  { const b = await page.locator('[data-widget="recent"] [data-testid="w-recent"]').boundingBox(); await page.mouse.click(b.x + 50, b.y + b.height - 30); }
+  { const b = await page.locator('[data-widget="recent"] [data-testid="w-recent"]').boundingBox(); await page.mouse.click(b.x + 50, Math.min(b.y + b.height - 30, b.y + 60)); }
   await page.waitForTimeout(300);
   check("編輯時點擊元件不會誤觸連結", new URL(page.url()).pathname === "/");
   await shot("01-edit-mode");
@@ -43,9 +43,11 @@ try {
   await page.mouse.move(hx, hy);
   await page.mouse.down();
   for (let i = 1; i <= 10; i++) await page.mouse.move(hx, hy + (dy * i) / 10);
-  check("拖動中：元件跟隨手指並浮起", (await page.getAttribute('[data-testid="home-editor"]', "data-dragging")) === "value" && /translateY/.test(await page.locator('[data-widget="value"]').evaluate((e) => e.style.transform)));
-  check("拖動中：其他元件即時讓位", /translateY\(-/.test(await page.locator('[data-widget="quick"]').evaluate((e) => e.style.transform)));
-  check("拖動中：顯示插入位置", await page.locator('[data-testid="home-insert-line"]').isVisible());
+  check("拖動中：元件跟隨手指並浮起", (await page.getAttribute('[data-testid="home-editor"]', "data-dragging")) === "value" && /translate\(/.test(await page.locator('[data-widget="value"]').evaluate((e) => e.style.transform)));
+  await page.waitForTimeout(150);
+  const domOrder = await page.locator("[data-widget]").evaluateAll((els) => els.map((e) => [e.dataset.widget, Number(getComputedStyle(e).order)]).sort((a, b) => a[1] - b[1]).map((x) => x[0]));
+  check("拖動中：其他元件即時讓位（快捷操作移到總價之前）", domOrder.indexOf("quick") < domOrder.indexOf("value"), domOrder);
+  check("拖動中：顯示放置位置", await page.locator('[data-testid="home-insert-line"]').isVisible());
   check("拖動期間主頁次序未改變（放手才更新）", (await layoutOf()) === l0);
   await shot("02-dragging");
   await page.mouse.up();
@@ -105,10 +107,12 @@ try {
   await page.click('[data-testid="home-add"]');
   check("元件庫：已隱藏的元件可重新加入", (await page.textContent('[data-add="value"]')).includes("重新加入"));
   await page.click('[data-add="value"]');
+  await page.click('[data-testid="gallery-readd"]');
   await waitLayout(() => document.querySelector('[data-testid="home"]').dataset.layout.split(",").includes("value"));
   check("重新加入", (await layoutOf()).split(",").includes("value"));
   await page.click('[data-testid="home-add"]');
   await page.click('[data-add="recent"]');
+  await page.click('[data-testid="gallery-add"]');
   const ids = await page.locator("[data-widget]").evaluateAll((els) => els.map((e) => e.dataset.widget));
   check("同類多個元件：各自獨立 ID", ids.includes("recent") && ids.includes("recent_2"), ids);
   await shot("03-settings");
