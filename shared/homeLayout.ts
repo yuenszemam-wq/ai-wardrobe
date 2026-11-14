@@ -42,8 +42,7 @@ export interface WidgetOpts {
   align?: "left" | "center";
   /** 穿搭元件：只顯示衣服配搭／角色換裝 */
   look_kind?: "all" | "outfit" | "look";
-  /** 衣物元件：顯示名稱、品牌、分類 */
-  show_name?: boolean;
+  /** 衣物元件：顯示名稱（與封面共用 show_name）、品牌、分類 */
   show_brand?: boolean;
   show_category?: boolean;
   /** 分析：顯示圖例 */
@@ -212,7 +211,7 @@ export function normalizeHomeLayout(v: unknown): HomeLayout {
  * 單一元件的大小、展示方式及欄數。舊版（v1）：compact／standard 都是全寬，升級為中型／大型全寬，
  * 展示方式按舊設定推斷（例如概覽 compact＝橫向數字列、分析 chart＝圓環／長條），外觀保持不變。
  */
-export function normalizeWidget(spec: WidgetSpec, raw: Partial<Widget> & { size?: string }, id: string): Widget {
+export function normalizeWidget(spec: WidgetSpec, raw: Omit<Partial<Widget>, "size"> & { size?: string }, id: string): Widget {
   const opts = normalizeOpts(spec, raw.opts);
   const list = DISPLAYS[spec.type];
   const legacy = raw.size === "compact" || raw.size === "standard";

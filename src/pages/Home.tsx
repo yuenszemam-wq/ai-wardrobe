@@ -12,6 +12,7 @@ import { HomeLayout, OVERVIEW_DEFAULT, QUICK_DEFAULT, Widget, WidgetType } from 
 import { useHomeLayoutState } from "../homeLayoutStore";
 import { HomeEditSurface } from "../components/HomeEditSurface";
 import { loadFullList } from "../wardrobeList";
+import { cachedApi, deriveStats, localGarments } from "../localWardrobe";
 
 interface Stats {
   total: number;
@@ -68,10 +69,11 @@ export default function Home() {
     loaded.current.add(src);
     setErrors((e) => { if (!e[src]) return e; const n = { ...e }; delete n[src]; return n; });
     const fail = (e: unknown) => setErrors((x) => ({ ...x, [src]: (e as Error).message || "讀取失敗" }));
-    if (src === "stats") api<Stats>("/api/stats").then((v) => { memo.stats = v; setS(v); }).catch(fail);
-    else if (src === "analysis") api<AnalysisData>("/api/analysis").then((v) => { memo.analysis = v; setAn(v); }).catch(fail);
+    // Phase 3.8B：讀取失敗（離線）時使用本機副本；統計可由本機衣櫃推導，不會整頁失敗
+    if (src === "stats") cachedApi<Stats>("/api/stats").then((r) => { memo.stats = r.data; setS(r.data); }).catch((e) => { const local = localGarments(); if (local) { const v = deriveStats(local) as unknown as Stats; memo.stats = v; setS(v); } else fail(e); });
+    else if (src === "analysis") cachedApi<AnalysisData>("/api/analysis").then((r) => { memo.analysis = r.data; setAn(r.data); }).catch(fail);
     else if (src === "garments") loadFullList(new URLSearchParams()).then((v) => { memo.garments = v; setGarments(v); }).catch(fail);
-    else Promise.all([api<{ outfits: OutfitSummary[] }>("/api/outfits"), api<{ looks: LookSummary[] }>("/api/doll/looks")]).then(([o, l]) => {
+    else Promise.all([cachedApi<{ outfits: OutfitSummary[] }>("/api/outfits").then((r) => r.data), cachedApi<{ looks: LookSummary[] }>("/api/doll/looks").then((r) => r.data)]).then(([o, l]) => {
       const v = [
         ...o.outfits.map((x): LookEntry => ({ kind: "outfit", id: x.id, name: x.name, is_favorite: x.is_favorite, updated_at: x.updated_at ?? x.created_at ?? "", created_at: x.created_at ?? "", outfit: x })),
         ...l.looks.map((x): LookEntry => ({ kind: "look", id: x.id, name: x.name, is_favorite: x.is_favorite, updated_at: x.updated_at, created_at: x.created_at, look: x })),
@@ -82,6 +84,8 @@ export default function Home() {
   // 只讀取目前需要而未讀取的資料（加入新元件時才讀取）
   useEffect(() => { if (!ready) return; for (const src of needs) if (!loaded.current.has(src)) load(src); }, [needKey, load, ready]); // eslint-disable-line react-hooks/exhaustive-deps
   const reloadAll = useCallback(() => { for (const src of loaded.current) load(src); }, [load]);
+  // 背景同步有改動：只重新讀取衣物及統計（本機資料，不重新下載完整衣櫃）
+  useEffect(() => { const on = () => { for (const src of ["garments", "stats"] as Source[]) if (loaded.current.has(src)) load(src); }; window.addEventListener("aw:wardrobe-synced", on); return () => window.removeEventListener("aw:wardrobe-synced", on); }, [load]);
   const need = useCallback((t: WidgetType) => setExtra((x) => { const add = (NEEDS[t] ?? []).filter((src) => !x.includes(src)); return add.length ? [...x, ...add] : x; }), []);
   useEffect(() => {
     if (location.hash === "#todo" || new URLSearchParams(location.search).get("tab")) setTimeout(() => document.getElementById("todo")?.scrollIntoView({ behavior: "smooth" }), 300);

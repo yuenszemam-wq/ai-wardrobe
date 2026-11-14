@@ -23,6 +23,15 @@ import PublicUpload from "./pages/PublicUpload";
 import Settings from "./pages/Settings";
 import TaxonomyManager from "./pages/TaxonomyManager";
 import Wardrobe from "./pages/Wardrobe";
+import { setLocalAccount } from "./localWardrobe";
+import { OfflineBanner } from "./components/OfflineBanner";
+
+const AUTH_KEY = "aw:last-auth";
+const OFFLINE_DAYS = 30;
+function rememberAuth(username: string) { try { localStorage.setItem(AUTH_KEY, JSON.stringify({ username, at: Date.now() })); } catch { /* 私人瀏覽 */ } }
+function forgetAuth() { try { localStorage.removeItem(AUTH_KEY); } catch { /* ignore */ } }
+/** 可以離線唯讀使用的帳戶（最近 30 日內曾經成功登入） */
+function offlineAccount(): string | null { try { const v = JSON.parse(localStorage.getItem(AUTH_KEY) || "null") as { username: string; at: number } | null; return v && Date.now() - v.at < OFFLINE_DAYS * 864e5 ? v.username : null; } catch { return null; } }
 
 interface AuthState {
   setup_required: boolean;
@@ -40,15 +49,26 @@ export default function App() {
   // 登入後讀取設定一次：介面主題及主頁布局若在另一部裝置更新，套用較新的版本
   useEffect(()=>{if(auth?.logged_in)api<AppSettings>("/api/settings").then(setSettingsCache).catch(()=>undefined);},[auth?.logged_in]);
 
+  /**
+   * 登入狀態（Phase 3.8B 離線安全策略）：
+   * - 伺服器確認已登入：記錄帳戶及確認時間，開啟該帳戶的本機衣櫃。
+   * - 伺服器回覆未登入／登入過期：鎖定本機資料（不讀取），保留以便重新登入後不用重新下載。
+   * - 沒有網絡：最近 30 日內曾在這部手機成功登入的帳戶，可以離線唯讀查看已同步的資料；超過期限需要連線重新登入。
+   * - 明確登出：刪除該帳戶的本機資料庫及圖片快取（見設定 → 帳戶）。
+   */
   const refresh = useCallback(() => {
     api<AuthState>("/api/auth/status")
-      .then(a=>{setAuth(a);if(!a.logged_in){clearImageMemory();clearCachedLists();clearHomeLayoutCache();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});}})
-      .catch(() => setAuth({ setup_required: false, logged_in: false, username: null }));
+      .then(a=>{setAuth(a);if(a.logged_in&&a.username){if(navigator.onLine)rememberAuth(a.username);void setLocalAccount(a.username);}if(!a.logged_in){void setLocalAccount(null);clearImageMemory();clearCachedLists();clearHomeLayoutCache();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});}})
+      .catch(() => {
+        const last = offlineAccount();
+        if (last && !navigator.onLine) { void setLocalAccount(last); setAuth({ setup_required: false, logged_in: true, username: last }); }
+        else setAuth({ setup_required: false, logged_in: false, username: null });
+      });
   }, []);
 
   useEffect(() => {
     refresh();
-    const on = () => {clearImageMemory();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});setAuth((a) => (a ? { ...a, logged_in: false } : a));};
+    const on = () => {void setLocalAccount(null);forgetAuth();clearImageMemory();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});setAuth((a) => (a ? { ...a, logged_in: false } : a));};
     window.addEventListener("aw:unauthorized", on);
     return () => window.removeEventListener("aw:unauthorized", on);
   }, [refresh]);
@@ -109,7 +129,7 @@ export default function App() {
           )}
         </div>
       </header>
-      <main className="px-4 pb-32 pt-2">{offline&&<p role="status" className="mb-2 rounded bg-head p-2 text-xs text-gold-soft">離線瀏覽：顯示已快取的資料和縮圖，連線後才能儲存或載入高清圖。</p>}{page}</main>
+      <main className="px-4 pb-32 pt-2">{offline&&<OfflineBanner />}{page}</main>
       <TabBar path={path} />
       <Toast />
     </div>
