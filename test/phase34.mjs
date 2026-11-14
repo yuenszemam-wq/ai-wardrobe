@@ -136,6 +136,7 @@ try {
 
   console.log("衣服設定工作室");
   await page.goto(R.base + "/outfits");
+  await page.waitForSelector('[data-testid="entry-setup"]', { timeout: 8000 }).catch(() => undefined);
   check("穿搭工作室有三個入口", (await page.locator('[data-testid="entry-setup"]').count()) === 1);
   await page.goto(R.base + "/dressing/setup");
   await page.waitForSelector("[data-setup-garment]");

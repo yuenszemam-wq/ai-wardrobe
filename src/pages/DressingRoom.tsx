@@ -544,6 +544,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   // ───── Phase 3.8A.1 快捷工具列：還原姿勢、跟隨模式（與「骨架」分頁使用同一份設定） ─────
   const [quickScope, setQuickScope] = useState<QuickScope>("item");
   const [quickMore, setQuickMore] = useState(false);
+  // 矮螢幕（例如 iPhone SE）：範圍選擇器併入同一行，保留畫布空間
+  const [shortScreen, setShortScreen] = useState(() => window.innerHeight < 600);
+  useEffect(() => { const on = () => setShortScreen(window.innerHeight < 600); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
   const [quickOpen, setQuickOpen] = useState(() => { try { return localStorage.getItem("aw:quickbar") !== "0"; } catch { return true; } });
   const setQuickOpenSaved = (v: boolean) => { setQuickOpen(v); try { localStorage.setItem("aw:quickbar", v ? "1" : "0"); } catch { /* 私密瀏覽 */ } };
   /** 這件衣物（或套裝部件）未經造型調整時的跟隨模式 */
@@ -1370,7 +1373,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       {/* ───── 快捷工具列（Phase 3.8A.1）：放在畫布與面板之間，不遮住人物 ───── */}
       {!preview && !draft && (
         <div className="relative shrink-0 border-t border-gold/25 bg-ink/85 px-2 pb-1 pt-0.5" data-testid="quick-bar" data-open={quickOpen ? "1" : "0"}>
-          <div className="flex h-6 items-center gap-1.5 text-[11px]">
+          <div className={`flex h-6 items-center gap-1.5 text-[11px] ${shortScreen && quickOpen ? "hidden" : ""}`}>
             <label className="flex min-w-0 items-center gap-1 text-mauve">作用於
               <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-6 max-w-[7.5rem] rounded-full bg-white/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
                 {(["item", "set", "all"] as QuickScope[]).map((s) => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
@@ -1382,14 +1385,19 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
             <button type="button" aria-label={quickOpen ? "收起快捷工具" : "展開快捷工具"} aria-expanded={quickOpen} data-testid="quick-collapse" onClick={() => { setQuickOpenSaved(!quickOpen); setQuickMore(false); }} className="grid h-6 w-9 shrink-0 place-items-center rounded-full text-mauve">{quickOpen ? "▾" : "▴"}</button>
           </div>
           {quickOpen && (
-            <div className="mt-0.5 grid grid-cols-5 gap-1" role="toolbar" aria-label="快捷工具">
-              <button type="button" data-quick="pose-reset" disabled={!Object.keys(pose).length && !front.length} onClick={quickResetPose} title={`還原${bodyModel.name ?? "目前身體"}的預設站姿；衣物設定保留`} className="chip flex h-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] disabled:opacity-40"><IconRotate className="text-[16px]" />還原姿勢</button>
+            <div className={`mt-0.5 grid gap-1 ${shortScreen ? "grid-cols-6" : "grid-cols-5"}`} role="toolbar" aria-label="快捷工具">
+              {shortScreen && (
+                <select aria-label="快捷操作的作用範圍" data-testid="quick-scope-short" title={quickState ? `${quickState === "mixed" ? "混合設定" : MODE_LABEL[quickState]} · ${quickList.length} ${unitOf(quickList)}` : "未選衣物"} value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-10 min-w-0 rounded-xl bg-white/10 px-1 text-[10.5px] text-cream ring-1 ring-gold/40">
+                  {(["item", "set", "all"] as QuickScope[]).map((sc) => <option key={sc} value={sc}>{SCOPE_LABEL[sc]}</option>)}
+                </select>
+              )}
+              <button type="button" data-quick="pose-reset" disabled={!Object.keys(pose).length && !front.length} onClick={quickResetPose} title="還原目前身體模型的預設站姿；衣物設定保留" className={`chip flex ${shortScreen ? "h-10" : "h-11"} flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] disabled:opacity-40`}><IconRotate className="text-[16px]" />還原姿勢</button>
               {([["fixed", "固定原圖", IconLock], ["body", "跟隨身體", IconPerson], ["auto", "跟隨手臂", IconArm]] as const).map(([m, label, Icon]) => {
                 const can = m !== "auto" || scopeTargets(resolved, quickScope, sel, "auto").length > 0;
                 const on = quickState === m;
-                return <button key={m} type="button" data-quick-mode={m} aria-pressed={on} disabled={!quickList.length || !can} onClick={() => quickApply(m)} className={`flex h-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] disabled:opacity-35 ${on ? "chip-on" : "chip"}`}><Icon className="text-[16px]" />{label}</button>;
+                return <button key={m} type="button" data-quick-mode={m} aria-pressed={on} disabled={!quickList.length || !can} onClick={() => quickApply(m)} className={`flex ${shortScreen ? "h-10" : "h-11"} flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] disabled:opacity-35 ${on ? "chip-on" : "chip"}`}><Icon className="text-[16px]" />{label}</button>;
               })}
-              <button type="button" aria-label="更多快捷操作" aria-expanded={quickMore} data-testid="quick-more" onClick={() => setQuickMore(!quickMore)} className={`flex h-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] ${quickMore ? "chip-on" : "chip"}`}><IconMore className="text-[16px]" />更多</button>
+              <button type="button" aria-label="更多快捷操作" aria-expanded={quickMore} data-testid="quick-more" onClick={() => setQuickMore(!quickMore)} className={`flex ${shortScreen ? "h-10" : "h-11"} flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] ${quickMore ? "chip-on" : "chip"}`}><IconMore className="text-[16px]" />更多</button>
             </div>
           )}
           {quickMore && (
