@@ -102,7 +102,8 @@ export function guessPiece(c: Component, all: Component[]): { name: string; slot
     return { name: "頭飾", slot: "headwear" };
   }
   if (bh > bw * 1.6 && (c.cx < main[0] + 0.08 || c.cx > main[2] - 0.08)) return { name: c.cx < 0.5 ? "右袖套（畫面左）" : "左袖套（畫面右）", slot: "accessory" };
-  if (c.cy > 0.8) return { name: c.cx < 0.5 ? "右鞋／襪" : "左鞋／襪", slot: "shoes" };
+  // 底部的部件：只按位置不能分辨鞋、襪、腿環或其他腿部配件，使用中性名稱（可在部件管理改名及分類）
+  if (c.cy > 0.8) return { name: c.cx < 0.5 ? "右側腿部配件（畫面左）" : "左側腿部配件（畫面右）", slot: "accessory" };
   return { name: "配件", slot: "accessory" };
 }
 

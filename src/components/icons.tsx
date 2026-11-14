@@ -254,3 +254,27 @@ export const IconDownload = (p: P) => (
     <path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" />
   </Svg>
 );
+/** 還原：逆時針旋轉箭頭 */
+export const IconRotate = (p: P) => (
+  <Svg {...p}>
+    <path d="M4.500 12a7.500 7.500 0 1 0 2.200-5.300" />
+    <path d="M4.500 4v3.500H8" />
+  </Svg>
+);
+/** 固定：鎖頭 */
+export const IconLock = (p: P) => (
+  <Svg {...p}>
+    <rect x="5" y="10.500" width="14" height="10" rx="2" />
+    <path d="M8 10.500V8a4 4 0 0 1 8 0v2.500" />
+    <circle cx="12" cy="15.500" r="1.200" fill="currentColor" stroke="none" />
+  </Svg>
+);
+/** 跟隨手臂：手臂骨架（肩→手肘→手腕） */
+export const IconArm = (p: P) => (
+  <Svg {...p}>
+    <circle cx="6" cy="5" r="1.700" />
+    <circle cx="11" cy="13" r="1.700" />
+    <circle cx="18.500" cy="17" r="1.700" />
+    <path d="M6.900 6.500 10.100 11.500M12.500 13.800l4.500 2.400" />
+  </Svg>
+);

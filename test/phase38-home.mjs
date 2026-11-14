@@ -37,10 +37,11 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-testid="home"]').dataset.layout.startsWith("value,cover")).catch(() => undefined);
   check("向上／向下按鈕排序", (await layoutOf()).startsWith("value,cover"), await layoutOf());
   // 最近加入：顯示 3 件、只顯示半身裙
-  await page.click('[data-widget="recent"] button[aria-expanded]');
+  await page.click('[data-widget="recent"] [data-settings="recent"]');
   await page.fill('[data-widget-settings="recent"] [data-opt="count"]', "3");
   await page.selectOption('[data-widget-settings="recent"] [data-opt="category"]', "半身裙");
   await page.waitForTimeout(200);
+  await page.click('[role="dialog"] [aria-label="關閉"]');
   const recentN = await page.locator('[data-testid="w-recent"] .shrink-0').count();
   check("元件獨立設定：數量及分類篩選", recentN === 3, recentN);
   // 新增一個「收藏衣物」，並設定獨立排序

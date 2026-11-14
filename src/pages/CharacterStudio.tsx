@@ -1,6 +1,7 @@
 // 角色素材工作室（Phase 3.6C）：身體、頭部、髮型、姿勢的獨立管理介面（不放在換裝頁的外貌選單內）。
 // 列表只讀 D1 縮圖及設定；高清身體部件只在編輯器內按需讀取。
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { readListState, usePageScroll, writeListState } from "../hooks/useListPosition";
 import { BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, HAIR_CATS, HAIR_CAT_BONE, HAIR_CAT_LABEL, HAIR_CAT_LAYER, HairCat, HairConfig, hairCatOf, hairPartName, placeHairPart, refUrl } from "../../shared/avatarV2";
 import { api } from "../api";
 import { IconChevronLeft, IconMore } from "../components/icons";
@@ -53,7 +54,10 @@ function AssetCard({ testid, id, thumb, name, sub, tags = [], badge, dim, onOpen
 const Grid = ({ children }: { children: ReactNode }) => <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" data-testid="asset-grid">{children}</ul>;
 
 export default function CharacterStudio() {
-  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(location.search).get("tab") as Tab) || "body");
+  // 返回時保留分頁及捲動位置（Phase 3.8A.1）
+  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(location.search).get("tab") as Tab) || readListState("assets", { tab: "body" as Tab }).tab);
+  useEffect(() => { writeListState("assets", { tab }); }, [tab]);
+  usePageScroll("assets:" + tab);
   const [busy, setBusy] = useState(false);
   useEffect(() => { try { history.replaceState(null, "", "/dressing/assets" + (tab === "body" ? "" : "?tab=" + tab)); } catch { /* 忽略 */ } }, [tab]);
   const run = async (fn: () => Promise<unknown>, done?: string) => { setBusy(true); try { await fn(); if (done) toast(done); return true; } catch (e) { toast((e as Error).message, "err"); return false; } finally { setBusy(false); } };

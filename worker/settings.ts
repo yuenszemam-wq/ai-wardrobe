@@ -88,14 +88,19 @@ export async function updateSettings(env: Env, actor: Actor, body: Record<string
   for (const [key, norm] of [["home_layout", normalizeHomeLayout], ["theme", normalizeThemeSettings]] as const) {
     if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
     const base = (body as Record<string, unknown>)[key + "_base"];
-    if (typeof base === "string") {
-      const cur = await readJson<HomeLayout | ThemeSettings>(env, key, norm as (v: unknown) => HomeLayout | ThemeSettings);
+    const baseRev = (body as Record<string, unknown>)[key + "_rev"];
+    const cur = await readJson<HomeLayout | ThemeSettings>(env, key, norm as (v: unknown) => HomeLayout | ThemeSettings);
+    // Phase 3.8A.1：主頁布局用編輯開始時凍結的版本號（rev）核對；舊用戶端仍可用 updated_at
+    if (typeof baseRev === "number") {
+      if (((cur as HomeLayout | null)?.rev ?? 0) !== baseRev) throw new HttpError(409, "settings_conflict", "主頁布局已在另一部裝置更新。你的草稿已保留，可以重新載入或明確選擇覆寫。", { current: cur });
+    } else if (typeof base === "string") {
       if (cur?.updated_at && cur.updated_at !== base) throw new HttpError(409, "settings_conflict", "這項設定已在另一部裝置更新，請重新載入後再修改", { current: cur });
     }
     const v = (body as Record<string, unknown>)[key];
     if (v === null) await env.DB.prepare("DELETE FROM app_settings WHERE key = ?").bind(key).run();
     else {
-      const raw = JSON.stringify({ ...norm(v), updated_at: nowIso() });
+      const rev = key === "home_layout" ? { rev: ((cur as HomeLayout | null)?.rev ?? 0) + 1 } : {};
+      const raw = JSON.stringify({ ...norm(v), updated_at: nowIso(), ...rev });
       if (raw.length > 60000) throw new HttpError(413, "settings_too_large", "設定內容太大");
       await putSetting(env, key, raw);
     }

@@ -19,6 +19,11 @@
   --color-gold: #d9b391;         /* 玫瑰金：框線、標題 */
   --color-gold-soft: #f0d9c0;
   --color-cream: #f6e7df;        /* 深色底上的主要文字 */
+  /* Phase 3.8A.1 狀態語意色（已完成／錯誤、未校正）：淺色主題自動換成深色文字，保持對比 */
+  --color-ok: #6fbf8f;
+  --color-ok-ink: #d6f5e1;
+  --color-danger: #a12c4b;
+  --color-danger-ink: #ffd3df;
   --font-serif: "Noto Serif TC", "Songti TC", "Source Han Serif TC", serif;
   --font-sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
 }
@@ -40,7 +45,7 @@
     --aw-radius: 18px;
     --aw-border-w: 1px;
   }
-  :root[data-scheme="light"] { color-scheme: light; }
+  :root[data-scheme="light"] { color-scheme: light; --color-ok-ink: #1f5a36; --color-danger-ink: #7a1530; }
   /* html 與 body 都用深色實底：iOS 把網頁加到主畫面後，狀態列後面的模糊色取自這裡，
      以前是白色所以頂部會出現一片模糊白邊。 */
   html {

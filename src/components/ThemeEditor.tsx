@@ -71,7 +71,7 @@ export function ThemeEditor() {
             <Button variant="ghost" data-testid="theme-auto-text" onClick={() => setEdit({ ...edit, colors: { ...edit.colors, ...autoText(edit.colors.bg) } })}>自動文字顏色</Button>
             <span className="text-[11px] text-mauve">主要文字對比：{contrast(edit.colors.text, edit.colors.bg).toFixed(1)}:1</span>
           </div>
-          {issues.length > 0 && <p className="rounded-xl bg-[#a12c4b]/30 px-3 py-2 text-[12px] text-white" role="alert" data-testid="theme-issues">可讀性提示：{issues.join("；")}</p>}
+          {issues.length > 0 && <p className="rounded-xl bg-danger/30 px-3 py-2 text-[12px] text-white" role="alert" data-testid="theme-issues">可讀性提示：{issues.join("；")}</p>}
         </section>
         <section className="frame space-y-2 p-3 text-[12.5px]" data-testid="theme-decor">
           <h3 className="font-serif text-[14px] text-gold-soft">介面裝飾</h3>
@@ -93,7 +93,7 @@ export function ThemeEditor() {
   }
   return (
     <div className="space-y-3" data-testid="theme-list">
-      {issues.length > 0 && <p className="rounded-xl bg-[#a12c4b]/30 px-3 py-2 text-[12px] text-white" role="alert">目前主題的可讀性提示：{issues.join("；")}</p>}
+      {issues.length > 0 && <p className="rounded-xl bg-danger/30 px-3 py-2 text-[12px] text-white" role="alert">目前主題的可讀性提示：{issues.join("；")}</p>}
       <ul className="grid grid-cols-2 gap-2">
         {all.map((t) => (
           <li key={t.id}>
@@ -106,7 +106,7 @@ export function ThemeEditor() {
               <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
                 <button type="button" onClick={() => startCustom(t)} className="rounded-full bg-black/25 px-2 py-0.5 text-white" data-testid="theme-customize">{t.builtin ? "以此自訂" : "編輯"}</button>
                 {!t.builtin && <button type="button" onClick={() => { const name = prompt("主題名稱", t.name)?.trim(); if (name) void persist({ ...settings, custom: settings.custom.map((c) => (c.id === t.id ? { ...c, name: name.slice(0, 20) } : c)) }, "已改名"); }} className="rounded-full bg-black/25 px-2 py-0.5 text-white">改名</button>}
-                {!t.builtin && <button type="button" onClick={() => { if (confirm(`刪除主題「${t.name}」？`)) void persist({ ...settings, custom: settings.custom.filter((c) => c.id !== t.id), active: settings.active === t.id ? THEME_PRESETS[0].id : settings.active }, "已刪除主題"); }} className="rounded-full bg-black/25 px-2 py-0.5 text-[#ffd3df]">刪除</button>}
+                {!t.builtin && <button type="button" onClick={() => { if (confirm(`刪除主題「${t.name}」？`)) void persist({ ...settings, custom: settings.custom.filter((c) => c.id !== t.id), active: settings.active === t.id ? THEME_PRESETS[0].id : settings.active }, "已刪除主題"); }} className="rounded-full bg-black/25 px-2 py-0.5 text-danger-ink">刪除</button>}
               </div>
             </div>
           </li>

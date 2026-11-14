@@ -10,7 +10,7 @@ import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
-import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getPalette, putPalette, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, serveAssetFile, updateAsset, updateLook } from "./doll";
+import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getPalette, putPalette, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, batchTemplates, serveAssetFile, updateAsset, updateLook } from "./doll";
 import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
@@ -429,6 +429,10 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (path === "/api/doll/templates" && method === "GET") {
     requireScope(actor, "read");
     return json({ templates: await listTemplates(env, url.searchParams) });
+  }
+  if (path === "/api/doll/templates/batch" && method === "POST") {
+    requireSession(actor);
+    return json(await batchTemplates(env, actor, await readJson(req, 8_000_000)));
   }
   m = path.match(/^\/api\/doll\/templates\/([\w-]+)$/);
   if (m) {

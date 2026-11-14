@@ -124,7 +124,7 @@ export function pieceBone(p: Pick<Piece, "name" | "slot">): string {
   if (/袖套|手套|手腕|手環|腕/.test(n)) return /左/.test(n) ? "elbow_l" : /右/.test(n) ? "elbow_r" : "world";
   if (/頸|領|choker|項鍊/i.test(n)) return "neck";
   if (p.slot === "headwear" || /頭飾|髮飾|帽|髮箍|kc|髮夾/i.test(n)) return "head";
-  if (/鞋|襪/.test(n)) return /左/.test(n) ? "ankle_l" : /右/.test(n) ? "ankle_r" : "world";
+  if (/鞋|襪|腿|腳|踝/.test(n)) return /左/.test(n) ? "ankle_l" : /右/.test(n) ? "ankle_r" : "world";
   return "world";
 }
 export const templateFor = (tpls: Templates, g: GarmentLite) => validTemplate(tpls.v2.get(g.id), g);

@@ -44,9 +44,11 @@ const avatarOf = async (env: Env, v: unknown): Promise<string> => {
   return id;
 };
 
-export async function putTemplate(env: Env, actor: Actor, garmentId: string, input: Record<string, unknown>) {
+/** 單件及批量保存共用的驗證：回傳可以直接寫入的資料（不寫入資料庫） */
+interface PreparedTemplate { garmentId: string; avatar: string; imageId: string | null; fit: Fit; slot: string; data: string; version: number }
+async function prepareTemplate(env: Env, garmentId: string, input: Record<string, unknown>, avatarId?: string): Promise<PreparedTemplate> {
   const fit = fitOrThrow(input.fit);
-  const avatar = await avatarOf(env, input.avatar_id);
+  const avatar = avatarId ?? await avatarOf(env, input.avatar_id);
   const g = await env.DB.prepare(`SELECT g.id, g.category, g.subcategory, ${transparentImageSql()} AS image_id FROM garments g WHERE g.id = ?`).bind(garmentId).first<{ id: string; category: string | null; subcategory: string | null; image_id: string | null }>();
   if (!g) throw new HttpError(404, "garment_not_found", "找不到這件衣物");
   if (input.slot != null && !isSlot(input.slot)) throw new HttpError(400, "bad_slot", "圖層位置不正確");
@@ -57,17 +59,77 @@ export async function putTemplate(env: Env, actor: Actor, garmentId: string, inp
   const expected = input.expected_version;
   if (expected != null && (!Number.isSafeInteger(expected) || Number(expected) < 0)) throw new HttpError(400, "bad_version", "版本不正確");
   // Older clients may create a first preset, but must reload before updating an existing one.
-  const version = expected == null ? 0 : Number(expected);
-  const now = nowIso();
-  const saved = await env.DB.prepare(
-    `INSERT INTO doll_fit_templates (garment_id, avatar_id, image_id, cx, cy, w, rotation, slot, data, version, created_at, updated_at)
+  return { garmentId, avatar, imageId: g.image_id, fit, slot, data, version: expected == null ? 0 : Number(expected) };
+}
+const UPSERT_SQL = `INSERT INTO doll_fit_templates (garment_id, avatar_id, image_id, cx, cy, w, rotation, slot, data, version, created_at, updated_at)
      SELECT ?,?,?,?,?,?,?,?,?,1,?,? WHERE ? = 0 OR EXISTS (SELECT 1 FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ? AND version = ?)
      ON CONFLICT(garment_id, avatar_id) DO UPDATE SET image_id = excluded.image_id, cx = excluded.cx, cy = excluded.cy, w = excluded.w,
-       rotation = excluded.rotation, slot = excluded.slot, data = excluded.data, version = doll_fit_templates.version + 1, updated_at = excluded.updated_at WHERE doll_fit_templates.version = ? RETURNING *`,
-  ).bind(garmentId, avatar, g.image_id, fit.cx, fit.cy, fit.w, fit.rotation, slot, data, now, now, version, garmentId, avatar, version, version).all<TemplateRow>();
-  if (!saved.results.length) throw new HttpError(409, "template_conflict", "另一裝置已更新衣物設定。你的編輯仍保留；請重新載入最新預設後再保存，避免覆蓋其他部件。");
-  await audit(env, actor, "doll.template.save", garmentId, { avatar });
+       rotation = excluded.rotation, slot = excluded.slot, data = excluded.data, version = doll_fit_templates.version + 1, updated_at = excluded.updated_at WHERE doll_fit_templates.version = ? RETURNING *`;
+const upsert = (env: Env, p: PreparedTemplate, now: string) =>
+  env.DB.prepare(UPSERT_SQL).bind(p.garmentId, p.avatar, p.imageId, p.fit.cx, p.fit.cy, p.fit.w, p.fit.rotation, p.slot, p.data, now, now, p.version, p.garmentId, p.avatar, p.version, p.version);
+const CONFLICT_MSG = "另一裝置已更新衣物設定。你的編輯仍保留；請重新載入最新預設後再保存，避免覆蓋其他部件。";
+
+export async function putTemplate(env: Env, actor: Actor, garmentId: string, input: Record<string, unknown>) {
+  const p = await prepareTemplate(env, garmentId, input);
+  const saved = await upsert(env, p, nowIso()).all<TemplateRow>();
+  if (!saved.results.length) throw new HttpError(409, "template_conflict", CONFLICT_MSG);
+  await audit(env, actor, "doll.template.save", garmentId, { avatar: p.avatar });
   return templateOut(saved.results[0]);
+}
+
+/**
+ * 一次保存多件衣物預設（Phase 3.8A.1）：與單件保存使用同一套驗證及版本規則。
+ * 只寫入一個身體模型；每件衣物（連同其全部套裝部件）一筆記錄。
+ * 先逐件驗證（圖片已更新、版本衝突、衣物已刪除等）→ 通過的項目以單一資料庫交易寫入：
+ * 交易內每一筆先核對版本（不符即令整個交易失敗並還原），所以不會出現只寫入一半的情況。
+ * 驗證不通過的項目逐件回報，其餘照常保存；用戶端可以只重試失敗項目。
+ */
+export async function batchTemplates(env: Env, actor: Actor, input: Record<string, unknown>) {
+  const avatar = await avatarOf(env, input.avatar_id);
+  const items = Array.isArray(input.items) ? input.items : null;
+  if (!items || !items.length) throw new HttpError(400, "bad_items", "沒有需要保存的衣物");
+  if (items.length > 80) throw new HttpError(400, "too_many_items", "一次最多保存 80 件衣物");
+  const failed: { garment_id: string; code: string; message: string }[] = [];
+  const ready: PreparedTemplate[] = [];
+  const seen = new Set<string>();
+  for (const raw of items) {
+    const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const gid = typeof o.garment_id === "string" && /^[\w-]{1,64}$/.test(o.garment_id) ? o.garment_id : null;
+    if (!gid) { failed.push({ garment_id: String(o.garment_id ?? ""), code: "bad_garment", message: "衣物識別不正確" }); continue; }
+    // 同一件衣物（包括同一套裝的不同部件）必須合併為一筆，避免互相覆蓋
+    if (seen.has(gid)) { failed.push({ garment_id: gid, code: "duplicate_item", message: "同一件衣物出現多於一次，請合併後再保存" }); continue; }
+    seen.add(gid);
+    try { ready.push(await prepareTemplate(env, gid, o, avatar)); }
+    catch (e) {
+      const h = e instanceof HttpError ? e : new HttpError(500, "save_failed", "未能保存");
+      failed.push({ garment_id: gid, code: h.code, message: h.message });
+    }
+  }
+  // 版本預先核對：已知衝突的項目逐件回報，不影響其他衣物
+  const ok: PreparedTemplate[] = [];
+  for (const p of ready) {
+    const cur = await env.DB.prepare("SELECT version FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ?").bind(p.garmentId, avatar).first<{ version: number }>();
+    if (Number(cur?.version ?? 0) !== p.version) failed.push({ garment_id: p.garmentId, code: "template_conflict", message: CONFLICT_MSG });
+    else ok.push(p);
+  }
+  if (!ok.length) return { saved: [], failed };
+  const now = nowIso();
+  const stmts: D1PreparedStatement[] = [];
+  for (const p of ok) {
+    // 交易內再次核對：版本不符時 json('x') 觸發錯誤，整個交易還原
+    stmts.push(env.DB.prepare("SELECT json(CASE WHEN COALESCE((SELECT version FROM doll_fit_templates WHERE garment_id = ? AND avatar_id = ?), 0) = ? THEN '1' ELSE 'version_conflict' END) AS ok").bind(p.garmentId, avatar, p.version));
+    stmts.push(upsert(env, p, now));
+  }
+  let results: D1Result[];
+  try { results = await env.DB.batch(stmts); }
+  catch {
+    // 期間另一裝置剛好保存：整批還原，全部回報為可重試的衝突（沒有任何一件被寫入）
+    for (const p of ok) failed.push({ garment_id: p.garmentId, code: "template_conflict", message: CONFLICT_MSG });
+    return { saved: [], failed };
+  }
+  const saved = results.filter((_, i) => i % 2 === 1).map((r) => (r.results?.[0] as TemplateRow | undefined)).filter((r): r is TemplateRow => !!r).map(templateOut);
+  await audit(env, actor, "doll.template.batch_save", avatar, { count: saved.length, failed: failed.length });
+  return { saved, failed };
 }
 
 /** 恢復分類預設：只刪除指定身體的設定；其他身體及舊角色的記錄保留 */

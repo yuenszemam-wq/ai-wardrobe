@@ -392,7 +392,7 @@ export function SplitEditor({ name, imageRef, pieces, busy, onSave, onClose, onU
           {(tool === "brush" || tool === "erase") && <input type="range" aria-label="筆刷大小" min={3} max={60} value={size} onChange={(e) => setSize(Number(e.target.value))} className="min-w-0 flex-1" />}
         </div>
         {overlap.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-xl bg-[#a12c4b]/30 px-2 py-1 text-[11px] text-[#ffd3df]" data-testid="split-overlap">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-xl bg-danger/30 px-2 py-1 text-[11px] text-danger-ink" data-testid="split-overlap">
             <span>與 {overlap.map((o) => `「${o.e.name}」`).join("、")} 重疊</span>
             <button type="button" onClick={() => { if (!current?.mask) return; for (const o of overlap) { remember(o.e); for (let i = 0; i < o.e.mask!.data.length; i++) if (current.mask.data[i] > 24) o.e.mask!.data[i] = 0; } touched(); }} className="chip rounded-full px-2 py-0.5">重疊部分只屬於目前部件</button>
           </div>

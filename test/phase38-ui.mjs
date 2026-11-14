@@ -12,7 +12,9 @@ const COLLAR = '<path d="M330 200 L570 200 L600 760 L300 760 Z" fill="#fffaf6"/>
 await addGarment(env, { id: "gar_col", name: "白色黑蕾絲娃娃領上衣", category: "上衣", subcategory: "Blouse", svg: COLLAR });
 await addGarment(env, { id: "gar_sk", name: "測試半裙", category: "半身裙", subcategory: "SK", svg: '<path d="M300 300 L600 300 L800 950 L100 950 Z" fill="#7a1f2b"/>' });
 const H = roomHelpers(page);
-const openQuick = async () => { if (!(await page.locator('[data-testid="quick-pop"]').count())) await page.click('[data-testid="quick-toggle"]'); };
+// Phase 3.8A.1：快捷工具列常駐於畫布下方，不再需要先打開彈層
+const openQuick = async () => undefined;
+const qmode = () => page.getAttribute('[data-testid="quick-state"]', "data-mode");
 
 try {
   console.log("換裝：快捷操作");
@@ -21,12 +23,9 @@ try {
   await page.click('[data-garment="gar_col"]');
   await page.click('[data-garment="gar_sk"]');
   await H.ready();
-  await page.click('[data-testid="quick-toggle"]');
-  check("快捷操作收在可展開的按鈕內", (await page.locator('[data-testid="quick-pop"]').count()) === 1);
-  check("沒有選中衣物時提示先選取", (await page.locator('[data-testid="quick-noselect"]').count()) === 1);
-  await page.click('[data-quick-close]').catch(() => undefined);
-  await page.mouse.click(...(await H.screen(80, 1700)));
-  check("點選畫布其他位置會收起快捷操作", (await page.locator('[data-testid="quick-pop"]').count()) === 0);
+  const bar = await page.locator('[data-testid="quick-bar"]').boundingBox(), stageBox = await page.locator('[data-testid="doll-stage"]').boundingBox();
+  check("快捷工具列在畫布下方，不遮住人物", !!bar && !!stageBox && bar.y >= stageBox.y + stageBox.height - 1, { bar, stageBox });
+  check("沒有選中衣物時提示先選取（不會默默修改全部）", (await page.getAttribute('[data-testid="quick-state"]', "data-count")) === "0" && (await page.textContent('[data-testid="quick-state"]')).includes("未選衣物") && await page.locator('[data-quick-mode="body"]').isDisabled());
   await page.click('[data-tab="pose"]');
   await page.click('[data-pose="reach_out"]');
   await H.ready();
@@ -59,11 +58,10 @@ try {
   await H.ready();
 
   // 快捷：目前衣物的跟隨模式（與骨架分頁同步）
-  await page.click('[data-testid="quick-toggle"]');
   const fit0 = await H.room("data-worn");
   await page.click('[data-quick-mode="fixed"]');
   await H.ready();
-  check("快捷切換：固定原圖", (await page.getAttribute('[data-testid="quick-mode"]', "data-mode")) === "fixed" && (await H.room("data-wear")) === "fixed");
+  check("快捷切換：固定原圖", (await qmode()) === "fixed" && (await H.room("data-wear")) === "fixed");
   await page.click('[data-tool="follow"]');
   check("與骨架分頁同步", (await page.getAttribute('[data-wear-mode="fixed"]', "aria-pressed")) === "true");
   check("切換跟隨模式不清除遮罩", (await H.room("data-masked")) === "1");
@@ -95,18 +93,17 @@ try {
   await page.click('[data-layer="gar_sk"] button:nth-of-type(2)');
   await openQuick();
   check("半裙不適用跟隨手臂", await page.locator('[data-quick-mode="auto"]').isDisabled());
-  // 批量
-  await page.click('[data-testid="quick-batch"] summary');
-  const autoLabel = await page.textContent('[data-quick-all="auto"]');
-  check("批量操作清楚顯示作用範圍（只計有袖衣物）", autoLabel.includes("1 件"), autoLabel);
-  await page.click('[data-quick-all="body"]');
+  // 批量：作用範圍＝全部適用衣物
+  await page.selectOption('[data-testid="quick-scope"]', "all");
+  check("批量操作清楚顯示作用範圍及件數（跟隨手臂只計有袖衣物）", (await page.getAttribute('[data-testid="quick-state"]', "data-count")) === "2" && (await page.getAttribute('[data-testid="quick-state"]', "data-auto")) === "1", await page.textContent('[data-testid="quick-state"]'));
+  await page.click('[data-quick-mode="body"]');
   await H.ready();
-  check("批量跟隨身體", (await H.room("data-wear")) === "body");
-  await openQuick();
-  if (await page.locator('[data-testid="quick-batch"]:not([open])').count()) await page.click('[data-testid="quick-batch"] summary');
+  check("批量跟隨身體", (await H.room("data-wear")) === "body" && (await qmode()) === "body");
+  await page.click('[data-testid="quick-more"]');
   await page.click('[data-quick-all="default"]');
   await H.ready();
   check("還原各自預設跟隨模式（沒有衣物預設＝固定原圖）", (await H.room("data-wear")) === "fixed", await H.room("data-wear"));
+  await page.selectOption('[data-testid="quick-scope"]', "item");
 
   // 保存造型 → 重新開啟：遮罩效果相同
   check("快捷操作未寫入衣物預設", !(await env.DB.prepare("SELECT 1 FROM doll_fit_templates WHERE garment_id='gar_col'").first()));

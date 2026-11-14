@@ -1,5 +1,6 @@
 // 換裝頁底部面板：衣服、圖層（已穿衣物）、外貌、姿勢。面板保持矮小，角色始終可見。
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { readListState, useListPosition, writeListState } from "../hooks/useListPosition";
 import { Pose, Rig, applyMat, boneMap, clampPose, jointPositions, samePose, solve } from "../../shared/avatarRig";
 import { BONE_LABEL, BUILTIN_HAIRS, BUILTIN_HEADS, DollAsset, FrontPart, HairCat, HairConfig, HairPart, HAIR_CATS, HAIR_CAT_LABEL, HAIR_COLORS, NO_HAIR_ID, POSE_PRESETS, hairCatOf, hairPartName, refUrl, resolveHairColors, rgbToHex } from "../../shared/avatarV2";
 import { ATTACHABLE_BONES, FOLLOWS, Follow, Piece, SLEEVE_ROT_LIMIT, SLOT_LABEL, SLOT_SKIN, WearOpts, slotFor } from "../../shared/doll";
@@ -14,6 +15,7 @@ import { Appearance, BUILTIN_THUMB, GarmentLite, Resolved, wearHairPart } from "
 import { HairColorStudio } from "./HairColor";
 import type { ModelSummary } from "./models";
 import type { BehindStats } from "./engine";
+import type { BatchSummary } from "./batchSave";
 import type { AvatarModel } from "../../shared/avatarModel";
 import { DRAG_MODES, DragMode, PoseControl, REGIONS, Region, adjustable, jointLabel, jointTitle, regionBones, regionOf } from "../../shared/poseControls";
 
@@ -28,11 +30,15 @@ const PIECE_CAT = "套裝部件";
 /** 部件屬於哪個大分類：按部件的圖層位置對應衣櫃分類 */
 const pieceInCat = (p: Piece, cat: string) => slotFor(cat) === p.slot;
 export function ClothesPanel({ garments, wornIds, wornKeys, pending, onToggle, pieces, onPiece }: { garments: Garment[] | null; wornIds: Set<string>; wornKeys: Set<string>; pending: Set<string>; onToggle: (g: Garment) => void; pieces: PieceEntry[]; onPiece: (e: PieceEntry) => void }) {
-  const [cat, setCat] = useState("");
-  const [sub, setSub] = useState("");
-  const [q, setQ] = useState("");
-  const [search, setSearch] = useState(false);
+  // 換裝衣物選單：分類、子分類、搜尋及捲動位置在同一工作階段保留（Phase 3.8A.1）
+  const init = useMemo(() => readListState("dress-picker", { cat: "", sub: "", q: "" }), []);
+  const [cat, setCat] = useState(init.cat);
+  const [sub, setSub] = useState(init.sub);
+  const [q, setQ] = useState(init.q);
+  const [search, setSearch] = useState(!!init.q);
   const tax = useTaxonomy();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { writeListState("dress-picker", { cat, sub, q }); }, [cat, sub, q]);
   // 大分類／子分類直接來自衣櫃現有資料（按分類字典的次序排列），不另外寫死
   const cats = useMemo(() => {
     const have = new Set((garments || []).map((g) => g.category || "").filter(Boolean));
@@ -54,6 +60,10 @@ export function ClothesPanel({ garments, wornIds, wornKeys, pending, onToggle, p
     return pieceInCat(piece, cat) && (!sub || piece.name.includes(sub) || sub.includes(piece.name.replace(/（.*）/, "")));
   }), [pieces, cat, sub, needle]);
   const pickCat = (c: string) => { setCat(c); setSub(""); };
+  // 保存的分類已不存在（例如衣物已改分類）：回到「全部」
+  useEffect(() => { if (garments && cat && !(cat === PIECE_CAT ? pieces.length : cats.includes(cat))) { setCat(""); setSub(""); } }, [garments, cats, cat, pieces.length]);
+  const posIds = useMemo(() => (garments ? [...pieceList.map((e) => e.g.id + "#" + e.piece.id), ...list.map((g) => g.id)] : null), [garments, pieceList, list]);
+  useListPosition(`dress-picker:${cat}|${sub}|${needle}`, posIds, scrollRef, scrollRef);
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-1.5 pb-1.5">
@@ -71,7 +81,7 @@ export function ClothesPanel({ garments, wornIds, wornKeys, pending, onToggle, p
           {["", ...subs].map((c) => <button key={c || "all"} type="button" data-subcat={c || "all"} onClick={() => setSub(c)} className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] ${sub === c ? "chip-on" : "bg-white/5 text-cream/80"}`}>{c || "全部"}</button>)}
         </div>
       )}
-      <div className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2">
+      <div ref={scrollRef} className="scrollbar-none -mx-3 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2">
         {!garments ? <p className="py-6 text-center text-[12px] text-mauve">載入衣櫃中…</p> : list.length === 0 && pieceList.length === 0 ? (
           <p className="py-6 text-center text-[12px] leading-relaxed text-mauve">{garments.length ? "沒有符合的衣物" : "衣櫃未有已入庫而且有透明圖的衣物"}</p>
         ) : (
@@ -79,7 +89,7 @@ export function ClothesPanel({ garments, wornIds, wornKeys, pending, onToggle, p
             {pieceList.map((e) => {
               const key = e.g.id + "#" + e.piece.id, on = wornKeys.has(key);
               return (
-                <button key={key} type="button" data-piece-entry={key} aria-pressed={on} onClick={() => onPiece(e)} className="relative block text-left">
+                <button key={key} type="button" data-piece-entry={key} data-pos-id={key} aria-pressed={on} onClick={() => onPiece(e)} className="relative block text-left">
                   <div className={`arch arch-base relative aspect-[3/4] ${on ? "outline-2 outline-offset-1 outline-gold-soft" : ""}`}>
                     <div className="absolute inset-0 overflow-hidden px-[8%] pb-[8%] pt-[18%]" style={{ borderRadius: "inherit" }}><PieceThumb g={e.g} piece={e.piece} /></div>
                   </div>
@@ -92,7 +102,7 @@ export function ClothesPanel({ garments, wornIds, wornKeys, pending, onToggle, p
             {list.map((g) => {
               const on = wornIds.has(g.id);
               return (
-                <button key={g.id} type="button" data-garment={g.id} aria-pressed={on} onClick={() => onToggle(g)} className="relative block text-left">
+                <button key={g.id} type="button" data-garment={g.id} data-pos-id={g.id} aria-pressed={on} onClick={() => onToggle(g)} className="relative block text-left">
                   <div className={`arch arch-base relative aspect-[3/4] ${on ? "outline-2 outline-offset-1 outline-gold-soft" : ""} ${pending.has(g.id) ? "opacity-60" : ""}`}>
                     <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
                       <TransparentImage src={imageUrl(g.transparent_image_id)} alt={displayName(g)} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain px-[8%] pb-[8%] pt-[18%]" />
@@ -133,8 +143,10 @@ export interface LayerGroupOps { onHideGroup: (gid: string, hide: boolean) => vo
 type LayerRow = { id: string; r: Resolved; group?: { gid: string; members: Resolved[] } };
 /** 圖層的名稱：套裝部件用部件自己的名稱 */
 export const layerName = (r: Resolved) => (r.piece ? r.piece.name : displayName(r.garment as Garment));
-export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRemove, onClear, hints, onHideGroup, onRemoveGroup }: {
+export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRemove, onClear, hints, onHideGroup, onRemoveGroup, batch }: {
   items: Resolved[]; selected: string | null; onSelect: (id: string | null) => void; onReorder: (ids: string[]) => void; onHide: (id: string) => void; onRemove: (id: string) => void; onClear: () => void; hints: string[];
+  /** Phase 3.8A.1：衣物設定保存狀態及「一次保存全部設定」 */
+  batch?: { summary: BatchSummary; onOpen: () => void; pending: number };
 } & LayerGroupOps) {
   /** 收起的套裝群組（只影響顯示；圖層次序仍然是每個部件獨立） */
   const [folded, setFolded] = useState<Set<string>>(new Set());
@@ -175,6 +187,19 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
         <span>已穿 {items.length} 件｜上面的在外層，按住 ☰ 拖動排序</span>
         <button type="button" data-testid="clear-all" onClick={onClear} className="chip rounded-full px-2.5 py-1 text-[11.5px]">全部脫下</button>
       </div>
+      {batch && (() => {
+        const b = batch.summary, unsaved = b.modified + b.uncalibrated;
+        const unit = items.every((r) => r.piece) ? "個部件" : "件";
+        return (
+          <div data-testid="batch-bar" data-unsaved={unsaved} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/5 px-2.5 py-1.5">
+            <div className="min-w-0 flex-1 text-[11px] leading-snug">
+              <p className="text-gold-soft">已穿 {b.worn} {unit}｜{unsaved ? `${unsaved} 項設定尚未保存` : "衣物設定已全部保存"}</p>
+              <p className="text-mauve">已修改 {b.modified} · 未校正 {b.uncalibrated} · 已保存 {b.saved}{b.other ? ` · 其他 ${b.other}` : ""}{batch.pending ? ` · 載入中 ${batch.pending}` : ""}</p>
+            </div>
+            <button type="button" data-testid="batch-open" onClick={batch.onOpen} className={`h-9 shrink-0 rounded-full px-3 text-[12px] ${unsaved ? "btn-jewel" : "chip"}`}>一次保存全部設定</button>
+          </div>
+        );
+      })()}
       {hints.map((h) => <p key={h} role="note" className="mb-1.5 rounded-xl bg-white/5 px-2.5 py-1.5 text-[11px] leading-snug text-gold-soft">提示：{h}</p>)}
       {groups.size > 0 && (
         <div className="mb-1.5 space-y-1" data-testid="layer-groups">
@@ -183,7 +208,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
             return (
               <div key={gid} data-layer-group={gid} className="flex items-center gap-1.5 rounded-xl bg-white/5 px-2 py-1 text-[11.5px]">
                 <button type="button" aria-expanded={!folded.has(gid)} onClick={() => fold(gid)} className="flex min-w-0 flex-1 items-center gap-1 text-left text-gold-soft">
-                  <span className="text-[10px]">{folded.has(gid) ? "▸" : "▾"}</span><span className="truncate">{displayName(members[0].garment as Garment)}（{members.length} 個部件）</span>
+                  <span className="text-[10px]">{folded.has(gid) ? "▸" : "▾"}</span><span className="truncate">{displayName(members[0].garment as Garment)}（{members.length} 個部件・已校正 {members.filter((m) => m.piece?.fit).length}）</span>
                 </button>
                 <button type="button" aria-label={allHidden ? "顯示整套" : "隱藏整套"} onClick={() => onHideGroup(gid, !allHidden)} className="grid h-7 w-7 place-items-center text-[15px]">{allHidden ? <IconEyeOff /> : <IconEye />}</button>
                 <button type="button" aria-label="脫下整套部件" onClick={() => onRemoveGroup(gid)} className="grid h-7 w-7 place-items-center text-[13px]"><IconClose /></button>
@@ -207,7 +232,7 @@ export function LayersPanel({ items, selected, onSelect, onReorder, onHide, onRe
                   <span className="relative h-10 w-8 shrink-0 overflow-hidden rounded-lg bg-white/85"><TransparentImage src={imageUrl(r.garment.transparent_image_id)} alt="" className="absolute inset-0 h-full w-full object-contain" /></span>
                   <span className="min-w-0">
                     <span className="block truncate text-[13px]">{displayName(r.garment as Garment)}</span>
-                    <span className="block text-[10.5px] opacity-75">套裝群組｜{group.members.length} 個部件（按此展開）</span>
+                    <span className="block text-[10.5px] opacity-75" data-group-calibrated={`${group.members.filter((m) => m.piece?.fit).length}/${group.members.length}`}>套裝群組｜{group.members.length} 個部件｜已校正 {group.members.filter((m) => m.piece?.fit).length}/{group.members.length}（按此展開）</span>
                   </span>
                 </button>
                 <button type="button" aria-label={hidden ? "顯示整套" : "隱藏整套"} onClick={() => onHideGroup(group.gid, !hidden)} className="grid h-9 w-8 shrink-0 place-items-center text-[17px]">{hidden ? <IconEyeOff /> : <IconEye />}</button>
