@@ -1,5 +1,6 @@
 import { TransparentImage } from "../components/TransparentImage";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { readListState, useListPosition, writeListState } from "../hooks/useListPosition";
 import { api, imageUrl } from "../api";
 import { IconCrown, IconHeart, IconPerson, IconPlus, IconScissors, IconSearch, IconShirt, IconSort } from "../components/icons";
 import { Empty, Link, Spinner, toast } from "../components/ui";
@@ -32,9 +33,13 @@ export default function Outfits() {
   const saved = useMemo(() => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") as { filter?: Filter; sort?: Sort }; } catch { return {}; } }, []);
   const [filter, setFilter] = useState<Filter>(saved.filter ?? "all");
   const [sort, setSort] = useState<Sort>(saved.sort ?? "updated");
-  const [fav, setFav] = useState(false);
-  const [q, setQ] = useState("");
-  const [search, setSearch] = useState(false);
+  // 收藏篩選及搜尋：同一工作階段返回時保留（Phase 3.8A.1）
+  const session = useMemo(() => readListState("outfits", { fav: false, q: "" }), []);
+  const [fav, setFav] = useState(session.fav);
+  const [q, setQ] = useState(session.q);
+  const [search, setSearch] = useState(!!session.q);
+  const gridRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { writeListState("outfits", { fav, q }); }, [fav, q]);
   useEffect(() => {
     api<{ outfits: OutfitSummary[] }>("/api/outfits").then((r) => setOutfits(r.outfits)).catch((e) => { setOutfits([]); toast((e as Error).message, "err"); });
     api<{ looks: LookSummary[] }>("/api/doll/looks").then((r) => setLooks(r.looks)).catch(() => setLooks([]));
@@ -50,6 +55,7 @@ export default function Outfits() {
     const out = all.filter((e) => (filter === "all" || e.kind === filter) && (!fav || e.is_favorite) && (!needle || e.name.toLowerCase().includes(needle)));
     return out.sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name, "zh-Hant") : (sort === "created" ? b.created_at : b.updated_at).localeCompare(sort === "created" ? a.created_at : a.updated_at)));
   }, [all, filter, fav, q, sort]);
+  useListPosition("outfits", useMemo(() => (outfits && looks ? list.map((e) => e.kind + ":" + e.id) : null), [outfits, looks, list]), gridRef);
   const count = (k: Filter) => (k === "all" ? all.length : all.filter((e) => e.kind === k).length);
 
   async function toggleFav(e: Entry) {
@@ -102,9 +108,9 @@ export default function Outfits() {
       ) : list.length === 0 ? (
         <Empty title={all.length ? "沒有符合的造型" : "仍未有造型"}>{all.length ? "試試其他篩選條件。" : "從上面兩個入口開始：配搭衣櫃單品，或替角色換裝。"}</Empty>
       ) : (
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div ref={gridRef} className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {list.map((e) => (
-            <div key={e.kind + e.id} className="paper relative p-2" data-card={e.kind} data-id={e.id}>
+            <div key={e.kind + e.id} className="paper relative p-2" data-card={e.kind} data-id={e.id} data-pos-id={e.kind + ":" + e.id}>
               <Link to={e.kind === "outfit" ? `/outfits/${e.id}` : `/dressing/${e.id}`} className="block">
                 {e.outfit ? <OutfitPreview o={e.outfit} /> : <LookPreview l={e.look!} />}
                 <div className="mt-2 flex items-center px-0.5">

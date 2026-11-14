@@ -1,7 +1,8 @@
 import { ReactNode } from "react";
 
 /** 分類色（深紫絲絨底上要分得開）：粉、薰衣草、玫瑰金、莓紅、霧藍、奶油、灰紫、橄欖 */
-export const SERIES = ["#f2a7c3", "#b98ae0", "#d9b391", "#e0577f", "#8fc7d6", "#f6e7df", "#9d6f8f", "#c9d08a"];
+// 第一個顏色跟隨介面主題的圖表色；原本的奶油色在淺色主題看不見，改用主題的金色文字色
+export const SERIES = ["var(--aw-chart, #f2a7c3)", "#b98ae0", "#d9b391", "#e0577f", "#8fc7d6", "var(--color-gold-soft, #f6e7df)", "#9d6f8f", "#c9d08a"];
 
 export const COLOR_HEX: Record<string, string> = {
   黑: "#17101a",

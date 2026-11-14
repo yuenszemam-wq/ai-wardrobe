@@ -1,6 +1,7 @@
 // 衣服設定工作室（Phase 3.4）：管理及校正每件衣服的預設穿著效果（位置、變形、遮罩、骨架、拆件）。
 // 不會建立穿搭造型；在這裡保存只更新相應的衣物預設（/api/doll/templates）。
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useListPosition } from "../hooks/useListPosition";
 import { SETUP_KEYS, SETUP_LABEL } from "../../shared/doll";
 import { api, displayName, Garment, imageUrl } from "../api";
 import { IconChevronLeft, IconChevronRight, IconSearch, IconSort } from "../components/icons";
@@ -23,11 +24,12 @@ export const SETUP_LIST_KEY = "aw:setup:list";
 
 /** 狀態符號：✓ 已完成、？ 待確認、！ 需要處理、自 自動、— 不需要／未設定 */
 const STATE_MARK: Record<ItemState, string> = { done: "✓", review: "？", todo: "！", auto: "自", na: "不需", optional: "—" };
-const STATE_TEXT: Record<ItemState, string> = { done: "text-[#bfeccf]", review: "text-gold-soft", todo: "text-[#ffc6d6]", auto: "text-cream/80", na: "text-cream/50", optional: "text-cream/50" };
-const OVERALL_TONE: Record<Overall, string> = { done: "bg-[#6fbf8f]/30 text-[#d6f5e1]", partial: "bg-gold/25 text-gold-soft", none: "bg-white/10 text-cream/70", stale: "bg-[#a12c4b]/45 text-white" };
+const STATE_TEXT: Record<ItemState, string> = { done: "text-ok-ink", review: "text-gold-soft", todo: "text-danger-ink", auto: "text-cream/80", na: "text-cream/50", optional: "text-cream/50" };
+const OVERALL_TONE: Record<Overall, string> = { done: "bg-ok/30 text-ok-ink", partial: "bg-gold/25 text-gold-soft", none: "bg-white/10 text-cream/70", stale: "bg-danger/45 text-white" };
 
-function loadView(): { filter: Filter; sort: Sort; cat: string; sub: string } {
-  try { return { filter: "all", sort: "todo", cat: "", sub: "", ...JSON.parse(sessionStorage.getItem(VIEW_KEY) || "{}") }; } catch { return { filter: "all", sort: "todo", cat: "", sub: "" }; }
+function loadView(): { filter: Filter; sort: Sort; cat: string; sub: string; q: string; model: string | null } {
+  const d = { filter: "all" as Filter, sort: "todo" as Sort, cat: "", sub: "", q: "", model: null as string | null };
+  try { return { ...d, ...JSON.parse(sessionStorage.getItem(VIEW_KEY) || "{}") }; } catch { return d; }
 }
 const ago = (iso: string | null) => {
   if (!iso) return "";
@@ -39,16 +41,18 @@ export default function GarmentSetup() {
   const [garments, setGarments] = useState<Garment[] | null>(null);
   const [tpls, setTpls] = useState<Templates | null>(null);
   // 目前校正的身體模型（每個身體有自己的衣物設定；網址 ?model= 保留選擇）
-  const [model, setModel] = useState<string>(() => new URLSearchParams(location.search).get("model") || V2_SUMMARY.id);
-  const [models, setModels] = useState<ModelSummary[]>([V2_SUMMARY]);
   const init = loadView();
+  // 網址沒有指定時，返回上次使用的身體模型（Phase 3.8A.1 返回位置）
+  const [model, setModel] = useState<string>(() => new URLSearchParams(location.search).get("model") || init.model || V2_SUMMARY.id);
+  const [models, setModels] = useState<ModelSummary[]>([V2_SUMMARY]);
   const [filter, setFilter] = useState<Filter>(init.filter);
   const [sort, setSort] = useState<Sort>(init.sort);
   const [cat, setCat] = useState(init.cat);
   const [sub, setSub] = useState(init.sub);
-  const [q, setQ] = useState("");
-  const [search, setSearch] = useState(false);
+  const [q, setQ] = useState(init.q);
+  const [search, setSearch] = useState(!!init.q);
   const tax = useTaxonomy();
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     fetchStudioGarments().then(setGarments).catch((e) => toast((e as Error).message, "err"));
@@ -60,7 +64,7 @@ export default function GarmentSetup() {
     try { history.replaceState(null, "", "/dressing/setup" + (isBuiltinModel(model) ? "" : `?model=${model}`)); } catch { /* 忽略 */ }
   }, [model]);
   const modelQs = isBuiltinModel(model) ? "" : `?model=${model}`;
-  useEffect(() => { try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ filter, sort, cat, sub })); } catch { /* 私密瀏覽 */ } }, [filter, sort, cat, sub]);
+  useEffect(() => { try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ filter, sort, cat, sub, q, model })); } catch { /* 私密瀏覽 */ } }, [filter, sort, cat, sub, q, model]);
 
   const infos = useMemo(() => {
     const m = new Map<string, SetupInfo>();
@@ -93,6 +97,9 @@ export default function GarmentSetup() {
     });
   }, [garments, infos, filter, cat, sub, q, sort]);
 
+  // 返回位置：校正第 35 件衣服後返回，仍然停在第 35 件附近（按身體模型分開）
+  const listIds = useMemo(() => (garments && tpls ? list.map((g) => g.id) : null), [garments, tpls, list]);
+  useListPosition("setup:" + model, listIds, listRef);
   const open = (id: string) => {
     try { sessionStorage.setItem(SETUP_LIST_KEY, JSON.stringify(list.map((g) => g.id))); } catch { /* 私密瀏覽 */ }
     navigate(`/dressing/setup/${id}${modelQs}`);
@@ -128,11 +135,11 @@ export default function GarmentSetup() {
       {!garments || !tpls ? <div className="py-16"><Spinner /></div> : list.length === 0 ? (
         <p className="py-12 text-center text-[12.5px] text-mauve">沒有符合的衣物</p>
       ) : (
-        <ul className="mt-1 space-y-1.5" data-testid="setup-list">
+        <ul ref={listRef} className="mt-1 space-y-1.5" data-testid="setup-list">
           {list.map((g) => {
             const i = infos.get(g.id)!;
             return (
-              <li key={g.id}>
+              <li key={g.id} data-pos-id={g.id}>
                 <button type="button" data-setup-garment={g.id} data-overall={i.overall} onClick={() => open(g.id)} className="frame flex w-full items-center gap-2.5 px-2 py-1.5 text-left">
                   <span className="relative h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-white/85"><TransparentImage src={imageUrl(g.transparent_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-0.5" /></span>
                   <span className="min-w-0 flex-1">

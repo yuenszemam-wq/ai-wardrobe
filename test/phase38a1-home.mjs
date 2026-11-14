@@ -169,6 +169,27 @@ try {
   await page.waitForSelector('[data-testid="w-analysis"]');
   check("局部重試成功", (await page.locator('[data-testid="w-error-analysis"]').count()) === 0);
   await shot("05-on-demand");
+  console.log("列表返回位置（衣服設定）");
+  for (let i = 0; i < 30; i++) await addGarment(env, { id: `gar_s${String(i).padStart(2, "0").replace(/[0189]/g, (d) => "wxyz"["0189".indexOf(d)])}`, name: `設定衣物 ${String(i + 1).padStart(2, "0")}`, category: "上衣", subcategory: "Blouse", svg: `<rect x="250" y="200" width="400" height="700" fill="#6b2d5c"/>`, w: 300, h: 400, created: new Date(Date.UTC(2026, 1, 1 + i)).toISOString() });
+  await page.goto(A.base + "/dressing/setup");
+  await page.waitForSelector('[data-testid="setup-list"] li');
+  await page.click('[data-testid="setup-sort"]');
+  await page.click('[data-testid="setup-sort"]');
+  check("排序：名稱", (await page.textContent('[data-testid="setup-sort"]')).includes("名稱"));
+  const target = page.locator('[data-setup-garment]').nth(24);
+  const tid = await target.getAttribute("data-setup-garment");
+  await target.scrollIntoViewIfNeeded();
+  await page.evaluate((id) => { const el = document.querySelector(`[data-setup-garment="${id}"]`); window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 160 }); }, tid);
+  await page.waitForTimeout(400);
+  const before = await page.evaluate((id) => document.querySelector(`[data-setup-garment="${id}"]`).getBoundingClientRect().top, tid);
+  await page.click(`[data-setup-garment="${tid}"]`);
+  await page.waitForSelector('[data-testid="dressing-room"]');
+  await page.goBack();
+  await page.waitForSelector(`[data-setup-garment="${tid}"]`);
+  await page.waitForTimeout(500);
+  const after = await page.evaluate((id) => document.querySelector(`[data-setup-garment="${id}"]`).getBoundingClientRect().top, tid);
+  check("返回後停在同一件衣物（不需重新捲動）", Math.abs(after - before) < 30 && (await page.evaluate(() => window.scrollY)) > 300, { before, after });
+  check("返回後保留排序", (await page.textContent('[data-testid="setup-sort"]')).includes("名稱"));
   check("沒有瀏覽器錯誤", A.errors.filter((e) => !/500/.test(e)).length === 0, A.errors);
 } catch (e) {
   check("執行過程沒有例外", false, String(e?.stack || e));
