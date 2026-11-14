@@ -25,7 +25,7 @@ export const SETUP_LIST_KEY = "aw:setup:list";
 /** 狀態符號：✓ 已完成、？ 待確認、！ 需要處理、自 自動、— 不需要／未設定 */
 const STATE_MARK: Record<ItemState, string> = { done: "✓", review: "？", todo: "！", auto: "自", na: "不需", optional: "—" };
 const STATE_TEXT: Record<ItemState, string> = { done: "text-ok-ink", review: "text-gold-soft", todo: "text-danger-ink", auto: "text-cream/80", na: "text-cream/50", optional: "text-cream/50" };
-const OVERALL_TONE: Record<Overall, string> = { done: "bg-ok/30 text-ok-ink", partial: "bg-gold/25 text-gold-soft", none: "bg-white/10 text-cream/70", stale: "bg-danger/45 text-white" };
+const OVERALL_TONE: Record<Overall, string> = { done: "bg-ok/30 text-ok-ink", partial: "bg-gold/25 text-gold-soft", none: "bg-cream/10 text-cream/70", stale: "bg-danger/45 text-[#fffaf6]" };
 
 function loadView(): { filter: Filter; sort: Sort; cat: string; sub: string; q: string; model: string | null } {
   const d = { filter: "all" as Filter, sort: "todo" as Sort, cat: "", sub: "", q: "", model: null as string | null };
@@ -120,16 +120,16 @@ export default function GarmentSetup() {
           {models.map((m) => <button key={m.id} type="button" data-setup-model={m.id} aria-pressed={model === m.id} onClick={() => setModel(m.id)} className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] ${model === m.id ? "chip-on" : "chip"}`}>{m.name}</button>)}
         </div>
       )}
-      {search && <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋衣服名稱" aria-label="搜尋衣服名稱" className="mb-2 h-10 w-full rounded-full bg-white px-4 text-[14px] text-ink ring-1 ring-gold focus:outline-none" />}
+      {search && <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋衣服名稱" aria-label="搜尋衣服名稱" className="mb-2 h-10 w-full rounded-full bg-field px-4 text-[14px] text-ink ring-1 ring-gold focus:outline-none" />}
       <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-2" data-testid="setup-filters">
         {FILTERS.map(([f, label]) => <button key={f} type="button" data-filter={f} aria-pressed={filter === f} onClick={() => setFilter(f)} className={`shrink-0 rounded-full px-3 py-1.5 text-[12.5px] ${filter === f ? "chip-on" : "chip"}`}>{label} <span className="opacity-70">{counts[f]}</span></button>)}
       </div>
       <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1.5" data-testid="setup-cats">
-        {["", ...cats].map((c) => <button key={c || "all"} type="button" onClick={() => { setCat(c); setSub(""); }} className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] ${cat === c ? "chip-on" : "bg-white/5 text-cream/85"}`}>{c || "全部分類"}</button>)}
+        {["", ...cats].map((c) => <button key={c || "all"} type="button" onClick={() => { setCat(c); setSub(""); }} className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] ${cat === c ? "chip-on" : "bg-cream/5 text-cream/85"}`}>{c || "全部分類"}</button>)}
       </div>
       {subs.length > 1 && (
         <div className="scrollbar-none -mx-4 flex gap-1 overflow-x-auto px-4 pb-1.5" data-testid="setup-subcats">
-          {["", ...subs].map((c) => <button key={c || "all"} type="button" onClick={() => setSub(c)} className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] ${sub === c ? "chip-on" : "bg-white/5 text-cream/75"}`}>{c || "全部"}</button>)}
+          {["", ...subs].map((c) => <button key={c || "all"} type="button" onClick={() => setSub(c)} className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] ${sub === c ? "chip-on" : "bg-cream/5 text-cream/75"}`}>{c || "全部"}</button>)}
         </div>
       )}
       {!garments || !tpls ? <div className="py-16"><Spinner /></div> : list.length === 0 ? (
@@ -141,7 +141,7 @@ export default function GarmentSetup() {
             return (
               <li key={g.id} data-pos-id={g.id}>
                 <button type="button" data-setup-garment={g.id} data-overall={i.overall} onClick={() => open(g.id)} className="frame flex w-full items-center gap-2.5 px-2 py-1.5 text-left">
-                  <span className="relative h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-white/85"><TransparentImage src={imageUrl(g.transparent_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-0.5" /></span>
+                  <span className="relative h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-field/85"><TransparentImage src={imageUrl(g.transparent_image_id)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain p-0.5" /></span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5"><span className="truncate text-[13px] font-medium">{displayName(g)}</span><span className={`shrink-0 rounded-full px-1.5 text-[10px] leading-[16px] ${OVERALL_TONE[i.overall]}`}>{OVERALL_LABEL[i.overall]}</span></span>
                     <span className="block truncate text-[10.5px] leading-4 text-mauve">{[g.category, g.subcategory].filter(Boolean).join("・")}{i.updated_at ? `｜${ago(i.updated_at)}` : ""}{i.convertible ? "｜由 V2 換算" : ""}</span>

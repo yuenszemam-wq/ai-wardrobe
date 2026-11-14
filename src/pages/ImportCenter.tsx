@@ -12,7 +12,7 @@ export default function ImportCenter() {
 
 export function CopyBlock({ text, dark = true }: { text: string; dark?: boolean }) {
   return (
-    <div className={`mt-3 rounded-2xl p-3 text-[13px] leading-relaxed ${dark ? "bg-velvet text-rose" : "bg-white ring-1 ring-ink/10"}`}>
+    <div className={`mt-3 rounded-2xl p-3 text-[13px] leading-relaxed ${dark ? "bg-velvet text-rose" : "bg-field ring-1 ring-ink/10"}`}>
       <p className="break-all">{text}</p>
       <button
         type="button"

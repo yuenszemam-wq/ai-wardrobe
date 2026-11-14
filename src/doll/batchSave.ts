@@ -10,18 +10,62 @@ import type { Resolved, Worn } from "./model";
 
 export type WearMode = "fixed" | "body" | "auto";
 export const wearModeOf = (o: WearOpts): WearMode => (o.follow === "auto" ? "auto" : o.bone === "world" ? "fixed" : "body");
-export const MODE_LABEL: Record<WearMode, string> = { fixed: "固定原圖", body: "跟隨身體", auto: "跟隨手臂" };
+export const MODE_LABEL: Record<WearMode, string> = { fixed: "固定於畫布", body: "附接骨骼", auto: "跟隨手臂" };
 
 // ───── 快捷工具：作用範圍 ─────
 export type QuickScope = "item" | "set" | "all";
 export const SCOPE_LABEL: Record<QuickScope, string> = { item: "目前衣物", set: "目前套裝", all: "全部適用衣物" };
 
 /**
- * 「跟隨手臂」只適用於有袖的上身衣物（上衣、連身裙、外套、整套）或上身部件（套裝主體）。
- * 半裙、頭飾、頸飾、腿部配件不強制使用手臂骨架；袖套等附接前臂的部件以「跟隨身體」跟隨其附接骨骼。
+ * 「跟隨手臂」適用判斷（Phase 3.8A.2）：不再只看圖層是否屬於上身。
+ * 依據（按優先次序）：已設定跟隨手臂／基準姿勢 → 已附接手臂骨骼的部件（袖套、手袖、手套、手鐲）→
+ * 名稱或子分類為無袖（JSK、背心、吊帶、SK…）→ 有袖的上身衣物（上衣、外套、OP、連身裙、整套主體）。
+ * kind：sleeve＝袖子隨肩膊、上臂、手肘變形；arm-piece＝整個部件附接相應手臂骨骼移動。
  */
-export function armCapable(r: Pick<Resolved, "worn" | "piece">): boolean {
-  return SLOT_SKIN[r.piece ? r.piece.slot : r.worn.slot] === "upper";
+export type ArmInfo = { ok: true; kind: "sleeve" | "arm-piece"; bone?: string } | { ok: false; reason: string };
+const SLEEVELESS = /(JSK|ジャンパースカート|無袖|吊帶|背心|吊带|SK\b|半裙|裙撐|襯裙|camisole|vest|sleeveless)/i;
+const ARM_PIECE = /(袖套|手袖|手套|袖口|手鐲|手鍊|腕|arm ?cover|sleeve|glove|cuff)/i;
+const ARM_BONE = /^(elbow|wrist)_(r|l)$/;
+/** 部件名稱的左右：右＝角色右手（畫面左） */
+const sideOf = (name: string, box?: number[] | null) => (/右/.test(name) ? "r" : /左/.test(name) ? "l" : box ? ((box[0] + box[2]) / 2 < 0.5 ? "r" : "l") : "r");
+export function armInfo(r: Pick<Resolved, "worn" | "piece" | "opts"> & { garment?: { name?: string | null; subcategory?: string | null; category?: string | null } }): ArmInfo {
+  if (r.piece) {
+    const bone = r.opts.bone && ARM_BONE.test(r.opts.bone) ? r.opts.bone : r.piece.opts?.bone && ARM_BONE.test(r.piece.opts.bone) ? r.piece.opts.bone : null;
+    if (bone) return { ok: true, kind: "arm-piece", bone };
+    if (ARM_PIECE.test(r.piece.name)) return { ok: true, kind: "arm-piece", bone: (/(手套|glove|手鐲|手鍊|腕)/i.test(r.piece.name) ? "wrist_" : "elbow_") + sideOf(r.piece.name, (r.piece as { box?: number[] }).box) };
+    if (r.opts.follow === "auto" || r.opts.bind) return { ok: true, kind: "sleeve" };
+    if (SLOT_SKIN[r.piece.slot] !== "upper") return { ok: false, reason: `「${r.piece.name}」不是手臂部件，不需要跟隨手臂` };
+    return SLEEVELESS.test(r.piece.name) ? { ok: false, reason: `「${r.piece.name}」沒有袖子，不需要袖子變形` } : { ok: true, kind: "sleeve" };
+  }
+  // 已手動校正過（有基準姿勢）的衣物：保留使用者的設定
+  if (r.opts.bind) return { ok: true, kind: "sleeve" };
+  const g = r.garment ?? {};
+  const text = [g.name, g.subcategory].filter(Boolean).join(" ");
+  if (SLOT_SKIN[r.worn.slot] !== "upper") return { ok: false, reason: ARM_PIECE.test(text) ? "手臂配件：請在骨架進階設定附接到手肘或手腕" : "這件衣物沒有袖子，不適用「跟隨手臂」" };
+  // 名稱／子分類為無袖（JSK、背心…）：即使目前是自動跟隨的舊預設，也不當作有袖
+  if (SLEEVELESS.test(text)) return { ok: false, reason: "無袖衣物（JSK、背心等）不需要袖子變形；可以在進階設定使用「附接骨骼（整件移動）」" };
+  return { ok: true, kind: "sleeve" };
+}
+export function armCapable(r: Pick<Resolved, "worn" | "piece" | "opts"> & { garment?: { name?: string | null; subcategory?: string | null } }): boolean {
+  return armInfo(r).ok;
+}
+
+/**
+ * 「還原衣物姿勢」使用的保存姿勢（不是身體模型的靜止站姿，也不是 opts.bind 蒙皮基準）：
+ * 套裝部件 piece.pose → 穿法 variant.pose → 單件衣物 template.data.pose → 整套配置 set_layout.pose。
+ */
+export function savedPoseFor(r: Pick<Resolved, "worn" | "piece" | "template">): { pose: Pose; front: FrontPart[]; source: "piece" | "variant" | "garment" | "set" } | null {
+  const d = r.template?.data;
+  if (r.piece) {
+    const p = d?.pieces?.find((q) => q.id === r.piece!.id)?.pose ?? r.piece.pose;
+    if (p) return { pose: p, front: [], source: "piece" };
+    if (d?.set_layout?.pose) return { pose: d.set_layout.pose, front: [], source: "set" };
+  }
+  const v = r.worn.variant ? d?.variants?.[r.worn.variant] : null;
+  if (v?.pose) return { pose: v.pose, front: [], source: "variant" };
+  if (d?.pose) return { pose: d.pose, front: d.front ?? [], source: "garment" };
+  if (d?.set_layout?.pose) return { pose: d.set_layout.pose, front: [], source: "set" };
+  return null;
 }
 
 /** 部件「跟隨身體」時使用的附接骨骼：保留目前附接 → 部件預設 → 按名稱建議；整件衣物＝null（按圖層預設） */
@@ -41,7 +85,7 @@ export function scopeTargets(all: Resolved[], scope: QuickScope, sel: Resolved |
   if (scope === "item") list = sel && visible.some((r) => r.key === sel.key) ? [sel] : [];
   else if (scope === "set") list = sel ? visible.filter((r) => r.garment.id === sel.garment.id) : [];
   else list = visible;
-  return mode === "auto" ? list.filter(armCapable) : list;
+  return mode === "auto" ? list.filter((r) => armCapable(r)) : list;
 }
 
 /** 範圍內的目前模式：全部相同＝該模式；各件不同＝mixed；沒有衣物＝null */

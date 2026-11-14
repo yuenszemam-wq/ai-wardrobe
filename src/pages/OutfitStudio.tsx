@@ -413,8 +413,8 @@ export default function OutfitStudio({ id }: { id?: string }) {
           ))}
         </div>
         <div className="relative min-w-0 flex-1">
-          <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[#8a6d80]" />
-          <input type="search" className="h-9 w-full rounded-full bg-white pl-9 pr-3 text-ink ring-1 ring-gold placeholder:text-[14px] placeholder:text-mauve/80 focus:outline-none focus:ring-2 focus:ring-amethyst" placeholder="搜尋單品…" value={q} onChange={(e) => { setQ(e.target.value); setOpenRight(true); }} aria-label="搜尋單品" />
+          <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[var(--aw-placeholder)]" />
+          <input type="search" className="h-9 w-full rounded-full bg-field pl-9 pr-3 text-ink ring-1 ring-gold placeholder:text-[14px] placeholder:text-mauve/80 focus:outline-none focus:ring-2 focus:ring-amethyst" placeholder="搜尋單品…" value={q} onChange={(e) => { setQ(e.target.value); setOpenRight(true); }} aria-label="搜尋單品" />
         </div>
       </div>
       <div className="mt-1.5">
@@ -486,7 +486,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
                       {p.image_id ? (
                         <TransparentImage quality="high" src={imageUrl(p.image_id)} alt={p.name} draggable={false} className="pointer-events-none h-full w-full object-contain" />
                       ) : (
-                        <div className="grid h-full w-full place-items-center rounded-xl bg-white/70 text-[11px] text-mauve">{p.name}｜待補透明圖</div>
+                        <div className="grid h-full w-full place-items-center rounded-xl bg-field/70 text-[11px] text-mauve">{p.name}｜待補透明圖</div>
                       )}
                       {isSel && (
                         <div
@@ -577,7 +577,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
           <input className={inputCls} value={notes} onChange={(e) => { setNotes(e.target.value); setDirty(true); }} />
         </Field>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={favorite} onChange={(e) => { setFavorite(e.target.checked); setDirty(true); }} className="h-5 w-5 accent-amethyst" />
+          <input type="checkbox" checked={favorite} onChange={(e) => { setFavorite(e.target.checked); setDirty(true); }} className="h-5 w-5 accent-[var(--aw-check)]" />
           收藏這套穿搭
         </label>
       </section>

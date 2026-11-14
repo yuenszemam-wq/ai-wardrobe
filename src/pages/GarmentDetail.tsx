@@ -186,10 +186,10 @@ export default function GarmentDetail({ id }: { id: string }) {
                   key={im.id}
                   type="button"
                   onClick={() => setViewId(im.id)}
-                  className={`relative h-20 w-16 shrink-0 overflow-hidden rounded-xl bg-rose-soft ${shown?.id === im.id ? "ring-2 ring-[#f2a7c3]" : "ring-1 ring-gold/50"}`}
+                  className={`relative h-20 w-16 shrink-0 overflow-hidden rounded-xl bg-rose-soft ${shown?.id === im.id ? "ring-2 ring-[var(--aw-chart)]" : "ring-1 ring-gold/50"}`}
                 >
                   <WardrobeImage src={thumbFor(g, im)} alt="" loading="lazy" className="h-full w-full object-contain" />
-                  <span className="absolute inset-x-0 bottom-0 bg-ink/80 text-center text-[10px] text-rose">{im.is_primary ? "主圖" : im.image_type === "processed" ? "去背圖" : "原相"}</span>
+                  <span className="absolute inset-x-0 bottom-0 bg-head/80 text-center text-[10px] text-rose">{im.is_primary ? "主圖" : im.image_type === "processed" ? "去背圖" : "原相"}</span>
                 </button>
               ))}
             </div>
@@ -231,7 +231,7 @@ export default function GarmentDetail({ id }: { id: string }) {
               type="button"
               aria-label={g.is_favorite ? "取消收藏" : "收藏"}
               onClick={() => patch({ is_favorite: !g.is_favorite }, g.is_favorite ? "已取消收藏" : "已收藏")}
-              className={`text-[26px] leading-none ${g.is_favorite ? "text-[#f2a7c3]" : "text-mauve/60"}`}
+              className={`text-[26px] leading-none ${g.is_favorite ? "text-[var(--aw-chart)]" : "text-mauve/60"}`}
             >
               <IconHeart filled={g.is_favorite} />
             </button>
@@ -600,7 +600,7 @@ function EditForm({
         <textarea className={`${inputCls} min-h-24`} value={f.notes} onChange={set("notes")} />
       </Field>
       <Field label="連結"><input type="url" className={inputCls} maxLength={2048} value={f.source_url} onChange={set("source_url")} placeholder="https://…" /></Field>
-      <div className="detail-actions z-30 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-ink/95 px-4 py-2 backdrop-blur">
+      <div className="detail-actions z-30 flex flex-wrap items-center gap-2 border-t border-gold/30 bg-head/95 px-4 py-2 backdrop-blur">
         <Button type="submit" disabled={busy}>
           {busy ? "儲存中…" : saveLabel}
         </Button>

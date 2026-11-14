@@ -10,7 +10,7 @@ import { BgImage, HomeBgEditor } from "../components/HomeBackground";
 import { useHomeLayout } from "../homeLayoutStore";
 import { activeTheme } from "../../shared/theme";
 import { localTheme } from "../theme";
-import { clearImageCaches, hdCacheLimit, imageCacheUsage, setHdCacheLimit } from "../imageCache";
+import { ClearResult, checkImageUpdates, clearImageCaches, hdCacheLimit, imageCacheUsage, setHdCacheLimit } from "../imageCache";
 
 import { BUILD } from "../build";
 
@@ -158,19 +158,58 @@ function ImageSettings() {
   );
 }
 
-function LocalCache() {
+/**
+ * 本機圖片快取（3.8A.2）：「清除本機圖片快取」（以前叫「修復圖片快取」，但實際是清除）及「檢查及更新圖片」分開。
+ * 清除前顯示容量及影響；只影響這部手機，伺服器原圖、D1 縮圖、衣物、穿搭、角色資料、未同步修改及離線佇列不受影響。
+ */
+export function LocalCache() {
   const [u, setU] = useState<Awaited<ReturnType<typeof imageCacheUsage>> | null>(null);
+  const [pick, setPick] = useState<"thumbs" | "hd" | "all" | null>(null);
+  const [withPinned, setWithPinned] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ClearResult | null>(null);
   const load = () => imageCacheUsage().then(setU);
   useEffect(() => { void load(); }, []);
   const mb = (b: number) => (b / 1048576).toFixed(1) + " MB";
+  const est = !u || !pick ? 0 : (pick !== "hd" ? u.thumbs.bytes : 0) + (pick !== "thumbs" ? u.hd.bytes : 0);
+  async function run() {
+    if (!pick) return;
+    setBusy(true);
+    try {
+      const r = await clearImageCaches({ thumbs: pick !== "hd", hd: pick !== "thumbs", includePinned: withPinned });
+      setResult(r); setPick(null); await load();
+      toast(r.errors.length ? `部分未能清除：${r.errors[0]}` : `已清除 ${r.thumbs.count + r.hd.count} 張（${mb(r.thumbs.bytes + r.hd.bytes)}）`, r.errors.length ? "err" : "ok");
+    } finally { setBusy(false); }
+  }
   return (
-    <section className="frame space-y-2 p-4 text-[13px]" data-testid="local-cache">
-      {!u ? <Spinner /> : <>
-        <p>本機縮圖：{u.thumbs.count} 張｜{mb(u.thumbs.bytes)}</p>
-        <p>本機高清圖片：{u.hd.count} 張｜{mb(u.hd.bytes)}</p>
-      </>}
-      <p className="text-[11.5px] text-mauve">這是手機上的快取用量，與伺服器（R2）儲存及費用無關。完整離線衣櫃（離線瀏覽、下載管理）將在 Phase 3.8B 提供。</p>
-      <Button variant="ghost" onClick={async () => { if (!confirm("清除這部手機的圖片快取？伺服器的圖片及衣物資料不受影響，之後會按需要重新下載。")) return; await clearImageCaches(); await load(); toast("已清除本機圖片快取"); }}>修復圖片快取（清除本機圖片）</Button>
+    <section className="frame space-y-3 p-4 text-[13px]" data-testid="local-cache">
+      {!u ? <Spinner /> : <div className="grid grid-cols-2 gap-2 text-center" data-testid="cache-usage" data-thumbs={u.thumbs.count} data-hd={u.hd.count}>
+        <div className="rounded-xl bg-cream/5 p-2"><p className="font-serif text-[18px] text-gold-soft">{u.thumbs.count}</p><p className="text-[11px] text-mauve">縮圖｜{mb(u.thumbs.bytes)}</p></div>
+        <div className="rounded-xl bg-cream/5 p-2"><p className="font-serif text-[18px] text-gold-soft">{u.hd.count}</p><p className="text-[11px] text-mauve">高清圖片｜{mb(u.hd.bytes)}</p></div>
+      </div>}
+      <div className="space-y-1.5">
+        <Button variant="ghost" className="w-full" data-testid="cache-check" onClick={() => { void checkImageUpdates(); toast("會在顯示圖片時核對版本，只重新下載有改動的圖片"); }}>檢查及更新圖片</Button>
+        <p className="text-[11px] text-mauve">只核對圖片版本及更新時間，只下載有改動的圖片；不會清除全部縮圖或高清圖。</p>
+      </div>
+      <div className="space-y-1.5 border-t border-gold/20 pt-3">
+        <p className="text-gold-soft">清除本機圖片快取</p>
+        <div className="flex flex-wrap gap-1.5">
+          {([["thumbs", "清除縮圖"], ["hd", "清除高清圖片"], ["all", "清除全部圖片快取"]] as const).map(([k, l]) => <button key={k} type="button" data-clear={k} aria-pressed={pick === k} onClick={() => { setPick(k); setResult(null); }} className={`h-9 rounded-full px-3 text-[12.5px] ${pick === k ? "chip-on" : "chip"}`}>{l}</button>)}
+        </div>
+        {pick && u && (
+          <div className="rounded-2xl bg-cream/5 p-3 text-[12px] leading-relaxed" data-testid="clear-confirm">
+            <p>將清除約 <b data-testid="clear-estimate">{mb(est)}</b>。</p>
+            <ul className="list-disc pl-4 text-mauve">
+              <li>只影響這部手機；伺服器原圖（R2）、D1 縮圖、衣物及穿搭資料、角色資料不受影響。</li>
+              <li>未同步的修改、未上傳的圖片及離線佇列不會被刪除。</li>
+              <li>之後需要重新下載圖片（會產生少量 R2 讀取），離線時可能看不到圖片。</li>
+            </ul>
+            {pick !== "thumbs" && <label className="mt-1.5 flex items-center gap-2"><input type="checkbox" checked={withPinned} onChange={(e) => setWithPinned(e.target.checked)} data-testid="clear-pinned" />同時刪除已指定保留的離線高清圖（預設保留）</label>}
+            <div className="mt-2 flex gap-2"><Button variant="ghost" onClick={() => setPick(null)} disabled={busy}>取消</Button><Button variant="danger" data-testid="clear-run" disabled={busy} onClick={() => void run()}>確認清除</Button></div>
+          </div>
+        )}
+        {result && <p className="text-[12px]" role="status" data-testid="clear-result" data-errors={result.errors.length}>已清除縮圖 {result.thumbs.count} 張、高清圖 {result.hd.count} 張（{mb(result.thumbs.bytes + result.hd.bytes)}）{result.keptPinned ? `；保留指定離線圖 ${result.keptPinned} 張` : ""}{result.errors.length ? `；未能清除：${result.errors.join("、")}` : ""}</p>}
+      </div>
     </section>
   );
 }
@@ -285,7 +324,7 @@ function ThumbnailStatus() {
   const load=()=>api<any>("/api/thumbnails/status").then(setStatus).catch(()=>{});
   useEffect(()=>{void load();},[]);
   if(!status)return null;
-  return <section className="mb-5 rounded-2xl bg-ink p-4 text-sm">
+  return <section className="mb-5 rounded-2xl bg-head p-4 text-sm">
     <h2 className="font-serif text-lg text-gold-soft">圖片與離線縮圖</h2>
     <p className="mt-2">已建立 {status.storage.count} 張縮圖 · {(status.storage.bytes/1048576).toFixed(1)} MB</p>
     <p>待處理 {status.jobs.filter((j:any)=>j.state!=="failed").reduce((s:number,j:any)=>s+j.count,0)} 張 · 失敗 {status.jobs.find((j:any)=>j.state==="failed")?.count??0} 張</p>

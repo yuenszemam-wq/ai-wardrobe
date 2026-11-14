@@ -148,7 +148,7 @@ export function HairColorStudio({ value, onChange }: { value: Appearance; onChan
           <span className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow" style={{ left: `${hsv[1] * 100}%`, top: `${(1 - hsv[2]) * 100}%`, background: shown }} />
         </div>
         <div className="flex w-[7.2rem] shrink-0 flex-col justify-between gap-1.5">
-          <input value={hexText} onChange={(e) => { const t = e.target.value.trim(); setHexText(t); if (/^#[0-9a-f]{6}$/i.test(t)) { setHsv(hexToHsv(t.toLowerCase())); applyNow(t.toLowerCase()); } }} onBlur={() => { if (/^#[0-9a-f]{6}$/i.test(hexText)) remember(hexText.toLowerCase()); }} aria-label="HEX 色碼" data-testid="color-hex" placeholder="#rrggbb" className="h-8 w-full rounded-full bg-white px-3 text-[12.5px] text-ink ring-1 ring-gold focus:outline-none" />
+          <input value={hexText} onChange={(e) => { const t = e.target.value.trim(); setHexText(t); if (/^#[0-9a-f]{6}$/i.test(t)) { setHsv(hexToHsv(t.toLowerCase())); applyNow(t.toLowerCase()); } }} onBlur={() => { if (/^#[0-9a-f]{6}$/i.test(hexText)) remember(hexText.toLowerCase()); }} aria-label="HEX 色碼" data-testid="color-hex" placeholder="#rrggbb" className="h-8 w-full rounded-full bg-field px-3 text-[12.5px] text-ink ring-1 ring-gold focus:outline-none" />
           <button type="button" onClick={() => applyNow(null)} className="chip h-8 rounded-full text-[11.5px]">{target === "tip" ? "不用髮尾漸層" : "回復原色"}</button>
           <button type="button" data-testid="swatch-save" onClick={saveColor} className="chip flex h-8 items-center justify-center gap-1 rounded-full text-[11.5px]"><IconPlus className="text-[10px]" />存為色票</button>
         </div>
@@ -163,7 +163,7 @@ export function HairColorStudio({ value, onChange }: { value: Appearance; onChan
           <button key={c.id} type="button" data-swatch={c.id} onClick={() => (editing ? editColor(c) : (applyNow(c.hex), remember(c.hex)))} className="relative flex w-12 shrink-0 flex-col items-center">
             <span className="h-8 w-8 rounded-full border border-white/50" style={{ background: c.hex }} />
             <span className="w-full truncate text-center text-[9.5px] text-cream/85">{c.name}</span>
-            {editing && <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-ink text-[8px] text-gold-soft"><IconTrash /></span>}
+            {editing && <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-head text-[8px] text-gold-soft"><IconTrash /></span>}
           </button>
         ))}
       </div>

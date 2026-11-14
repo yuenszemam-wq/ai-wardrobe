@@ -55,6 +55,15 @@ jobs:
       - run: node test/phase38a1-home.mjs
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/phase38a2-theme.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/phase38a2-dress.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/phase38a2-home.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
       - run: node test/phase34.mjs
         if: always()
         env:

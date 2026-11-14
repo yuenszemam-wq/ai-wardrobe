@@ -170,14 +170,14 @@ export function HomeBgEditor({ current, onClose }: { current: HomeBg | null; onC
               <span>縮放</span>
               <span>{layout.zoom.toFixed(2)}×</span>
             </span>
-            <input type="range" min={1} max={4} step={0.01} value={layout.zoom} onChange={(e) => setLayout((l) => ({ ...l, zoom: Number(e.target.value) }))} className="mt-1 w-full accent-[#f2a7c3]" aria-label="縮放" />
+            <input type="range" min={1} max={4} step={0.01} value={layout.zoom} onChange={(e) => setLayout((l) => ({ ...l, zoom: Number(e.target.value) }))} className="mt-1 w-full " aria-label="縮放" />
           </label>
           <label className="mt-2 block text-[13px]">
             <span className="flex justify-between text-mauve">
               <span>高度</span>
               <span>{layout.ratio < 62 ? "矮" : layout.ratio < 95 ? "中" : "高"}</span>
             </span>
-            <input type="range" min={40} max={140} step={1} value={layout.ratio} onChange={(e) => setLayout((l) => ({ ...l, ratio: Number(e.target.value) }))} className="mt-1 w-full accent-[#f2a7c3]" aria-label="高度" />
+            <input type="range" min={40} max={140} step={1} value={layout.ratio} onChange={(e) => setLayout((l) => ({ ...l, ratio: Number(e.target.value) }))} className="mt-1 w-full " aria-label="高度" />
           </label>
         </>
       ) : (

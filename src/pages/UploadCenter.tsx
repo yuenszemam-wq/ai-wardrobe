@@ -248,7 +248,7 @@ export default function UploadCenter() {
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         className={`pat-dots flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
-          dragging ? "border-amethyst bg-rose" : "border-amethyst/50 bg-white"
+          dragging ? "border-amethyst bg-rose" : "border-amethyst/50 bg-field"
         } ${running || merging ? "pointer-events-none opacity-60" : ""}`}
       >
         <span className="mt-2 font-serif text-[18px] font-bold text-amethyst-deep">{total ? "再選相片" : "選擇相片"}</span>
@@ -261,7 +261,7 @@ export default function UploadCenter() {
 
       {total > 0 && (
         <>
-          <div className="mt-4 rounded-2xl bg-white p-3">
+          <div className="mt-4 rounded-2xl bg-field p-3">
             <div className="flex items-baseline justify-between text-[13px]">
               <span className="font-medium">{running ? "上傳中…" : failed ? "部分未能上傳" : "已完成"}</span>
               <span className="text-mauve">
@@ -277,7 +277,7 @@ export default function UploadCenter() {
           <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {groups.map(([i, ...photos]) => (
               <li key={i.key} data-merge-id={i.garmentId} aria-busy={merging}
-                className={`flex flex-wrap items-center gap-3 rounded-2xl bg-white p-2 pr-3 ${dropTarget === i.garmentId ? "ring-2 ring-amethyst" : ""} ${mergeSource === i.garmentId ? "opacity-60" : ""}`}>
+                className={`flex flex-wrap items-center gap-3 rounded-2xl bg-field p-2 pr-3 ${dropTarget === i.garmentId ? "ring-2 ring-amethyst" : ""} ${mergeSource === i.garmentId ? "opacity-60" : ""}`}>
                 {dropTarget === i.garmentId && <div className="w-full text-sm text-amethyst-deep">放手合併到這一件</div>}
                 <img src={i.preview} alt="" className="checker h-16 w-12 shrink-0 rounded-lg object-cover" onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")} />
                 <div className="min-w-0 flex-1">

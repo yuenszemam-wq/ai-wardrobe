@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { HomeLayout, WIDGETS, Widget, WidgetType, defaultHomeLayout, normalizeHomeLayout, widgetSpec } from "../../shared/homeLayout";
+import { HomeLayout, WIDGETS, Widget, WidgetType, defaultHomeLayout, normalizeHomeLayout, widgetSpec , SIZE_LABEL, displayLabel } from "../../shared/homeLayout";
 import { LayoutConflict, adoptServerLayout, baseOf, saveHomeLayout } from "../homeLayoutStore";
 import { IconChevronDown, IconChevronUp, IconEye, IconEyeOff, IconGrip } from "./icons";
 import { WidgetSettings } from "./WidgetSettings";
@@ -67,7 +67,7 @@ export function HomeEditor({ layout, onDraft, onClose, inline }: { layout: HomeL
                   <span {...handle} className="grid h-9 w-8 shrink-0 place-items-center text-mauve"><IconGrip /></span>
                   <button type="button" onClick={() => setOpen(open === w.id ? null : w.id)} aria-expanded={open === w.id} className="min-w-0 flex-1 text-left">
                     <span className="block truncate text-[13.5px]">{spec.label}{w.opts.category ? `｜${w.opts.category}` : ""}</span>
-                    <span className="block truncate text-[10.5px] text-mauve">{w.visible ? (w.size === "compact" ? "緊湊" : "標準") : "已隱藏"}{w.opts.count ? `｜${w.opts.count} 項` : ""}</span>
+                    <span className="block truncate text-[10.5px] text-mauve">{w.visible ? `${SIZE_LABEL[w.size]}・${displayLabel(w.type, w.display)}` : "已隱藏"}{w.opts.count ? `｜${w.opts.count} 項` : ""}</span>
                   </button>
                   <button type="button" aria-label="向上" data-move="up" disabled={i === 0} onClick={() => move(w.id, -1)} className="grid h-9 w-8 place-items-center text-[14px] disabled:opacity-30"><IconChevronUp /></button>
                   <button type="button" aria-label="向下" data-move="down" disabled={i === draft.widgets.length - 1} onClick={() => move(w.id, 1)} className="grid h-9 w-8 place-items-center text-[14px] disabled:opacity-30"><IconChevronDown /></button>

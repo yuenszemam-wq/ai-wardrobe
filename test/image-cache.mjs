@@ -45,6 +45,46 @@ await assert.rejects(()=>loader.highResolutionBlob('/api/images/img_test'));cons
   console.log('✓ HD: duplicate requests merge; cached HD reused without another R2 read');
   delete globalThis.window;
 }
+// Phase 3.8A.2：清除快取如實回報、指定保留的高清圖、舊下載不會寫回、共用下載的取消互不影響
+{
+  globalThis.window={dispatchEvent(){},addEventListener(){}};
+  loader.clearImageMemory();
+  globalThis.fetch=async()=>new Response(new Blob(['hd2']),{headers:{'content-type':'image/png'}});
+  await loader.highResolutionBlob('/api/images/img_keep',{pin:true});
+  await loader.highResolutionBlob('/api/images/img_drop');
+  await new Promise(r=>setTimeout(r,20));
+  const r1=await loader.clearImageCaches({thumbs:false,hd:true});
+  assert.equal(r1.hd.count,2,JSON.stringify(r1));assert.equal(r1.keptPinned,1);assert.equal(r1.errors.length,0);
+  const hdStore=await caches.open('aw-private-hd-v1');
+  assert.ok(await hdStore.match('/api/images/img_keep'));assert.ok(!(await hdStore.match('/api/images/img_drop')));
+  console.log('✓ clear HD: reports count, keeps pinned offline images unless chosen');
+  const r2=await loader.clearImageCaches({thumbs:true,hd:true,includePinned:true});
+  assert.ok(!(await hdStore.match('/api/images/img_keep')));assert.ok(r2.thumbs.count>0);
+  console.log('✓ clear all incl. pinned: thumbs and pinned HD removed, counts reported');
+  // 清除時仍在下載的舊請求：完成後不會寫回快取
+  let release;globalThis.fetch=()=>new Promise(r=>{release=()=>r(new Response(new Blob(['late']),{headers:{'content-type':'image/png'}}));});
+  const late=loader.highResolutionBlob('/api/images/img_late');late.catch(()=>{});
+  await new Promise(r=>setTimeout(r,5));
+  await loader.clearImageCaches({thumbs:true,hd:true});
+  release?.();await new Promise(r=>setTimeout(r,20));
+  assert.ok(!(await (await caches.open('aw-private-hd-v1')).match('/api/images/img_late')));
+  console.log('✓ in-flight download finishing after clear/logout does not re-populate the cache');
+  // 共用下載：其中一個元件取消，不影響另一個
+  let calls=0,finish;globalThis.fetch=(u,o)=>new Promise((r,j)=>{calls++;o?.signal?.addEventListener('abort',()=>j(new DOMException('aborted','AbortError')));finish=()=>r(new Response(new Blob(['shared']),{headers:{'content-type':'image/png'}}));});
+  const c1=new AbortController();
+  const p1=loader.highResolutionBlob('/api/images/img_share',{signal:c1.signal}),p2=loader.highResolutionBlob('/api/images/img_share');p1.catch(()=>{});
+  await new Promise(r=>setTimeout(r,5));c1.abort();
+  await assert.rejects(p1);finish();
+  assert.equal(await (await p2).text(),'shared');assert.equal(calls,1);
+  console.log('✓ shared HD flight: one consumer cancelling does not cancel the others');
+  const c2=new AbortController(),c3=new AbortController();let aborted=false;
+  globalThis.fetch=(u,o)=>new Promise((r,j)=>{o?.signal?.addEventListener('abort',()=>{aborted=true;j(new DOMException('aborted','AbortError'));});});
+  const q1=loader.highResolutionBlob('/api/images/img_both',{signal:c2.signal}),q2=loader.highResolutionBlob('/api/images/img_both',{signal:c3.signal});q1.catch(()=>{});q2.catch(()=>{});
+  await new Promise(r=>setTimeout(r,5));c2.abort();await new Promise(r=>setTimeout(r,5));assert.equal(aborted,false);c3.abort();
+  await Promise.allSettled([q1,q2]);await new Promise(r=>setTimeout(r,5));assert.equal(aborted,true);
+  console.log('✓ shared HD flight aborts the network request only when every consumer cancels');
+  delete globalThis.window;
+}
 // Execute the actual service-worker lifecycle against mock caches/network.
 const listeners={};let net=true;
 const context={self:{addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting:async()=>{},clients:{claim:async()=>{}}},location:{origin:'https://test'},caches,URL,Response,Headers,Promise,fetch:async req=>{if(!net)throw new Error('offline');return Response.json(req.url.endsWith('status')?{logged_in:true}:{items:[{id:'g_1'}]});}};

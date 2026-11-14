@@ -92,8 +92,8 @@ export default function Outfits() {
           <button type="button" aria-label={`排序：${SORT_LABEL[sort]}`} data-testid="sort" onClick={() => setSort(sort === "updated" ? "created" : sort === "created" ? "name" : "updated")} className="chip grid h-9 w-9 place-items-center rounded-full text-[17px]"><IconSort /></button>
         </div>
       </div>
-      {search && <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋造型名稱" aria-label="搜尋造型名稱" className="mt-2 h-10 w-full rounded-full bg-white px-4 text-[14px] text-ink ring-1 ring-gold focus:outline-none" />}
-      <div className="mt-3 grid grid-cols-3 rounded-full bg-white/5 p-1 ring-1 ring-gold/30" role="tablist" data-testid="kind-filter">
+      {search && <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋造型名稱" aria-label="搜尋造型名稱" className="mt-2 h-10 w-full rounded-full bg-field px-4 text-[14px] text-ink ring-1 ring-gold focus:outline-none" />}
+      <div className="mt-3 grid grid-cols-3 rounded-full bg-cream/5 p-1 ring-1 ring-gold/30" role="tablist" data-testid="kind-filter">
         {([["all", "全部"], ["outfit", "衣服配搭"], ["look", "角色換裝"]] as [Filter, string][]).map(([k, label]) => (
           <button key={k} type="button" role="tab" data-filter={k} aria-selected={filter === k} onClick={() => setFilter(k)} className={`h-9 rounded-full text-[13.5px] ${filter === k ? "chip-on" : "text-cream/80"}`}>{label}</button>
         ))}
@@ -119,7 +119,7 @@ export default function Outfits() {
                 <div className="mt-1 truncate px-0.5 font-serif text-[15px] font-bold text-ink">{e.name}</div>
                 <div className="px-0.5 text-[12px] text-mauve">{e.item_count} 件衣物</div>
               </Link>
-              <button type="button" aria-label={e.is_favorite ? "取消收藏" : "收藏"} aria-pressed={e.is_favorite} data-testid="card-fav" onClick={() => void toggleFav(e)} className={`absolute bottom-[3.1rem] right-2 grid h-8 w-8 place-items-center rounded-full text-[18px] ${e.is_favorite ? "text-[#c9578a]" : "text-mauve"}`}><IconHeart filled={e.is_favorite} /></button>
+              <button type="button" aria-label={e.is_favorite ? "取消收藏" : "收藏"} aria-pressed={e.is_favorite} data-testid="card-fav" onClick={() => void toggleFav(e)} className={`absolute bottom-[3.1rem] right-2 grid h-8 w-8 place-items-center rounded-full text-[18px] ${e.is_favorite ? "text-[var(--aw-chart)]" : "text-mauve"}`}><IconHeart filled={e.is_favorite} /></button>
             </div>
           ))}
         </div>
@@ -157,7 +157,7 @@ function ToolLink({ to, Icon, title, testid }: { to: string; Icon: typeof IconSh
 export function LookPreview({ l }: { l: LookSummary }) {
   const [failed, setFailed] = useState(false);
   return (
-    <div className="relative aspect-[3/4] overflow-hidden rounded-[14px] ring-1 ring-gold/50" style={{ background: "linear-gradient(#f7f0f6, #e6d6ea)" }}>
+    <div className="relative aspect-[3/4] overflow-hidden rounded-[14px] ring-1 ring-gold/50" style={{ background: "linear-gradient(color-mix(in srgb, var(--aw-canvas) 70%, #fff), var(--aw-canvas))" }}>
       {l.thumb_at && !failed ? (
         <img src={`/api/doll/looks/${l.id}/thumb?v=${encodeURIComponent(l.thumb_at)}`} alt="" loading="lazy" onError={() => setFailed(true)} className="absolute inset-0 h-full w-full object-cover object-top" />
       ) : (
@@ -171,7 +171,7 @@ export function LookPreview({ l }: { l: LookSummary }) {
 export function OutfitPreview({ o }: { o: OutfitSummary }) {
   if (o.items.some((it) => it.x !== null))
     return (
-      <div className="relative aspect-[3/4] overflow-hidden rounded-[14px] bg-white ring-1 ring-gold/50">
+      <div className="relative aspect-[3/4] overflow-hidden rounded-[14px] bg-field ring-1 ring-gold/50">
         {o.items.map((it, i) =>
           it.image_id && it.x !== null ? (
             <TransparentImage
@@ -187,7 +187,7 @@ export function OutfitPreview({ o }: { o: OutfitSummary }) {
       </div>
     );
   return (
-    <div className="grid aspect-[3/4] grid-cols-2 gap-1 overflow-hidden rounded-[14px] bg-white ring-1 ring-gold/50">
+    <div className="grid aspect-[3/4] grid-cols-2 gap-1 overflow-hidden rounded-[14px] bg-field ring-1 ring-gold/50">
       {!o.items.length && o.image_id ? (
         <TransparentImage src={imageUrl(o.image_id)} alt="" loading="lazy" className="col-span-2 row-span-2 h-full w-full object-cover" />
       ) : (

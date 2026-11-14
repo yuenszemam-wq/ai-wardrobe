@@ -101,7 +101,8 @@ check("目前衣物：只有選中的一件", B.scopeTargets(all, "item", rs[1])
 check("目前套裝：同一套裝 6 個部件", B.scopeTargets(all, "set", rs[1]).length === 6 && B.unitOf(B.scopeTargets(all, "set", rs[1])) === "個部件");
 check("沒有選中時「目前衣物」不會作用於任何衣物", B.scopeTargets(all, "item", null).length === 0);
 check("各件設定不同：顯示混合設定", B.scopeMode(B.scopeTargets(all, "set", rs[1])) === "mixed" && B.scopeMode([rs[4], rs[5]]) === "body");
-check("跟隨手臂只計有袖衣物：半裙、頭飾、腿部配件、袖套不計", B.scopeTargets(all, "all", null, "auto").map((r) => r.key).sort().join() === ["gar_blouse", "gar_maid#pc_body"].sort().join());
+// Phase 3.8A.2：袖套等附接手臂骨骼的部件也適用「跟隨手臂」（按手臂骨骼移動）；半裙、頭飾、腿部配件仍然不計
+check("跟隨手臂：有袖衣物＋袖套；半裙、頭飾、腿部配件不計", B.scopeTargets(all, "all", null, "auto").map((r) => r.key).sort().join() === ["gar_blouse", "gar_maid#pc_body", "gar_maid#pc_slvr", "gar_maid#pc_slvl"].sort().join(), B.scopeTargets(all, "all", null, "auto").map((r) => r.key));
 check("袖套切換為跟隨身體時保留附接骨骼", B.bodyBoneFor({ ...rs[4], opts: { ...rs[4].opts, bone: "world" } }, () => "world") === "elbow_r" && B.bodyBoneFor(rs[2], () => "world") === "ankle_r" && B.bodyBoneFor(blouse, () => "x") === null);
 
 console.log("批量 API：驗證後以單一交易寫入");

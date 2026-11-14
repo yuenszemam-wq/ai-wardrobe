@@ -154,7 +154,7 @@ export default function Wardrobe() {
       <div className="flex min-h-11 items-center gap-1.5 pb-1 pt-3">
         {searchOpen ? (
           <div className="relative min-w-0 flex-1">
-            <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[#8a6d80]" />
+            <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[var(--aw-placeholder)]" />
             <input type="search" autoFocus className="field h-9 w-full rounded-full pl-9 pr-3" placeholder="搜尋名稱、品牌、圖案…" aria-label="搜尋衣物" value={q}
               onChange={(e) => { const v = e.target.value; setQ(v); clearTimeout(debounce.current); debounce.current = window.setTimeout(() => setParam("q", v.trim()), 350); }} />
           </div>
@@ -176,7 +176,7 @@ export default function Wardrobe() {
       </div>
 
       {/* 緊湊固定工具列：主分類＋（子分類、顯示方式、排序、數量），約 86px */}
-      <div ref={barRef} data-testid="wardrobe-toolbar" className="lace-b sticky z-20 -mx-4 bg-ink/95 px-4 pb-1.5 pt-1.5 backdrop-blur" style={{ top: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
+      <div ref={barRef} data-testid="wardrobe-toolbar" className="lace-b sticky z-20 -mx-4 bg-head/95 px-4 pb-1.5 pt-1.5 backdrop-blur" style={{ top: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
         <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4" data-testid="wardrobe-cats">
           {["", ...tax.categories.map((c) => c.name)].map((c) => (
             <button key={c || "__all"} type="button" data-cat={c || "all"} aria-pressed={category === c} onClick={() => setParam("category", c)} className={`h-8 shrink-0 rounded-full px-3 text-[12.5px] ${category === c ? "chip-on" : "chip"}`}>{c || "全部"}</button>
@@ -224,7 +224,7 @@ export default function Wardrobe() {
           <div><p className="mb-1 text-[13px] text-mauve">品牌</p><Chips options={["__none__", ...brands] as string[]} value={brand} onChange={(v) => setParam("brand", v)} labels={{ __none__: "未有品牌" }} /></div>
           <div><p className="mb-1 text-[13px] text-mauve">價錢</p><Chips options={["1", "0"] as const} value={priced as never} onChange={(v) => setParam("priced", v)} labels={{ "1": "已填價錢", "0": "未填價錢" }} /></div>
           <div><p className="mb-1 text-[13px] text-mauve">是否已辨認</p><Chips options={["1", "0"] as const} value={identified as never} onChange={(v) => setParam("identified", v)} labels={{ "1": "已辨認", "0": "未辨認" }} /></div>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={favorite} onChange={(e) => setParam("favorite", e.target.checked ? "1" : "")} className="h-5 w-5 accent-amethyst" />只看收藏</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={favorite} onChange={(e) => setParam("favorite", e.target.checked ? "1" : "")} className="h-5 w-5 accent-[var(--aw-check)]" />只看收藏</label>
           <div className="flex gap-2"><Button variant="ghost" onClick={() => setShowFilters(false)}>完成</Button><Link to="/taxonomy" className="self-center text-[13px] text-amethyst-deep underline underline-offset-4">管理分類</Link></div>
         </div>
       )}

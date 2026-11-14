@@ -33,9 +33,9 @@ const STATUS_TONE: Record<AiStatus, string> = {
   pending_ai: "bg-velvet text-rose",
   ai_processing: "bg-amethyst text-white",
   pending_review: "bg-rose text-ink ring-1 ring-amethyst/40",
-  done: "bg-white text-mauve ring-1 ring-ink/10",
+  done: "bg-field text-mauve ring-1 ring-ink/10",
   failed: "bg-wine text-white",
-  needs_rework: "bg-ink text-rose",
+  needs_rework: "bg-head text-rose",
 };
 
 interface ReviewData {
@@ -132,7 +132,7 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
     <section id="todo" className="paper mt-9 scroll-mt-20 px-4 pb-4 pt-7">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="font-serif text-xl font-bold tracking-[0.08em]">待整理</h2>
-        <select className="rounded-full bg-white px-3 py-1.5 text-[13px] ring-1 ring-ink/10" value={sort} onChange={(e) => setParam("sort", e.target.value === "newest" ? "" : e.target.value)} aria-label="排序">
+        <select className="rounded-full bg-field px-3 py-1.5 text-[13px] ring-1 ring-ink/10" value={sort} onChange={(e) => setParam("sort", e.target.value === "newest" ? "" : e.target.value)} aria-label="排序">
           <option value="newest">最新上傳</option>
           <option value="oldest">最舊上傳</option>
           <option value="number">按編號</option>
@@ -270,7 +270,7 @@ function BulkIntakeSheet({
       )}
       {withAi > 0 && (
         <label className="flex items-start gap-2 text-[14px]">
-          <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} className="mt-0.5 h-5 w-5 accent-amethyst" />
+          <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} className="mt-0.5 h-5 w-5 accent-[var(--aw-check)]" />
           <span>
             其中 {withAi} 件有 AI 建議：同時接受 AI 建議
             <span className="block text-[12px] text-mauve">未確認的品牌不會寫入；上面指定的分類會優先。</span>
@@ -303,7 +303,7 @@ function ReviewCard({ g, selected, onToggle, open, onOpen, onChanged }: { g: Rev
   const brand = brandBadge(n);
   const reviewFields = n ? n.uncertain_fields.length + (n.needs_review ? 1 : 0) : 0;
   return (
-    <li className={`rounded-3xl bg-white p-3 ring-1 ${selected ? "ring-2 ring-amethyst" : "ring-ink/5"}`}>
+    <li className={`rounded-3xl bg-field p-3 ring-1 ${selected ? "ring-2 ring-amethyst" : "ring-ink/5"}`}>
       <div className="flex gap-3">
         <button type="button" onClick={onToggle} aria-pressed={selected} aria-label="選取" className="relative shrink-0">
           <div className="arch relative h-28 w-21 overflow-hidden" style={{ width: "5.25rem" }}>
@@ -313,7 +313,7 @@ function ReviewCard({ g, selected, onToggle, open, onOpen, onChanged }: { g: Rev
               <div className="absolute inset-0 grid place-items-center text-[11px] text-mauve">未有圖片</div>
             )}
           </div>
-          <span className={`absolute left-1 top-1 grid h-6 w-6 place-items-center rounded-full text-xs ${selected ? "bg-amethyst text-white" : "bg-white/90 text-transparent ring-1 ring-ink/20"}`}>✓</span>
+          <span className={`absolute left-1 top-1 grid h-6 w-6 place-items-center rounded-full text-xs ${selected ? "bg-amethyst text-white" : "bg-field/90 text-transparent ring-1 ring-ink/20"}`}>✓</span>
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -468,7 +468,7 @@ function Compare({ g, n, suggestionId, onDone, tax }: { g: ReviewItem; n: AiNorm
                 <td className="py-1.5">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 accent-amethyst"
+                    className="h-4 w-4 accent-[var(--aw-check)]"
                     disabled={!has(f)}
                     checked={checked.has(f)}
                     onChange={(e) =>

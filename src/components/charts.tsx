@@ -2,7 +2,8 @@ import { ReactNode } from "react";
 
 /** 分類色（深紫絲絨底上要分得開）：粉、薰衣草、玫瑰金、莓紅、霧藍、奶油、灰紫、橄欖 */
 // 第一個顏色跟隨介面主題的圖表色；原本的奶油色在淺色主題看不見，改用主題的金色文字色
-export const SERIES = ["var(--aw-chart, #f2a7c3)", "#b98ae0", "#d9b391", "#e0577f", "#8fc7d6", "var(--color-gold-soft, #f6e7df)", "#9d6f8f", "#c9d08a"];
+// Phase 3.8A.2：全部系列跟隨主題的圖表色票（主要＋4 個系列色），之後以標題色及其混色延伸
+export const SERIES = ["var(--aw-chart-1)", "var(--aw-chart-2)", "var(--aw-chart-3)", "var(--aw-chart-4)", "var(--aw-chart-5)", "var(--color-gold-soft)", "color-mix(in srgb, var(--aw-chart-1) 50%, var(--aw-chart-3))", "color-mix(in srgb, var(--aw-chart-2) 50%, var(--aw-chart-4))"];
 
 export const COLOR_HEX: Record<string, string> = {
   黑: "#17101a",
@@ -24,7 +25,7 @@ export const COLOR_HEX: Record<string, string> = {
 export function swatch(name: string): string {
   if (COLOR_HEX[name]) return COLOR_HEX[name];
   if (name === "多色") return "conic-gradient(#f4a9c8, #ecd06a, #5c9a72, #4f74c9, #8a5fc0, #f4a9c8)";
-  return "repeating-linear-gradient(45deg, #b79bae 0 3px, #5a3d52 3px 6px)";
+  return "repeating-linear-gradient(45deg, var(--aw-text2) 0 3px, var(--aw-card2) 3px 6px)";
 }
 
 export interface Seg {
@@ -50,7 +51,7 @@ export function Donut({ segs, size = 150, thickness = 15, children }: { segs: Se
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="-rotate-90" role="img" aria-label={segs.map((s) => `${s.name} ${s.n}`).join("、")}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgb(217 179 145 / 0.18)" strokeWidth={thickness} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: "color-mix(in srgb, var(--aw-line) 18%, transparent)" }} strokeWidth={thickness} />
         {total > 0 &&
           segs.map((s, i) => {
             const len = (s.n / total) * c;
@@ -82,7 +83,7 @@ export function Bars({
   rows,
   max,
   format = (n) => String(n),
-  color = "linear-gradient(90deg, #8f4d7c, #f2a7c3)",
+  color = "linear-gradient(90deg, var(--aw-primary), var(--aw-chart))",
   onPick,
 }: {
   rows: { name: string; n: number; sub?: string; dot?: string }[];

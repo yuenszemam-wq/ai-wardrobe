@@ -27,7 +27,7 @@ export default function Login({ setupRequired, onDone }: { setupRequired: boolea
   }
 
   return (
-    <div className="safe-top flex min-h-screen flex-col bg-ink px-6 text-rose">
+    <div className="safe-top flex min-h-screen flex-col bg-head px-6 text-rose">
       <div className="mx-auto w-full max-w-sm flex-1 pt-[12vh]">
         <div className="arch-dark mx-auto mb-8 grid h-36 w-28 place-items-center text-4xl text-rose">✝</div>
         <h1 className="text-center font-serif text-[28px] font-bold tracking-[0.15em]">電子衣櫃</h1>
