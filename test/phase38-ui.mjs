@@ -13,8 +13,9 @@ await addGarment(env, { id: "gar_col", name: "白色黑蕾絲娃娃領上衣", c
 await addGarment(env, { id: "gar_sk", name: "測試半裙", category: "半身裙", subcategory: "SK", svg: '<path d="M300 300 L600 300 L800 950 L100 950 Z" fill="#7a1f2b"/>' });
 const H = roomHelpers(page);
 // Phase 3.8A.1：快捷工具列常駐於畫布下方，不再需要先打開彈層
-const openQuick = async () => undefined;
-const qmode = () => page.getAttribute('[data-testid="quick-state"]', "data-mode");
+// Phase 3.8A.2：批量範圍及模式移入畫布快捷的「⋯」選單
+const openQuick = async () => { if (!(await page.locator('[data-testid="quick-menu"]').count())) await page.click('[data-testid="quick-more"]'); };
+const qmode = async () => { await openQuick(); return page.getAttribute('[data-testid="quick-state"]', "data-mode"); };
 
 try {
   console.log("換裝：快捷操作");
@@ -24,8 +25,10 @@ try {
   await page.click('[data-garment="gar_sk"]');
   await H.ready();
   const bar = await page.locator('[data-testid="quick-bar"]').boundingBox(), stageBox = await page.locator('[data-testid="doll-stage"]').boundingBox();
-  check("快捷工具列在畫布下方，不遮住人物", !!bar && !!stageBox && bar.y >= stageBox.y + stageBox.height - 1, { bar, stageBox });
+  check("快捷工具在畫布右下角（不另佔一行）", !!bar && !!stageBox && bar.y + bar.height <= stageBox.y + stageBox.height + 1 && bar.x + bar.width >= stageBox.x + stageBox.width - 12, { bar, stageBox });
+  await openQuick();
   check("沒有選中衣物時提示先選取（不會默默修改全部）", (await page.getAttribute('[data-testid="quick-state"]', "data-count")) === "0" && (await page.textContent('[data-testid="quick-state"]')).includes("未選衣物") && await page.locator('[data-quick-mode="body"]').isDisabled());
+  await page.click('[data-testid="quick-more"]');
   await page.click('[data-tab="pose"]');
   await page.click('[data-pose="reach_out"]');
   await H.ready();
@@ -59,9 +62,11 @@ try {
 
   // 快捷：目前衣物的跟隨模式（與骨架分頁同步）
   const fit0 = await H.room("data-worn");
+  await openQuick();
   await page.click('[data-quick-mode="fixed"]');
   await H.ready();
-  check("快捷切換：固定原圖", (await qmode()) === "fixed" && (await H.room("data-wear")) === "fixed");
+  check("快捷切換：固定於畫布", (await qmode()) === "fixed" && (await H.room("data-wear")) === "fixed");
+  await page.click('[data-testid="quick-more"]');
   await page.click('[data-tool="follow"]');
   check("與骨架分頁同步", (await page.getAttribute('[data-wear-mode="fixed"]', "aria-pressed")) === "true");
   check("切換跟隨模式不清除遮罩", (await H.room("data-masked")) === "1");
@@ -98,12 +103,13 @@ try {
   check("批量操作清楚顯示作用範圍及件數（跟隨手臂只計有袖衣物）", (await page.getAttribute('[data-testid="quick-state"]', "data-count")) === "2" && (await page.getAttribute('[data-testid="quick-state"]', "data-auto")) === "1", await page.textContent('[data-testid="quick-state"]'));
   await page.click('[data-quick-mode="body"]');
   await H.ready();
-  check("批量跟隨身體", (await H.room("data-wear")) === "body" && (await qmode()) === "body");
-  await page.click('[data-testid="quick-more"]');
+  check("批量附接骨骼", (await H.room("data-wear")) === "body" && (await qmode()) === "body");
   await page.click('[data-quick-all="default"]');
   await H.ready();
-  check("還原各自預設跟隨模式（沒有衣物預設＝固定原圖）", (await H.room("data-wear")) === "fixed", await H.room("data-wear"));
+  check("還原各自預設跟隨模式（沒有衣物預設＝固定於畫布）", (await H.room("data-wear")) === "fixed", await H.room("data-wear"));
+  await openQuick();
   await page.selectOption('[data-testid="quick-scope"]', "item");
+  await page.click('[data-testid="quick-more"]');
 
   // 保存造型 → 重新開啟：遮罩效果相同
   check("快捷操作未寫入衣物預設", !(await env.DB.prepare("SELECT 1 FROM doll_fit_templates WHERE garment_id='gar_col'").first()));

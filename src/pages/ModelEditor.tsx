@@ -326,7 +326,7 @@ export default function ModelEditor({ id }: { id: string }) {
             <button type="button" aria-label="重做" disabled={!hist.current.future.length} onClick={() => undo("redo")} className={`grid h-8 w-8 place-items-center rounded-full disabled:opacity-35 ${float}`}>↷</button>
           </div>
           {notice && <p data-stage-ui role="status" className="pointer-events-none absolute inset-x-14 top-2 rounded-2xl bg-head/80 px-3 py-2 text-center text-[11px] text-gold-soft">{notice}</p>}
-          {compare && <span data-stage-ui className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-danger/85 px-3 py-1 text-[11px] text-white">原本 Avatar V2（修改前）</span>}
+          {compare && <span data-stage-ui className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-danger/85 px-3 py-1 text-[11px] text-[#fffaf6]">原本 Avatar V2（修改前）</span>}
         </Stage>
       </div>
       <div className="shrink-0 border-t border-gold/40 bg-velvet px-3 pb-[max(env(safe-area-inset-bottom),8px)] pt-2" style={{ maxHeight: "42vh" }}>

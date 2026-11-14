@@ -24,7 +24,7 @@ import { AppearancePanel, COMPARE_LABEL, CompareKind, ClothesPanel, PieceEntry, 
 import { PaintPhase, Selection, Stage, StageMode } from "../doll/Stage";
 import { navigate } from "../router";
 import { ITEM_LABEL, pieceSetup, setupInfo } from "../doll/setup";
-import { MODE_LABEL, QuickScope, SCOPE_LABEL, bodyBoneFor, buildPayloads, entriesFor, layoutOrder, scopeMode, scopeTargets, summarize, unitOf } from "../doll/batchSave";
+import { MODE_LABEL, QuickScope, SCOPE_LABEL, armInfo, bodyBoneFor, buildPayloads, entriesFor, layoutOrder, savedPoseFor, scopeMode, scopeTargets, summarize, unitOf } from "../doll/batchSave";
 import { BatchResult, BatchSaveSheet } from "../doll/BatchSaveSheet";
 
 import { readDraft, writeDraft, clearDraft } from "../doll/drafts";
@@ -544,11 +544,6 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   // ───── Phase 3.8A.1 快捷工具列：還原姿勢、跟隨模式（與「骨架」分頁使用同一份設定） ─────
   const [quickScope, setQuickScope] = useState<QuickScope>("item");
   const [quickMore, setQuickMore] = useState(false);
-  // 矮螢幕（例如 iPhone SE）：範圍選擇器併入同一行，保留畫布空間
-  const [shortScreen, setShortScreen] = useState(() => window.innerHeight < 600);
-  useEffect(() => { const on = () => setShortScreen(window.innerHeight < 600); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
-  const [quickOpen, setQuickOpen] = useState(() => { try { return localStorage.getItem("aw:quickbar") !== "0"; } catch { return true; } });
-  const setQuickOpenSaved = (v: boolean) => { setQuickOpen(v); try { localStorage.setItem("aw:quickbar", v ? "1" : "0"); } catch { /* 私密瀏覽 */ } };
   /** 這件衣物（或套裝部件）未經造型調整時的跟隨模式 */
   const defaultModeOf = (r: Resolved): WearMode => {
     const base = r.piece ? r.piece.opts : (r.worn.variant ? r.template?.data?.variants[r.worn.variant]?.opts : null) ?? r.template?.data?.opts;
@@ -556,8 +551,71 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     // 與 model.ts 新穿上衣物一致：沒有衣物預設＝固定原圖；部件＝跟隨所附接的骨骼
     return r.piece ? "body" : "fixed";
   };
-  /** 還原姿勢：當前身體模型自己的預設站姿（姿勢＝{}＝該身體的靜止骨架）；衣物、遮罩、網格、髮型、鏡頭全部保留，可撤銷 */
-  const quickResetPose = () => { flushHist(); setPose({}, []); toast("已還原為預設站姿（衣物設定保留）"); };
+  /** 姿勢分頁的「還原身體預設站姿」（姿勢＝{}＝該身體的靜止骨架）；與「還原衣物姿勢」分開 */
+  const quickResetPose = () => { flushHist(); setPose({}, []); toast("已還原為身體預設站姿（衣物設定保留）"); };
+  // ───── Phase 3.8A.2 畫布浮動快捷：還原衣物姿勢、保存衣服設定、跟隨手臂 ─────
+  const nameOf = (r: Resolved) => (r.piece ? r.piece.name : displayName(r.garment as Garment));
+  /** 快捷的操作對象：目前選中的衣物；切換到姿勢分頁（會取消選取）後，沿用最後選中而仍然穿著的衣物，並在按鈕上方清楚顯示 */
+  const lastSel = useRef<string | null>(null);
+  if (sel) lastSel.current = sel.key;
+  const qt = sel ?? (lastSel.current ? resolved.find((r) => r.key === lastSel.current && !r.worn.hidden) ?? null : null);
+  /**
+   * 還原衣物姿勢：恢復保存這件衣物（或部件、穿法、整套配置）時擺出的姿勢，不是身體模型的預設站姿，也不是蒙皮基準 opts.bind。
+   * 衣物位置、網格、遮罩、拆件、髮型、頭部、身體模型及鏡頭全部保留；有保存手部前後關係時一併恢復；一個撤銷步驟。
+   */
+  const quickRestoreGarmentPose = () => {
+    if (!qt) return toast("先點選一件衣物，才可以還原它保存的姿勢", "err");
+    const saved = savedPoseFor(qt);
+    if (!saved) return toast(`「${nameOf(qt)}」尚未設定衣物姿勢：擺好姿勢後按保存圖示即可記住`, "err");
+    flushHist();
+    const p = clampPose(rig, saved.pose);
+    setPose(p, saved.source === "garment" ? saved.front : undefined);
+    toast(`已還原「${nameOf(qt)}」保存的姿勢${samePose(rig, p, saved.pose) ? "" : "（部分關節按這個身體的範圍調整）"}；衣物設定保留，可撤銷`);
+  };
+  /** 保存衣服設定：沿用 saveDefault（單件＝完整預設；套裝部件＝只保存該部件）；失敗時不會假稱成功 */
+  const quickSave = async () => {
+    if (!qt) return toast("先點選要保存的衣物；要一次保存全部請用「⋯」→ 一次保存全部衣物設定", "err");
+    if (busy) return;
+    await saveDefault(qt);
+  };
+  /** 開啟跟隨手臂前的模式（關閉時恢復，不會無條件清除骨架資料） */
+  const prevMode = useRef(new Map<string, WearMode>());
+  const selArm = qt ? armInfo(qt) : null;
+  const armOn = !!qt && !!selArm?.ok && (selArm.kind === "arm-piece" ? wearMode(qt.opts) === "body" && /^(elbow|wrist)_/.test(qt.opts.bone ?? "") : wearMode(qt.opts) === "auto");
+  /** 把衣物位置由一個附接骨骼換算到另一個（畫面上位置及角度不變） */
+  const rebone = (r: Resolved, opts: WearOpts): Partial<Worn> => {
+    const from = mainBone({ slot: r.worn.slot, opts: r.opts }), to = mainBone({ slot: r.worn.slot, opts });
+    if (from === to) return { opts };
+    const a = from === "world" ? null : mats[from], b = to === "world" ? null : mats[to];
+    let pt: [number, number] = [r.fit.cx, r.fit.cy];
+    if (a) pt = applyMat(a, ...pt);
+    if (b) pt = applyMat(invert(b), ...pt);
+    return { opts, fit: { ...r.fit, cx: pt[0], cy: pt[1], rotation: r.fit.rotation + (a ? matAngle(a) : 0) - (b ? matAngle(b) : 0) } };
+  };
+  const quickArm = () => {
+    if (!qt) return toast("先點選一件有袖衣物或袖套", "err");
+    const info = armInfo(qt);
+    if (!info.ok) return toast(info.reason, "err");
+    flushHist();
+    touchedRig.current.add(qt.key);
+    if (armOn) {
+      const prev = prevMode.current.get(qt.key);
+      const back: WearMode = info.kind === "arm-piece" ? (prev && prev !== "body" ? prev : "fixed") : prev && prev !== "auto" ? prev : defaultModeOf(qt) !== "auto" ? defaultModeOf(qt) : "body";
+      if (info.kind === "arm-piece" && back === "body") setMode(qt, "body"); else setMode(qt, back);
+      toast(`已關閉跟隨手臂：${MODE_LABEL[back]}（網格、遮罩及基準姿勢保留）`);
+      return;
+    }
+    prevMode.current.set(qt.key, wearMode(qt.opts));
+    if (info.kind === "arm-piece") {
+      setItem(qt.key, rebone(qt, { ...qt.opts, follow: "none", bone: info.bone }));
+      toast(`「${nameOf(qt)}」已附接${/_r$/.test(info.bone ?? "") ? "右" : "左"}${/^wrist/.test(info.bone ?? "") ? "手腕" : "前臂"}，會跟隨手臂移動`);
+      return;
+    }
+    // 有袖衣物：沒有基準姿勢時以目前姿勢建立，令目前畫面上的形狀（含手動網格）成為基準，之後只按姿勢差異變形，開啟時不會跳位
+    const bind = qt.opts.bind ?? (Object.keys(pose).length ? clampPose(rig, pose) : undefined);
+    setItem(qt.key, rebone(qt, { ...qt.opts, follow: "auto", bone: null, ...(bind ? { bind } : {}) }));
+    toast(qt.opts.bind ? "已開啟跟隨手臂（使用已保存的基準姿勢）" : bind ? "已開啟跟隨手臂：以目前姿勢作為基準，之後按姿勢差異變形" : "已開啟跟隨手臂");
+  };
   const quickList = scopeTargets(resolved, quickScope, sel);
   const quickState = scopeMode(quickList);
   /** 一次切換作用範圍內全部衣物（一個撤銷步驟）；跟隨手臂只套用於適用衣物 */
@@ -1276,10 +1334,10 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
 
   if (!loaded || !tpls) return <div className="fixed inset-0 z-40 grid place-items-center bg-plum"><Spinner /></div>;
   const compact = panelDrag === null && panel === "mini";
-  const float = "bg-head/45 text-cream ring-1 ring-gold/40 backdrop-blur";
+  const float = "doll-tool";
   const pct = Math.round(camera.z * 100);
   return (
-    <div className="doll-room fixed inset-0 z-40 flex flex-col bg-plum" data-testid="dressing-room" data-dirty={dirty ? "1" : "0"} data-worn={worn.map((w) => itemKey(w) + (w.hidden ? ":hidden" : "")).join(",")} data-resolved={resolved.length} data-pose={JSON.stringify(pose)} data-front={front.join(",")} data-hair={look.hair} data-head={look.head} data-hair-color={look.hair_color} data-model={bodyModel.id} data-model-rev={bodyModel.revision} data-selected={selected ?? ""} data-masked={worn.filter((w) => w.mask).length} data-parts={worn.filter((w) => w.parts).length} data-undo={hist.current.past.length} data-preview={preview ? "1" : "0"} data-gview={view} data-wear={sel ? wearMode(sel.opts) : ""} data-panel={panel}
+    <div className="doll-room fixed inset-0 z-40 flex flex-col bg-plum" data-testid="dressing-room" data-dirty={dirty ? "1" : "0"} data-worn={worn.map((w) => itemKey(w) + (w.hidden ? ":hidden" : "")).join(",")} data-resolved={resolved.length} data-pose={JSON.stringify(pose)} data-front={front.join(",")} data-hair={look.hair} data-head={look.head} data-hair-color={look.hair_color} data-model={bodyModel.id} data-model-rev={bodyModel.revision} data-selected={selected ?? ""} data-masked={worn.filter((w) => w.mask).length} data-parts={worn.filter((w) => w.parts).length} data-undo={hist.current.past.length} data-preview={preview ? "1" : "0"} data-gview={view} data-wear={sel ? wearMode(sel.opts) : ""} data-rig={(() => { try { return selItem && ready ? renderer.info(selItem).mode : ""; } catch { return ""; } })()} data-bind={sel?.opts.bind ? "1" : "0"} data-bone={sel?.opts.bone ?? ""} data-panel={panel}
       data-fits={JSON.stringify(resolved.map((r) => [r.key, Math.round(r.fit.cx * 10) / 10, Math.round(r.fit.cy * 10) / 10, Math.round(r.fit.w * 10) / 10, Math.round(r.fit.rotation * 10) / 10]))}>
       {/* ───── 頂部 ───── */}
       <div className="safe-top shrink-0 bg-head">
@@ -1350,70 +1408,67 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
             </div>
           )}
           {!preview && (!ready || pending.size > 0) && <span data-stage-ui className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-head/60 px-3 py-1 text-[11px] text-cream">載入中…</span>}
-          {!preview && renderer.errors.size > 0 && <button data-stage-ui type="button" onClick={() => { renderer.retry(); setAnalyses((m) => new Map(m)); }} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-danger px-3 py-1 text-[11px] text-white">有圖片未能讀取，按此重試</button>}
+          {!preview && renderer.errors.size > 0 && <button data-stage-ui type="button" onClick={() => { renderer.retry(); setAnalyses((m) => new Map(m)); }} className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-danger px-3 py-1 text-[11px] text-[#fffaf6]">有圖片未能讀取，按此重試</button>}
           {!preview && notice && <p data-stage-ui role="status" className="pointer-events-none absolute inset-x-14 top-2 rounded-2xl bg-head/80 px-3 py-2 text-center text-[11px] leading-snug text-gold-soft">{notice}</p>}
-          {!preview && (sourceOn || compareKind) && <span data-stage-ui data-testid="stage-badge" className={`pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full px-3 py-1 text-[11px] ${compareKind ? "bg-danger/85 text-white" : "bg-head/70 text-gold-soft"}`}>{sourceOn ? "衣物原圖" : "穿著預覽"}{compareKind ? `｜對比：${COMPARE_LABEL[compareKind]}` : sourceOn ? "（塗抹位置＝原圖位置）" : ""}</span>}
+          {!preview && (sourceOn || compareKind) && <span data-stage-ui data-testid="stage-badge" className={`pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full px-3 py-1 text-[11px] ${compareKind ? "bg-danger/85 text-[#fffaf6]" : "bg-head/70 text-gold-soft"}`}>{sourceOn ? "衣物原圖" : "穿著預覽"}{compareKind ? `｜對比：${COMPARE_LABEL[compareKind]}` : sourceOn ? "（塗抹位置＝原圖位置）" : ""}</span>}
           {!preview && (
             <div data-stage-ui className="absolute bottom-2 left-2 flex gap-1.5">
               <button type="button" aria-label="撤銷" data-testid="undo" disabled={!canUndo} onClick={() => timeTravel("undo")} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] disabled:opacity-35 ${float}`}>↶</button>
               <button type="button" aria-label="重做" data-testid="redo" disabled={!canRedo} onClick={() => timeTravel("redo")} className={`grid h-8 w-8 place-items-center rounded-full text-[15px] disabled:opacity-35 ${float}`}>↷</button>
             </div>
           )}
+          {/* Phase 3.8A.2：畫布右下角的小型浮動快捷（還原衣物姿勢、保存衣服設定、跟隨手臂、⋯ 更多）；不另外佔用一行 */}
+          {!preview && !draft && (
+            <div data-stage-ui className="absolute bottom-2 right-2 z-20 flex flex-col items-end gap-1" data-testid="quick-bar" data-open="1">
+              {quickMore && (
+                <div role="menu" data-testid="quick-menu" className="pop absolute bottom-full right-0 mb-1 w-64 overflow-y-auto overscroll-contain rounded-2xl text-[12.5px]" style={{ maxHeight: Math.max(150, stageSize.h - 100) }}>
+                  <div className="flex items-center gap-1.5 border-b border-gold/20 px-3 py-2 text-[11px]">
+                    <label className="flex min-w-0 items-center gap-1 text-mauve">作用於
+                      <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-7 max-w-[7.5rem] rounded-full bg-cream/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
+                        {(["item", "set", "all"] as QuickScope[]).map((sc) => <option key={sc} value={sc}>{SCOPE_LABEL[sc]}</option>)}
+                      </select>
+                    </label>
+                    <span className="min-w-0 flex-1 truncate text-right text-gold-soft" data-testid="quick-state" data-mode={quickState ?? "none"} data-count={quickList.length} data-auto={scopeTargets(resolved, quickScope, sel, "auto").length}>
+                      {quickState ? `${quickState === "mixed" ? "混合設定" : MODE_LABEL[quickState]} · ${quickList.length} ${unitOf(quickList)}` : quickScope === "all" ? "沒有已穿衣物" : "未選衣物"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 p-2" role="group" aria-label="批量跟隨方式">
+                    {([["fixed", IconLock], ["body", IconPerson], ["auto", IconArm]] as const).map(([m, Icon]) => {
+                      const can = m !== "auto" || scopeTargets(resolved, quickScope, sel, "auto").length > 0;
+                      const on = quickState === m;
+                      return <button key={m} type="button" data-quick-mode={m} aria-pressed={on} disabled={!quickList.length || !can} onClick={() => quickApply(m)} className={`flex h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] disabled:opacity-35 ${on ? "chip-on" : "chip"}`}><Icon className="text-[16px]" />{MODE_LABEL[m]}</button>;
+                    })}
+                  </div>
+                  <button type="button" role="menuitem" data-quick-all="default" onClick={() => { setQuickMore(false); quickApply("default"); }} className="block min-h-11 w-full px-4 py-2 text-left">還原各自預設跟隨模式（{SCOPE_LABEL[quickScope]}）</button>
+                  <button type="button" role="menuitem" data-quick-all="fixed" onClick={() => { setQuickMore(false); quickApply("fixed", "all"); }} className="block min-h-11 w-full px-4 py-2 text-left">全部固定於畫布（{scopeTargets(resolved, "all", sel).length} 件）</button>
+                  <button type="button" role="menuitem" data-testid="quick-batch-save" onClick={() => { setQuickMore(false); openBatch(); }} className="block min-h-11 w-full px-4 py-2 text-left">一次保存全部衣物設定…</button>
+                  <button type="button" role="menuitem" data-quick="pose-reset" disabled={!Object.keys(pose).length && !front.length} onClick={() => { setQuickMore(false); quickResetPose(); }} className="block min-h-11 w-full px-4 py-2 text-left disabled:opacity-40">還原身體預設站姿</button>
+                  {sel && <button type="button" role="menuitem" onClick={() => { setQuickMore(false); setTool("follow"); }} className="block min-h-11 w-full px-4 py-2 text-left">骨架進階設定（固定於畫布／附接骨骼）</button>}
+                  <details className="border-t border-gold/20 px-4 py-2 text-[11.5px] leading-snug text-mauve">
+                    <summary className="cursor-pointer text-gold-soft">快捷說明</summary>
+                    <p className="mt-1">↻ 還原衣物姿勢：恢復保存這件衣物時的姿勢（不是身體預設站姿）。保存圖示：把目前衣物的位置、網格、遮罩、骨架及姿勢存為這個身體的衣物預設。手臂圖示：開關跟隨手臂（有袖衣物按肩膊及手肘變形；袖套附接相應手臂）。批量切換只影響這個造型，可撤銷。</p>
+                  </details>
+                </div>
+              )}
+              <span data-testid="quick-target" data-key={qt?.key ?? ""} className="doll-tool max-w-[12rem] truncate rounded-full px-2.5 py-0.5 text-[10.5px]">{qt ? `目前：${nameOf(qt)}` : "點選衣物後使用快捷"}</span>
+              <div role="toolbar" aria-label="快捷工具" className="flex items-center gap-1.5">
+                <button type="button" data-quick="pose-restore" aria-label="還原衣物姿勢" title="還原這件衣物保存時的姿勢" onClick={quickRestoreGarmentPose} className={`doll-tool grid h-11 w-11 place-items-center rounded-full text-[18px] ${qt ? "" : "opacity-55"}`}><IconRotate /></button>
+                <button type="button" data-quick="save" aria-label="保存衣服設定" title="保存目前衣物的完整穿著設定" disabled={busy} onClick={() => void quickSave()} className={`doll-tool grid h-11 w-11 place-items-center rounded-full text-[18px] disabled:opacity-40 ${qt ? "" : "opacity-55"}`}><IconSave /></button>
+                <button type="button" data-quick="arm" aria-label={armOn ? "關閉跟隨手臂" : "開啟跟隨手臂"} aria-pressed={armOn} data-applicable={selArm ? (selArm.ok ? "1" : "0") : ""} title={selArm && !selArm.ok ? selArm.reason : "跟隨手臂"} onClick={quickArm} className={`doll-tool relative grid h-11 w-11 place-items-center rounded-full text-[18px] ${armOn ? "doll-tool-on" : ""} ${qt && selArm?.ok ? "" : "opacity-55"}`}><IconArm />{armOn && <span aria-hidden className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-ok ring-2 ring-[var(--aw-tool)]" />}</button>
+                <button type="button" aria-label="更多快捷操作" aria-expanded={quickMore} data-testid="quick-more" onClick={() => setQuickMore(!quickMore)} className={`doll-tool grid h-11 w-8 place-items-center rounded-full text-[16px] ${quickMore ? "doll-tool-on" : ""}`}><IconMore /></button>
+              </div>
+            </div>
+          )}
           {!preview && posePrompt && !editing && (
-            <div data-stage-ui data-testid="pose-prompt" className="absolute inset-x-2 bottom-12 mx-auto flex max-w-sm items-center gap-1.5 rounded-2xl bg-head/80 px-3 py-2 text-[11.5px] text-gold-soft ring-1 ring-gold/50">
+            <div data-stage-ui data-testid="pose-prompt" className="absolute inset-x-2 bottom-[5.5rem] mx-auto flex max-w-sm items-center gap-1.5 rounded-2xl bg-head/80 px-3 py-2 text-[11.5px] text-gold-soft ring-1 ring-gold/50">
               <span className="min-w-0 flex-1 leading-snug">「{posePrompt.label}」有不同的預設姿勢，要套用嗎？</span>
               <button type="button" onClick={() => { setPose(posePrompt.pose, posePrompt.front); setPosePrompt(null); }} className="btn-jewel h-7 shrink-0 rounded-full px-3 text-[11.5px]">套用</button>
               <button type="button" onClick={() => setPosePrompt(null)} className="chip h-7 shrink-0 rounded-full px-2.5 text-[11.5px]">保持</button>
             </div>
           )}
-          {!preview && poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot: false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-2 right-2 max-w-[62%] truncate rounded-full bg-head/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
+          {!preview && poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot: false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-14 left-2 max-w-[55%] truncate rounded-full bg-head/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
         </Stage>
       </div>
-
-      {/* ───── 快捷工具列（Phase 3.8A.1）：放在畫布與面板之間，不遮住人物 ───── */}
-      {!preview && !draft && (
-        <div className="relative shrink-0 border-t border-gold/25 bg-head/85 px-2 pb-1 pt-0.5" data-testid="quick-bar" data-open={quickOpen ? "1" : "0"}>
-          <div className={`flex h-6 items-center gap-1.5 text-[11px] ${shortScreen && quickOpen ? "hidden" : ""}`}>
-            <label className="flex min-w-0 items-center gap-1 text-mauve">作用於
-              <select aria-label="快捷操作的作用範圍" data-testid="quick-scope" value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-6 max-w-[7.5rem] rounded-full bg-cream/10 px-2 text-[11.5px] text-cream ring-1 ring-gold/40">
-                {(["item", "set", "all"] as QuickScope[]).map((s) => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
-              </select>
-            </label>
-            <span className="min-w-0 flex-1 truncate text-right text-gold-soft" data-testid="quick-state" data-mode={quickState ?? "none"} data-count={quickList.length} data-auto={scopeTargets(resolved, quickScope, sel, "auto").length}>
-              {quickState ? `${quickState === "mixed" ? "混合設定" : MODE_LABEL[quickState]} · ${quickList.length} ${unitOf(quickList)}` : quickScope === "all" ? "沒有已穿衣物" : "未選衣物：先點選衣物"}
-            </span>
-            <button type="button" aria-label={quickOpen ? "收起快捷工具" : "展開快捷工具"} aria-expanded={quickOpen} data-testid="quick-collapse" onClick={() => { setQuickOpenSaved(!quickOpen); setQuickMore(false); }} className="grid h-6 w-9 shrink-0 place-items-center rounded-full text-mauve">{quickOpen ? "▾" : "▴"}</button>
-          </div>
-          {quickOpen && (
-            <div className={`mt-0.5 grid gap-1 ${shortScreen ? "grid-cols-6" : "grid-cols-5"}`} role="toolbar" aria-label="快捷工具">
-              {shortScreen && (
-                <select aria-label="快捷操作的作用範圍" data-testid="quick-scope-short" title={quickState ? `${quickState === "mixed" ? "混合設定" : MODE_LABEL[quickState]} · ${quickList.length} ${unitOf(quickList)}` : "未選衣物"} value={quickScope} onChange={(e) => setQuickScope(e.target.value as QuickScope)} className="h-10 min-w-0 rounded-xl bg-cream/10 px-1 text-[10.5px] text-cream ring-1 ring-gold/40">
-                  {(["item", "set", "all"] as QuickScope[]).map((sc) => <option key={sc} value={sc}>{SCOPE_LABEL[sc]}</option>)}
-                </select>
-              )}
-              <button type="button" data-quick="pose-reset" disabled={!Object.keys(pose).length && !front.length} onClick={quickResetPose} title="還原目前身體模型的預設站姿；衣物設定保留" className={`chip flex ${shortScreen ? "h-10" : "h-11"} flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] disabled:opacity-40`}><IconRotate className="text-[16px]" />還原姿勢</button>
-              {([["fixed", "固定原圖", IconLock], ["body", "跟隨身體", IconPerson], ["auto", "跟隨手臂", IconArm]] as const).map(([m, label, Icon]) => {
-                const can = m !== "auto" || scopeTargets(resolved, quickScope, sel, "auto").length > 0;
-                const on = quickState === m;
-                return <button key={m} type="button" data-quick-mode={m} aria-pressed={on} disabled={!quickList.length || !can} onClick={() => quickApply(m)} className={`flex ${shortScreen ? "h-10" : "h-11"} flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] disabled:opacity-35 ${on ? "chip-on" : "chip"}`}><Icon className="text-[16px]" />{label}</button>;
-              })}
-              <button type="button" aria-label="更多快捷操作" aria-expanded={quickMore} data-testid="quick-more" onClick={() => setQuickMore(!quickMore)} className={`flex ${shortScreen ? "h-10" : "h-11"} flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] ${quickMore ? "chip-on" : "chip"}`}><IconMore className="text-[16px]" />更多</button>
-            </div>
-          )}
-          {quickMore && (
-            <div role="menu" data-testid="quick-menu" className="absolute bottom-full right-2 z-30 mb-1 w-60 overflow-hidden rounded-2xl border border-gold/50 bg-velvet/95 text-[12.5px] shadow-xl">
-              <button type="button" role="menuitem" data-quick-all="default" onClick={() => { setQuickMore(false); quickApply("default"); }} className="block min-h-11 w-full px-4 py-2 text-left">還原各自預設跟隨模式（{SCOPE_LABEL[quickScope]}）</button>
-              <button type="button" role="menuitem" data-quick-all="fixed" onClick={() => { setQuickMore(false); quickApply("fixed", "all"); }} className="block min-h-11 w-full px-4 py-2 text-left">全部固定原圖（{scopeTargets(resolved, "all", sel).length} 件）</button>
-              <button type="button" role="menuitem" data-testid="quick-batch-save" onClick={() => { setQuickMore(false); openBatch(); }} className="block min-h-11 w-full px-4 py-2 text-left">一次保存全部衣物設定…</button>
-              {sel && <button type="button" role="menuitem" onClick={() => { setQuickMore(false); setTool("follow"); }} className="block min-h-11 w-full px-4 py-2 text-left">展開詳細骨架設定</button>}
-              <details className="border-t border-gold/20 px-4 py-2 text-[11.5px] leading-snug text-mauve">
-                <summary className="cursor-pointer text-gold-soft">跟隨設定說明</summary>
-                <p className="mt-1">固定原圖：保持目前校正形狀，不隨骨架變形。跟隨身體：按附接骨骼整件移動。跟隨手臂：有袖衣物或附接手臂的部件按骨架及基準姿勢變形；半裙、頭飾、腿部配件不會套用。快捷操作只影響這個造型，可撤銷；要更新衣物預設請用「一次保存全部衣物設定」。</p>
-              </details>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ───── 衣服設定：部件選擇及設定狀態 ───── */}
       {!preview && setup && setupTarget && (() => {

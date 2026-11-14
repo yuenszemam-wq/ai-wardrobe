@@ -272,7 +272,7 @@ export function Toast() {
   if (!msg) return null;
   return (
     <div role="status" className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4">
-      <div className={`rounded-full px-5 py-2.5 text-sm shadow-lg ${msg.tone === "err" ? "bg-danger text-white" : "btn-dark"}`}>{msg.text}</div>
+      <div className={`rounded-full px-5 py-2.5 text-sm shadow-lg ${msg.tone === "err" ? "bg-danger text-[#fffaf6]" : "btn-dark"}`}>{msg.text}</div>
     </div>
   );
 }

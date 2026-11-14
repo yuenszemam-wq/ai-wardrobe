@@ -25,7 +25,7 @@ export const SETUP_LIST_KEY = "aw:setup:list";
 /** 狀態符號：✓ 已完成、？ 待確認、！ 需要處理、自 自動、— 不需要／未設定 */
 const STATE_MARK: Record<ItemState, string> = { done: "✓", review: "？", todo: "！", auto: "自", na: "不需", optional: "—" };
 const STATE_TEXT: Record<ItemState, string> = { done: "text-ok-ink", review: "text-gold-soft", todo: "text-danger-ink", auto: "text-cream/80", na: "text-cream/50", optional: "text-cream/50" };
-const OVERALL_TONE: Record<Overall, string> = { done: "bg-ok/30 text-ok-ink", partial: "bg-gold/25 text-gold-soft", none: "bg-cream/10 text-cream/70", stale: "bg-danger/45 text-white" };
+const OVERALL_TONE: Record<Overall, string> = { done: "bg-ok/30 text-ok-ink", partial: "bg-gold/25 text-gold-soft", none: "bg-cream/10 text-cream/70", stale: "bg-danger/45 text-[#fffaf6]" };
 
 function loadView(): { filter: Filter; sort: Sort; cat: string; sub: string; q: string; model: string | null } {
   const d = { filter: "all" as Filter, sort: "todo" as Sort, cat: "", sub: "", q: "", model: null as string | null };

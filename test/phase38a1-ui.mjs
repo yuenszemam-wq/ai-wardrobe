@@ -40,24 +40,27 @@ try {
 
   console.log("快捷工具列");
   const bar = await page.locator('[data-testid="quick-bar"]').boundingBox(), stage = await page.locator('[data-testid="doll-stage"]').boundingBox();
-  check("快捷工具列在畫布下方（不遮住人物中央）", bar.y >= stage.y + stage.height - 1 && bar.height <= 78, { bar, stage });
-  const btns = await page.locator('[data-testid="quick-bar"] [role="toolbar"] button').evaluateAll((els) => els.map((e) => ({ h: e.getBoundingClientRect().height, w: e.getBoundingClientRect().width, t: e.textContent })));
-  check("五個主要工具：圖示＋文字，觸控範圍足夠", btns.length === 5 && btns.every((b) => b.h >= 40 && b.w >= 56 && b.t.trim().length >= 2), btns);
+  check("快捷工具是畫布右下角的小型浮動按鈕（不另佔一行）", bar.y + bar.height <= stage.y + stage.height + 1 && bar.width < stage.width * 0.75 && bar.height <= 90, { bar, stage });
+  const btns = await page.locator('[data-testid="quick-bar"] [role="toolbar"] button').evaluateAll((els) => els.map((e) => ({ h: e.getBoundingClientRect().height, w: e.getBoundingClientRect().width, a: e.getAttribute("aria-label") })));
+  check("三個主要快捷＋更多，觸控範圍足夠", btns.length === 4 && btns.slice(0, 3).every((b) => b.h >= 40 && b.w >= 40), btns);
+  await page.click('[data-testid="quick-more"]');
   check("沒有選中時不會默默修改全部", (await page.getAttribute('[data-testid="quick-state"]', "data-count")) === "0");
   await page.click('[data-tab="layers"]');
   check("圖層頁顯示已穿部件及未保存數目（左右腿部配件未校正）", (await page.textContent('[data-testid="batch-bar"]')).includes("已穿 6 個部件") && (await unsaved()) === "2", await page.textContent('[data-testid="batch-bar"]'));
+  await page.click('[data-testid="quick-more"]');
   await page.click('[data-layer="gar_maid#pc_head"] button:nth-of-type(2)');
+  await page.click('[data-testid="quick-more"]');
   check("選中頭飾：作用範圍＝目前衣物（1 個部件）", (await page.getAttribute('[data-testid="quick-state"]', "data-count")) === "1" && (await page.getAttribute('[data-testid="quick-state"]', "data-mode")) === "body");
   check("頭飾不適用跟隨手臂", await page.locator('[data-quick-mode="auto"]').isDisabled());
   await page.selectOption('[data-testid="quick-scope"]', "set");
   check("目前套裝：6 個部件、各部件設定不同＝混合設定", (await page.getAttribute('[data-testid="quick-state"]', "data-count")) === "6" && (await page.getAttribute('[data-testid="quick-state"]', "data-mode")) === "mixed", await page.textContent('[data-testid="quick-state"]'));
-  check("跟隨手臂只計套裝主體（1 個）", (await page.getAttribute('[data-testid="quick-state"]', "data-auto")) === "1");
+  check("跟隨手臂計套裝主體及左右袖套（3 個）", (await page.getAttribute('[data-testid="quick-state"]', "data-auto")) === "3");
   await shot("01-quick-bar");
   const zoom0 = await page.getAttribute('[data-testid="doll-stage"]', "data-zoom"), f0 = await fits();
   const undo0 = Number(await H.room("data-undo"));
   await page.click('[data-quick-mode="body"]');
   await H.ready();
-  check("一次切換整套為跟隨身體", (await page.getAttribute('[data-testid="quick-state"]', "data-mode")) === "body");
+  check("一次切換整套為附接骨骼", (await page.getAttribute('[data-testid="quick-state"]', "data-mode")) === "body");
   const f1 = await fits();
   check("切換時部件沒有跳位或改變大小", Object.keys(f0).every((k) => Math.abs(f0[k][0] - f1[k][0]) < 1.5 && Math.abs(f0[k][1] - f1[k][1]) < 1.5 && Math.abs(f0[k][2] - f1[k][2]) < 0.2), { f0, f1 });
   await page.waitForTimeout(500);
@@ -66,6 +69,7 @@ try {
   await H.ready();
   check("撤銷後回到混合設定", (await page.getAttribute('[data-testid="quick-state"]', "data-mode")) === "mixed");
   await page.selectOption('[data-testid="quick-scope"]', "item");
+  await page.click('[data-testid="quick-more"]');
 
   console.log("一次保存全部衣物設定");
   // 調整頭飾 → 已修改

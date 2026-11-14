@@ -312,9 +312,9 @@ const SIZE_MIN = Math.log(40), SIZE_MAX = Math.log(2400);
 const VIEW_LABEL: [GarmentView, string][] = [["worn", "穿著預覽"], ["source", "衣物原圖"], ["mesh", "部件網格"]];
 const TOOL_LABEL: [FitTool, string][] = [["place", "位置"], ["mesh", "變形"], ["mask", "遮罩"], ["follow", "骨架"], ["wear", "穿法"]];
 const MODE_INFO: { id: WearMode; label: string; hint: string }[] = [
-  { id: "fixed", label: "固定形狀", hint: "保留已校正的衣物圖片，固定在畫面上，不跟隨骨架。最穩定。" },
-  { id: "body", label: "跟隨身體", hint: "整件衣物跟隨身體（或所附接的部位）移動及轉動，不拆袖，保持完整。" },
-  { id: "auto", label: "跟隨手臂", hint: "袖子跟隨肩膊、手肘及手腕。分辨失敗時會自動保持完整衣物，不會斷開。" },
+  { id: "fixed", label: "固定於畫布", hint: "整件衣物固定在畫布，不隨人物骨架移動；手動網格及遮罩保留。最穩定。" },
+  { id: "body", label: "附接骨骼（整件移動）", hint: "整件衣物附接到指定骨骼，跟隨其移動及旋轉，不作多關節彎曲。適合半裙、頭飾、頸飾、手鐲、鞋襪。" },
+  { id: "auto", label: "跟隨手臂", hint: "袖子按肩膊、上臂及手肘變形，衣身保持完整；有基準姿勢時只按姿勢差異變形。分辨失敗時自動改回完整衣物。" },
 ];
 export function FitPanel({ behind, onBind, onApplyBind, r, info, tool, setTool, compact, view, setView, compare, setCompare, busy, onFit, onMeshReset, onMode, onOpts, onAuto, onRestore, onSaveDefault, onRemove, onDone, onOrder, onVariant, onAddVariant, onDeleteVariant, onSavePose, onApplyPose, mask, setMask, onClearMask, part, setPart, hint, setHint, onParts, onResetSleeve, onSleeveAuto, onPoseFix, onFrame, onWhole, pieces, wornPieces, onOpenSplit, onWearPieces, onTogglePiece }: {
   /** 「移到身後」實際效果（像素量度）；null＝沒有身後部分或未計算 */
