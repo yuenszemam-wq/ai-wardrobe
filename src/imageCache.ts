@@ -63,8 +63,6 @@ export async function clearImageCaches(opts: { thumbs?: boolean; hd?: boolean; i
 export const checkImageUpdates = refreshImageCache;
 export function clearImageMemory() { epoch++; memory.clear(); flights.clear(); hdFlights.clear(); hdSharedReset(); for (const p of pending.values()) p.reject(new Error("圖片快取已清除")); pending.clear(); }
 if (typeof window !== "undefined") { window.addEventListener("aw:unauthorized", clearImageMemory); }
-/** 修復單張縮圖前：忘記記憶體中的舊版本 */
-export function forgetThumb(id: string) { memory.delete(id); flights.delete(id); }
 function remember(id: string, b: Blob) { memory.delete(id); memory.set(id, b); while (memory.size > 64) memory.delete(memory.keys().next().value!); }
 export function imageIdOf(src?: string) { return src?.match(/^\/api\/images\/(img_[a-z2-7]+)(?:\?|$)/)?.[1]; }
 const key = (id: string) => "/api/thumbnails/" + id;
@@ -143,11 +141,6 @@ export function thumbnailBlob(id: string): Promise<Blob> {
 }
 
 // ───── 高清圖片 ─────
-/** 本機高清快取命中次數（每月；每次命中＝少一次 R2 GetObject）。只是這部手機的統計。 */
-const HIT_KEY = () => "aw:hd-hits:" + new Date().toISOString().slice(0, 7);
-let hitBuffer = 0, hitTimer: ReturnType<typeof setTimeout> | undefined;
-function countLocalHit() { hitBuffer++; if (!hitTimer) hitTimer = setTimeout(() => { hitTimer = undefined; try { localStorage.setItem(HIT_KEY(), String((Number(localStorage.getItem(HIT_KEY())) || 0) + hitBuffer)); } catch { /* ignore */ } hitBuffer = 0; }, 1500); }
-export function localHitCount(): number { try { return (Number(localStorage.getItem(HIT_KEY())) || 0) + hitBuffer; } catch { return hitBuffer; } }
 let hdActive = 0;
 const hdWaiters: Array<() => void> = [];
 const hdFlights = new Map<string, Promise<Blob>>();
@@ -157,7 +150,6 @@ export async function cachedHighResolution(src: string): Promise<Blob | undefine
   try {
     const c = await caches.open(HD_CACHE), hit = await c.match(src);
     if (!hit) return undefined;
-    countLocalHit();
     const blob = await hit.blob();
     const used = Number(hit.headers.get("x-aw-used-at"));
     if (Date.now() - used > 6 * 3600 * 1000) void c.put(src, new Response(blob, { headers: hdHeaders(blob, hit.headers.get("x-aw-pinned") === "1") }));
@@ -250,23 +242,14 @@ export async function loadHighResolution(src: string): Promise<HTMLImageElement>
   const blob = await highResolutionBlob(src), url = URL.createObjectURL(blob);
   try { const img = new Image(); img.src = url; await img.decode(); return img; } finally { URL.revokeObjectURL(url); }
 }
-/** 本機圖片快取用量（離線衣櫃頁顯示）：縮圖、衣物高清圖、角色素材、指定保留數量 */
-export async function imageCacheUsage(): Promise<{ thumbs: { count: number; bytes: number }; hd: { count: number; bytes: number }; assets: { count: number; bytes: number }; pinned: number }> {
-  const out = { thumbs: { count: 0, bytes: 0 }, hd: { count: 0, bytes: 0 }, assets: { count: 0, bytes: 0 }, pinned: 0 };
-  try {
-    const c = await caches.open(CACHE), keys = await c.keys();
-    for (const k of keys) { const r = await c.match(k); if (r) out.thumbs.bytes += (await r.blob()).size; }
-    out.thumbs.count = keys.length;
-  } catch { /* 不支援 */ }
-  try {
-    const c = await caches.open(HD_CACHE), keys = await c.keys();
-    for (const k of keys) {
-      const r = await c.match(k); if (!r) continue;
-      const size = Number(r.headers.get("x-aw-size")) || 0;
-      const bucket = new URL(k.url, "https://x").pathname.startsWith("/api/doll/") ? out.assets : out.hd;
-      bucket.count++; bucket.bytes += size;
-      if (r.headers.get("x-aw-pinned") === "1") out.pinned++;
-    }
-  } catch { /* 不支援 */ }
-  return out;
+/** 本機圖片快取用量（離線衣櫃頁顯示） */
+export async function imageCacheUsage(): Promise<{ thumbs: { count: number; bytes: number }; hd: { count: number; bytes: number } }> {
+  const sum = async (name: string, sizeHeader: string | null) => {
+    try {
+      const c = await caches.open(name), keys = await c.keys(); let bytes = 0;
+      for (const k of keys) { const r = await c.match(k); if (!r) continue; const s = sizeHeader ? Number(r.headers.get(sizeHeader)) : 0; bytes += s || (await r.blob()).size; }
+      return { count: keys.length, bytes };
+    } catch { return { count: 0, bytes: 0 }; }
+  };
+  return { thumbs: await sum(CACHE, null), hd: await sum(HD_CACHE, "x-aw-size") };
 }

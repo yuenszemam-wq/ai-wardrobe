@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, AppSettings, formatDate } from "../api";
 import { Button, ColumnSwitch, copyText, Field, inputCls, Link, PageTitle, setSettingsCache, Spinner, toast, useColumns, useSettings } from "../components/ui";
 import { CopyBlock } from "./ImportCenter";
@@ -10,10 +10,6 @@ import { BgImage, HomeBgEditor } from "../components/HomeBackground";
 import { useHomeLayout } from "../homeLayoutStore";
 import { activeTheme } from "../../shared/theme";
 import { localTheme } from "../theme";
-import { deleteLocalAccount } from "../localWardrobe";
-import { RepairItem, RepairState, repairItems, scanCache } from "../offlineDownloads";
-import { OfflineWardrobe } from "../components/OfflineWardrobe";
-import { R2Usage } from "../components/R2Usage";
 import { ClearResult, checkImageUpdates, clearImageCaches, hdCacheLimit, imageCacheUsage, setHdCacheLimit } from "../imageCache";
 
 import { BUILD } from "../build";
@@ -54,9 +50,8 @@ export default function Settings({ username, onLogout, section }: { username: st
       { id: "images", label: "圖片及上傳設定", value: "手動去背", Icon: IconCloudUp },
     ]],
     ["資料及儲存", [
-      { id: "offline-wardrobe", label: "離線衣櫃", Icon: IconCrown },
       { id: "offline", label: "本機圖片快取", Icon: IconDownload },
-      { id: "r2", label: "R2 用量及費用", Icon: IconChart },
+      { id: "storage", label: "伺服器縮圖狀態", Icon: IconChart },
     ]],
     ["AI 及帳戶", [
       { id: "ai", label: "AI 連接器", value: `${tokens.filter((t) => !t.revoked_at).length} 個`, Icon: IconSparkle },
@@ -82,15 +77,14 @@ export default function Settings({ username, onLogout, section }: { username: st
         {section === "wardrobe" && <WardrobeDisplay />}
         {section === "images" && <ImageSettings />}
         {section === "offline" && <LocalCache />}
-        {section === "offline-wardrobe" && <OfflineWardrobe />}
-        {(section === "r2" || section === "storage") && <R2Usage advanced={<ThumbnailStatus />} />}
+        {section === "storage" && <ThumbnailStatus />}
         {section === "ai" && <Connectors tokens={tokens} reload={() => api<{ tokens: TokenRow[] }>("/api/tokens").then((r) => setTokens(r.tokens))} />}
         {section === "ai-command" && <AiCommandEditor />}
         {section === "account" && (
           <section className="frame p-4">
             <Field label="登入身份"><p className="text-[15px]">{username}</p></Field>
-            <Button variant="ghost" className="mt-3" data-testid="logout" onClick={async () => { await api("/api/auth/logout", { method: "POST" }); await deleteLocalAccount(username); onLogout(); }}>登出</Button>
-            <p className="mt-2 text-[11.5px] text-mauve">登出時會清除這部手機的私人資料快取、本機衣櫃資料庫及圖片快取（伺服器資料不受影響）。</p>
+            <Button variant="ghost" className="mt-3" data-testid="logout" onClick={async () => { await api("/api/auth/logout", { method: "POST" }); onLogout(); }}>登出</Button>
+            <p className="mt-2 text-[11.5px] text-mauve">登出時會清除這部手機的私人資料快取及圖片快取。</p>
           </section>
         )}
         {section === "about" && <About />}
@@ -216,7 +210,6 @@ export function LocalCache() {
         )}
         {result && <p className="text-[12px]" role="status" data-testid="clear-result" data-errors={result.errors.length}>已清除縮圖 {result.thumbs.count} 張、高清圖 {result.hd.count} 張（{mb(result.thumbs.bytes + result.hd.bytes)}）{result.keptPinned ? `；保留指定離線圖 ${result.keptPinned} 張` : ""}{result.errors.length ? `；未能清除：${result.errors.join("、")}` : ""}</p>}
       </div>
-      <CacheRepair onDone={() => void load()} />
     </section>
   );
 }
@@ -340,33 +333,4 @@ function ThumbnailStatus() {
     <button type="button" className="mt-2 underline" onClick={load}>更新進度</button>
     {status.failed.length>0&&<button type="button" className="ml-4 underline" onClick={async()=>{await api("/api/thumbnails/jobs/retry",{method:"POST"});load();}}>重試失敗縮圖</button>}
   </section>;
-}
-
-/** 檢查及修復快取（3.8B）：只修復缺失、損壞、過期或已無效的圖片；離線時只檢查本機，不會假稱已修復 */
-function CacheRepair({ onDone }: { onDone: () => void }) {
-  const [st, setSt] = useState<RepairState | null>(null);
-  const ctrl = useRef<AbortController | null>(null);
-  const busy = st?.phase === "scanning" || st?.phase === "repairing";
-  const label: Record<RepairItem["problem"], string> = { missing: "缺失", corrupt: "已損壞／無法解碼", stale: "版本過期", orphan: "已無效的快取" };
-  const sLabel: Record<RepairItem["status"], string> = { pending: "待修復", fixed: "已修復", failed: "失敗", skipped: "略過" };
-  async function scan() { ctrl.current = new AbortController(); setSt({ phase: "scanning", scanned: 0, total: 0, ok: 0, items: [], offline: !navigator.onLine }); setSt(await scanCache(setSt, ctrl.current.signal)); }
-  async function fix(only?: RepairItem) { if (!st) return; ctrl.current = new AbortController(); await repairItems(st, setSt, only, ctrl.current.signal); onDone(); }
-  const fixed = st?.items.filter((i) => i.status === "fixed").length ?? 0, failed = st?.items.filter((i) => i.status === "failed").length ?? 0;
-  return (
-    <div className="space-y-1.5 border-t border-gold/20 pt-3" data-testid="cache-repair" data-phase={st?.phase ?? ""} data-issues={st?.items.length ?? 0} data-fixed={fixed} data-failed={failed}>
-      <p className="text-gold-soft">檢查及修復快取</p>
-      <p className="text-[11px] text-mauve">找出缺失、損壞、無法解碼、版本過期及已無效的圖片，只修復有問題的項目，不會清除正常圖片。</p>
-      <div className="flex gap-2">
-        <Button variant="ghost" data-testid="repair-scan" disabled={busy} onClick={() => void scan()}>{st?.phase === "scanning" ? `掃描中 ${st.scanned}／${st.total}` : "開始檢查"}</Button>
-        {busy && <Button variant="ghost" onClick={() => ctrl.current?.abort()}>取消</Button>}
-        {st?.phase === "done" && st.items.some((i) => i.status === "pending") && <Button data-testid="repair-run" onClick={() => void fix()}>修復 {st.items.filter((i) => i.status === "pending").length} 項</Button>}
-      </div>
-      {st && st.phase !== "scanning" && (
-        <div className="rounded-2xl bg-cream/5 p-3 text-[12px]" data-testid="repair-summary">
-          <p>正常 {Math.max(0, st.ok)} 張｜需要修復 {st.items.length} 項｜已修復 {fixed}｜失敗 {failed}{st.offline ? "｜目前離線：只檢查本機狀態，需要網絡的項目不會假稱已修復" : ""}</p>
-          {st.items.length > 0 && <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto">{st.items.map((it) => <li key={it.kind + it.id} className="flex items-center justify-between gap-2" data-repair-item={it.id} data-status={it.status}><span className="min-w-0 truncate">{it.label}｜{label[it.problem]}</span><span className="shrink-0 text-mauve">{sLabel[it.status]}{it.message ? `（${it.message}）` : ""}{(it.status === "failed" || it.status === "skipped") && <button type="button" className="ml-1 underline" onClick={() => void fix(it)}>重試</button>}</span></li>)}</ul>}
-        </div>
-      )}
-    </div>
-  );
 }

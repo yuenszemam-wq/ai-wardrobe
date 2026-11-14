@@ -11,7 +11,6 @@ import { Button, Chips, Empty, GarmentTile, GRID_COLS, Link, Spinner, useColumns
 import { navigate, usePath } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
 import { cachedList, capturePosition, loadFullList, readPosition, restorePosition, savePosition } from "../wardrobeList";
-import { localGarments } from "../localWardrobe";
 
 /** 每批顯示數量：接近底部時自動顯示下一批（不需要按「載入更多」） */
 const BATCH = 48;
@@ -61,9 +60,6 @@ export default function Wardrobe() {
   const [shown, setShown] = useState(() => Math.max(BATCH, savedPos.current?.shown ?? 0));
   const [brands, setBrands] = useState<string[]>([]);
   useEffect(() => {
-    // 品牌選項：由本機衣櫃推導（不另外讀取伺服器；未有本機資料時才讀取）
-    const local = localGarments();
-    if (local) { setBrands([...new Set(local.map((g) => g.brand).filter((b): b is string => Boolean(b)))].sort()); return; }
     api<{ garments: Garment[] }>("/api/garments?limit=200&status=all")
       .then((r) => setBrands([...new Set(r.garments.map((g) => g.brand).filter((b): b is string => Boolean(b)))].sort()))
       .catch(() => undefined);
@@ -83,14 +79,12 @@ export default function Wardrobe() {
 
   // 讀取完整清單：已有同一條件的清單時直接顯示（不清空、不顯示全頁載入），之後在背景更新
   const generation = useRef(0);
-  const lastQuery = useRef<string | null>(null);
   useEffect(() => {
     const run = ++generation.current;
     const cached = cachedList(serverQuery);
     if (cached) setAll(cached.items); else setAll(null);
-    // 只在篩選條件改變時清除選取（背景同步更新不會清除批量選取）
-    if (lastQuery.current !== queryKey) { lastQuery.current = queryKey; setSelected(new Set()); }
-    loadFullList(serverQuery, undefined, { fresh: revision > 0 && refreshingRef.current }).then((items) => {
+    setSelected(new Set());
+    loadFullList(serverQuery).then((items) => {
       if (run !== generation.current) return; // 快速切換篩選：不混入舊結果
       setAll(items); setStale(false);
     }).catch(() => {
@@ -101,10 +95,6 @@ export default function Wardrobe() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, revision]);
 
-  const refreshingRef = useRef(false);
-  refreshingRef.current = refreshing;
-  // 背景增量同步完成（有衣物新增／修改／刪除）：只按本機資料重新篩選，不重新初始化清單、不改變捲動位置
-  useEffect(() => { const on = () => setRevision((v) => v + 1); window.addEventListener("aw:wardrobe-synced", on); return () => window.removeEventListener("aw:wardrobe-synced", on); }, []);
   const refresh = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);

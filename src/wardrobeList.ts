@@ -6,32 +6,14 @@
  * Phase 3.8B 會把清單改為 IndexedDB 本機資料庫，此模組的介面保持不變。
  */
 import { api, Garment } from "./api";
-import { dropLocalGarment, filterLocal, localAccount, localGarments, localQueryable, patchLocalGarment, syncWardrobe, whenLocalReady } from "./localWardrobe";
 
 export interface ListState { items: Garment[]; at: number }
 const lists = new Map<string, ListState>();
 const flights = new Map<string, Promise<Garment[]>>();
 
-/**
- * 讀取完整清單。Phase 3.8B：已登入且條件可在本機完成時，使用本機衣櫃（IndexedDB）立即回傳，
- * 背景增量同步（最多每 30 秒一次）；同步後發出 aw:wardrobe-synced，頁面再按本機資料重新篩選。
- * 本機未有資料（第一次使用）時先完成一次同步；離線且未有本機資料才失敗。
- * 其他條件（封存、自訂屬性）仍由伺服器分頁讀取，按 id 去重。
- */
-export function loadFullList(query: URLSearchParams, signal?: AbortSignal, opts: { fresh?: boolean } = {}): Promise<Garment[]> {
+/** 讀取完整清單（伺服器分頁）。期間伺服器資料改動時，按 id 去重，不會出現重複記錄。 */
+export function loadFullList(query: URLSearchParams, signal?: AbortSignal): Promise<Garment[]> {
   const key = query.toString();
-  if (localAccount() && localQueryable(query)) {
-    return (async () => {
-      await whenLocalReady();
-      if (!localGarments()) await syncWardrobe();
-      else if (opts.fresh) await syncWardrobe().catch(() => undefined);
-      else void syncWardrobe({ throttleMs: 30000 }).catch(() => undefined);
-      const out = filterLocal(localGarments() ?? [], query);
-      lists.set(key, { items: out, at: Date.now() });
-      if (lists.size > 12) lists.delete(lists.keys().next().value!);
-      return out;
-    })();
-  }
   const running = flights.get(key);
   if (running) return running;
   const p = (async () => {
@@ -54,9 +36,8 @@ export const cachedList = (query: URLSearchParams) => lists.get(query.toString()
 /** 單件衣物已在其他頁面修改：更新所有已保存清單中的這一件（不重新讀取整個衣櫃） */
 export function patchCachedGarment(g: Partial<Garment> & { id: string }) {
   for (const st of lists.values()) { const i = st.items.findIndex((x) => x.id === g.id); if (i >= 0) st.items[i] = { ...st.items[i], ...g }; }
-  void patchLocalGarment(g);
 }
-export function dropCachedGarment(id: string) { for (const st of lists.values()) st.items = st.items.filter((x) => x.id !== id); void dropLocalGarment(id); }
+export function dropCachedGarment(id: string) { for (const st of lists.values()) st.items = st.items.filter((x) => x.id !== id); }
 export function clearCachedLists() { lists.clear(); }
 if (typeof window !== "undefined") window.addEventListener("aw:unauthorized", clearCachedLists);
 

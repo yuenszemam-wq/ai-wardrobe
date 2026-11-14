@@ -1,7 +1,7 @@
 import { thumbnailApi, thumbnailStatus, processThumbnailJobs, claimBrowserThumbnail, browserThumbnailSource, finishBrowserThumbnail, failBrowserThumbnail } from "./thumbnails";
 import { bulkEdit, splitGarment } from "./organize";
 import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./auth";
-import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, syncManifest, syncRows, updateGarment } from "./garments";
+import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, updateGarment } from "./garments";
 import { getCustomColors, addCustomColor, deleteHomeBg, getSettings, serveHomeBg, updateSettings, uploadHomeBg } from "./settings";
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
@@ -14,16 +14,11 @@ import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, de
 import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
-import { Counter, DEFAULT_ALERTS, PURPOSES, R2_PRICING, alertSettings, appUsage, backgroundAllowed, estimateCost, flushUsage, freeTierUse, meteredBucket, officialUsage } from "./r2usage";
 
 export default {
-  async fetch(req: Request, rawEnv: Env, ctx?: ExecutionContext): Promise<Response> {
+  async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const started = Date.now();
-    // Phase 3.8B：統一 R2 存取包裝，計算這個請求真正向 R2 發出的操作；請求結束後一次寫入 D1
-    const counter: Counter = new Map();
-    const env: Env = { ...rawEnv, IMAGES: meteredBucket(rawEnv.IMAGES, counter) };
-    const flush = () => { if (!counter.size) return; const p = flushUsage(rawEnv, counter); if (ctx) ctx.waitUntil(p); else return p; };
     try {
       let res: Response;
       if ((url.pathname.startsWith("/api/") || url.pathname.startsWith("/mcp")) && !/^\/api\/(images|thumbnails)(\/|$)/.test(url.pathname)) await ensureTaxonomy(env);
@@ -31,38 +26,30 @@ export default {
       else if (url.pathname.startsWith("/api/")) res = await handleApi(req, env, url);
       else return env.ASSETS.fetch(req);
       logRequest(req, url, res.status, started);
-      await flush();
       return withSecurityHeaders(res);
     } catch (err) {
       const res = errorResponse(err);
       logRequest(req, url, res.status, started, err);
-      await flush();
       return withSecurityHeaders(res);
     }
   },
   // 每分鐘處理 D1 暫存匯入（import_staging）
-  async scheduled(_event: ScheduledController, rawEnv: Env, ctx: ExecutionContext): Promise<void> {
-    const counter: Counter = new Map();
-    const env: Env = { ...rawEnv, IMAGES: meteredBucket(rawEnv.IMAGES, counter) };
-    const waits: Promise<unknown>[] = [];
-    const wait = (p: Promise<unknown>) => { waits.push(p); ctx.waitUntil(p); };
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     await ensureTaxonomy(env);
-    if (env.THUMBNAIL_SERVER_ENCODING === "enabled" && (await backgroundAllowed(env)).allowed) wait(processThumbnailJobs(env, 4).then(r => console.log(JSON.stringify({thumbnails:r}))).catch(e => console.error("thumbnail_cron",String(e))));
-    wait(
+    if (env.THUMBNAIL_SERVER_ENCODING === "enabled") ctx.waitUntil(processThumbnailJobs(env, 4).then(r => console.log(JSON.stringify({thumbnails:r}))).catch(e => console.error("thumbnail_cron",String(e))));
+    ctx.waitUntil(
       processStaging(env).then((r) => {
         if (r.length) console.log(JSON.stringify({ staging: r }));
       }),
     );
     // AI 待整理：釋放逾時租約、驗證 D1 直接提交的建議、更新短效圖片網址
-    wait(
+    ctx.waitUntil(
       aiMaintenance(env)
         .then((r) => {
           if (r.released || r.validated || r.links_refreshed) console.log(JSON.stringify({ ai: r }));
         })
         .catch((e) => console.error("aiMaintenance", e)),
     );
-    // 所有背景工作完成後，一次寫入這次排程的 R2 操作計數
-    ctx.waitUntil(Promise.allSettled(waits).then(() => flushUsage(rawEnv, counter)));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -107,7 +94,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (actor.kind === "session") await recordOrigin(env, url.origin);
 
   if(path === "/api/thumbnails/jobs/retry" && method === "POST") { requireSession(actor); await env.DB.prepare("UPDATE thumbnail_jobs SET state='pending',attempts=0,next_attempt_at='',lease=NULL WHERE state='failed'").run(); return json({ok:true}); }
-  if(path === "/api/thumbnails/jobs/claim" && method === "POST") { requireSession(actor); const bg = await backgroundAllowed(env); if (!bg.allowed) return json({ job: null, paused: bg.reason }); return claimBrowserThumbnail(env); }
+  if(path === "/api/thumbnails/jobs/claim" && method === "POST") { requireSession(actor); return claimBrowserThumbnail(env); }
   const tj=path.match(/^\/api\/thumbnails\/jobs\/(img_[a-z2-7]+)$/);
   if(tj) { requireSession(actor); const lease=url.searchParams.get("lease")??"";
     if(method==="GET")return browserThumbnailSource(env,tj[1],lease);
@@ -158,23 +145,6 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   }
 
   // ───── 衣物 ─────
-  // Phase 3.8B：R2 用量及費用（官方數據與 App 自身統計分開）
-  if (path === "/api/r2/usage" && method === "GET") {
-    requireSession(actor);
-    const [official, app, alerts] = await Promise.all([officialUsage(env, url.searchParams.get("refresh") === "1"), appUsage(env), alertSettings(env)]);
-    return json({ pricing: R2_PRICING, purposes: PURPOSES, official, app, alerts, free_use: freeTierUse(official, app), cost: estimateCost(official), background: await backgroundAllowed(env) });
-  }
-  if (path === "/api/r2/alerts" && method === "PUT") {
-    requireSession(actor);
-    const b = (await readJson(req)) as { warn?: unknown; soft_limit?: unknown };
-    const warn = (Array.isArray(b.warn) ? b.warn : DEFAULT_ALERTS.warn).map(Number).filter((x) => x > 0 && x <= 100).sort((x, y) => x - y).slice(0, 5);
-    const soft = Math.min(100, Math.max(10, Number(b.soft_limit) || DEFAULT_ALERTS.soft_limit));
-    await env.DB.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('r2_alerts', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(JSON.stringify({ warn, soft_limit: soft }), nowIso()).run();
-    return json(await alertSettings(env));
-  }
-  // Phase 3.8B：本機優先衣櫃的增量同步（只讀）
-  if (path === "/api/sync/garments/manifest" && method === "GET") { requireScope(actor, "read"); return json(await syncManifest(env, url.searchParams.get("since"))); }
-  if (path === "/api/sync/garments" && method === "POST") { requireScope(actor, "read"); const body = await readJson(req); return json(await syncRows(env, (body as { ids?: unknown }).ids)); }
   if (path === "/api/garments") {
     if (method === "GET") {
       requireScope(actor, "read");
