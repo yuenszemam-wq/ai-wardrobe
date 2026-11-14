@@ -22,16 +22,27 @@ export function loadFullList(query: URLSearchParams, signal?: AbortSignal, opts:
   const key = query.toString();
   if (localAccount() && localQueryable(query)) {
     return (async () => {
-      await whenLocalReady();
-      if (!localGarments()) await syncWardrobe();
-      else if (opts.fresh) await syncWardrobe().catch(() => undefined);
-      else void syncWardrobe({ throttleMs: 30000 }).catch(() => undefined);
-      const out = filterLocal(localGarments() ?? [], query);
-      lists.set(key, { items: out, at: Date.now() });
-      if (lists.size > 12) lists.delete(lists.keys().next().value!);
-      return out;
+      try {
+        await whenLocalReady();
+        if (!localGarments()) await syncWardrobe();
+        else if (opts.fresh) await syncWardrobe().catch(() => undefined);
+        else void syncWardrobe({ throttleMs: 30000 }).catch(() => undefined);
+        const local = localGarments();
+        if (!local) throw new Error("本機衣櫃未有資料");
+        const out = filterLocal(local, query);
+        lists.set(key, { items: out, at: Date.now() });
+        if (lists.size > 12) lists.delete(lists.keys().next().value!);
+        return out;
+      } catch (e) {
+        // 本機衣櫃同步或讀取失敗：改用伺服器清單（舊方式），不會顯示成零件；離線時才真正失敗
+        console.warn("[wardrobe] 本機衣櫃失敗，改用伺服器清單", e);
+        return loadServerList(query, key, signal);
+      }
     })();
   }
+  return loadServerList(query, key, signal);
+}
+function loadServerList(query: URLSearchParams, key: string, signal?: AbortSignal): Promise<Garment[]> {
   const running = flights.get(key);
   if (running) return running;
   const p = (async () => {

@@ -141,6 +141,25 @@ try {
   await shot("04-offline-home");
   await ctx.setOffline(false);
 
+  console.log("本機衣櫃故障：改用伺服器清單（不會顯示 0 件）");
+  {
+    const p2 = await ctx.newPage();
+    await p2.addInitScript(() => { indexedDB.open = () => { const r = {}; setTimeout(() => { r.error = new DOMException("模擬故障", "UnknownError"); r.onerror?.(); }, 10); return r; }; });
+    await p2.goto(A.base + "/wardrobe");
+    await p2.waitForSelector("[data-gid]", { timeout: 10000 }).catch(() => undefined);
+    check("IndexedDB 無法開啟：仍然由伺服器顯示全部衣物", (await p2.locator("[data-gid]").count()) === 8, await p2.textContent("body"));
+    await p2.close();
+    const p3 = await ctx.newPage();
+    await p3.goto(A.base + "/");
+    await p3.evaluate(async () => { for (const d of await indexedDB.databases()) indexedDB.deleteDatabase(d.name); });
+    await p3.route("**/api/sync/**", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"error":{"code":"x","message":"模擬錯誤"}}' }));
+    await p3.goto(A.base + "/wardrobe");
+    await p3.waitForSelector("[data-gid]", { timeout: 10000 }).catch(() => undefined);
+    check("同步 API 失敗（本機未有資料）：改用伺服器清單顯示全部衣物", (await p3.locator("[data-gid]").count()) === 8, await p3.textContent("body"));
+    await p3.unrouteAll({ behavior: "ignoreErrors" });
+    await p3.close();
+  }
+
   console.log("登出：刪除本機資料");
   await page.goto(A.base + "/settings/account");
   await page.click('[data-testid="logout"]');
