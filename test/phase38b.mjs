@@ -75,7 +75,7 @@ try {
 
   console.log("R2 用量 API");
   let u = (await call("GET", "/api/r2/usage")).body;
-  check("未設定官方 Token：清楚列出缺少的設定，不顯示虛構數字", u.official.available === false && u.official.reason === "missing_config" && u.official.missing.length === 2 && !u.official.account && u.cost === null);
+  check("未設定官方 Token：清楚列出缺少的設定，不顯示虛構數字", u.official.available === false && u.official.reason === "missing_config" && u.official.missing.length >= 1 && !u.official.account && u.cost === null);
   check("App 自身用量：按用途的物件及容量（由 D1 記錄，不掃描 R2）", u.app.storage.processed.objects === 4 && u.app.storage.processed.bytes > 0 && u.purposes.length === 8, u.app.storage);
   check("沒有官方數據時，免費額度比例標示為 App 估算", u.free_use.source === "app_estimate");
   check("定價：Standard 免費 10 GB-month、Class A 100 萬、Class B 1,000 萬；US$0.015／4.50／0.36", u.pricing.free.gb_month === 10 && u.pricing.free.class_a === 1e6 && u.pricing.free.class_b === 1e7 && u.pricing.price.class_a_per_million === 4.5 && u.pricing.price.class_b_per_million === 0.36);

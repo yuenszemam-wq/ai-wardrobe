@@ -62,7 +62,7 @@ export function R2Usage({ advanced }: { advanced?: ReactNode }) {
               <ul className="mt-1 list-disc pl-4">{o.missing?.map((m) => <li key={m}>{m}</li>)}</ul>
               <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-[12px] text-mauve">
                 <li>Cloudflare Dashboard → 我的個人資料 → API Tokens → 建立自訂 Token：權限只選「Account › Account Analytics › Read」，帳戶資源選你的帳戶。</li>
-                <li>Workers &amp; Pages → ai-wardrobe → 設定 → 變數及密碼：新增 Secret「CF_API_TOKEN」（貼上 Token）及「CF_ACCOUNT_ID」（帳戶 ID，在 Dashboard 首頁右側）。</li>
+                <li>Workers &amp; Pages → ai-wardrobe → 設定 → 變數及密碼：新增 Secret「CF_API_TOKEN」（貼上 Token）。帳戶 ID 已在設定檔內。</li>
                 <li>重新部署後回到這一頁按「重新整理」。Token 只保存在 Worker，不會出現在 App 或 GitHub。</li>
               </ol>
             </> : <p>官方用量暫時無法取得：{o.message}</p>}
