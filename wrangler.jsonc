@@ -32,8 +32,10 @@
     { "binding": "IMAGES", "bucket_name": "ai-wardrobe-images" }
   ],
 
-  // 非機密設定（機密資料一律存 D1 雜湊，不放這裡）
+  // 非機密設定（機密資料一律存 D1 雜湊，不放這裡）。
+  // R2 用量頁的官方數據需要 Worker Secret（不放在 repo）：CF_API_TOKEN（Account Analytics: Read）、CF_ACCOUNT_ID
   "vars": {
+    "AW_ENV": "production",
     "MAX_UPLOAD_MB": "25",
     "TOKEN_DAILY_CALL_LIMIT": "3000",
     "TOKEN_DAILY_UPLOAD_MB": "800",
@@ -43,6 +45,7 @@
   // Preview 使用獨立測試資源，不接觸正式衣櫃資料或 Cron。
   "previews": {
     "vars": {
+      "AW_ENV": "preview",
       "MAX_UPLOAD_MB": "25",
       "TOKEN_DAILY_CALL_LIMIT": "3000",
       "TOKEN_DAILY_UPLOAD_MB": "800",

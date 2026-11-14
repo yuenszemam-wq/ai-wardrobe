@@ -7,6 +7,11 @@ export interface Env {
   TOKEN_DAILY_CALL_LIMIT?: string;
   TOKEN_DAILY_UPLOAD_MB?: string;
   UPLOAD_LINK_MAX_MINUTES?: string;
+  /** production／preview（wrangler vars） */
+  AW_ENV?: string;
+  /** R2 用量頁（官方 Analytics）：Worker Secret，只在後端使用 */
+  CF_API_TOKEN?: string;
+  CF_ACCOUNT_ID?: string;
 }
 
 /** 已驗證的呼叫者 */
