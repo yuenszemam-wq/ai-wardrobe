@@ -104,7 +104,7 @@ export class FakeR2 {
   }
 }
 
-export function makeEnv() {
+export function makeEnv(opts = {}) {
   const DB = new FakeD1();
   DB.migrate(new URL("../migrations/0001_init.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0002_upload_slots.sql", import.meta.url));
@@ -117,6 +117,7 @@ export function makeEnv() {
   DB.migrate(new URL("../migrations/0009_avatar_v2.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0010_doll_phase3.sql", import.meta.url));
   DB.migrate(new URL("../migrations/0011_doll_models.sql", import.meta.url));
+  if (!opts.withoutR2Usage) DB.migrate(new URL("../migrations/0012_r2_usage.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),

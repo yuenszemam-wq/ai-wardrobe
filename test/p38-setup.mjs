@@ -55,7 +55,9 @@ export async function startApp(name = "p38") {
         if (url === "/assets/app.css") { res.setHeader("content-type", "text/css"); return res.end(app.css); }
         const file = join(ROOT, "public", url);
         if (url.startsWith("/doll/") && existsSync(file)) { res.setHeader("content-type", "image/png"); return res.end(readFileSync(file)); }
-        if (url === "/sw.js") { res.statusCode = 404; return res.end(); }
+        // Service Worker 只在頁面設定 aw:sw-test=1 時才會註冊（離線冷啟動測試）；其他測試不受影響
+        if (url === "/sw.js") { res.setHeader("content-type", "application/javascript"); return res.end(readFileSync(join(ROOT, "public/sw.js"))); }
+        if (url === "/manifest.webmanifest") { res.setHeader("content-type", "application/manifest+json"); return res.end(readFileSync(join(ROOT, "public/manifest.webmanifest"))); }
         res.setHeader("content-type", "text/html");
         return res.end(app.html);
       }

@@ -35,6 +35,15 @@ npx wrangler d1 migrations apply DB --remote
 
 （`0001_init.sql`、`0002_upload_slots.sql`、`0003_import_staging.sql` 已於 2026-11-08 套用；`0004_ai_workflow.sql`、`0005_taxonomy_layout.sql` 已於 2026-11-09 經 Cloudflare D1 API 套用；全部已記錄在 `d1_migrations` 表。）
 
+`0012_r2_usage.sql`（只新增 `r2_usage` 統計表）已於 2026-11-14 經 Cloudflare D1 API 套用到正式及預覽資料庫並記錄在 `d1_migrations`。未套用時 App 正常運作，只是 R2 用量頁沒有操作次數。回復：此表只供統計，可直接 `DROP TABLE r2_usage`，不影響其他資料。
+
+### Phase 3.8B：本機優先、離線及 R2 用量
+
+- 本機衣櫃：IndexedDB `aw-local-<帳戶>`（衣物、同步資料、本機副本、3.8C 預留 outbox）。同步：`GET /api/sync/garments/manifest`（全部衣物 id＋指紋；digest 不變只回 `same`）→ `POST /api/sync/garments`（只讀取指紋改變的衣物，最多 200 件／次）；清單沒有的衣物＝已刪除或封存。
+- 離線安全策略：伺服器確認登入才開啟本機資料；401 鎖定但保留；網絡失敗時最近 30 日內成功登入的帳戶可唯讀查看；登出刪除該帳戶本機資料庫及私人快取。
+- Service Worker（`aw-shell-v4`）安裝時預先保存 App Shell 及其 JS／CSS／圖示，可離線冷啟動。
+- R2 用量頁：`GET /api/r2/usage`。官方數據需要 Worker Secret `CF_API_TOKEN`（只需 Account › Account Analytics › Read）；`CF_ACCOUNT_ID` 已在 `wrangler.jsonc` vars。Worker 內所有 `env.IMAGES` 操作經統一包裝計數（`worker/r2usage.ts`）。
+
 ## V3：分類字典 × 批量入庫 × 穿搭排版
 
 - **分類字典**（D1 `taxonomy`）：主分類 → 子分類，以及屬性（袖長、裙長、材質…）→ 選項。固定 ID、顯示名稱可改。預設值在 `shared/taxonomy.ts`，首次讀取時寫入（`app_settings.taxonomy_seeded`），之後全部在 App「設定 → 分類管理」增加／改名／刪除／拖拉排序。

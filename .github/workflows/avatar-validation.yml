@@ -30,6 +30,7 @@ jobs:
       - run: node test/organize.mjs
       - run: node test/image-cache.mjs
       - run: node test/phase38a1.mjs
+      - run: node test/phase38b.mjs
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
         env:
@@ -62,6 +63,9 @@ jobs:
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots
       - run: node test/phase38a2-home.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/phase38b-ui.mjs
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots
       - run: node test/phase34.mjs
