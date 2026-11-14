@@ -6,7 +6,7 @@ import { addGarment, checker, hex, now, sharp } from "./p38-setup.mjs";
 
 const { check, done } = checker();
 const worker = await buildWorker("p39a1-worker");
-const D = await buildModule("worker/diary.ts", "p39a1-diary");
+const D = await buildModule("worker/diaryStats.ts", "p39a1-diary");
 const env = makeEnv();
 await env.DB.prepare("INSERT INTO app_settings (key,value,updated_at) VALUES ('setup_code_hash',?,?)").bind(await hex(new TextEncoder().encode("TEST-P39-1234")), now()).run();
 const auth = await worker.fetch(new Request("http://localhost/api/auth/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: "TEST-P39-1234", username: "tester", password: "test-password-1234" }) }), env);
