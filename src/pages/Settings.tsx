@@ -13,6 +13,8 @@ import { localTheme } from "../theme";
 import { deleteLocalAccount } from "../localWardrobe";
 import { RepairItem, RepairState, repairItems, scanCache } from "../offlineDownloads";
 import { OfflineWardrobe } from "../components/OfflineWardrobe";
+import { ShareManager } from "../components/ShareManager";
+import { PackagesPanel } from "../components/PackagesPanel";
 import { R2Usage } from "../components/R2Usage";
 import { ClearResult, checkImageUpdates, clearImageCaches, hdCacheLimit, imageCacheUsage, setHdCacheLimit } from "../imageCache";
 
@@ -52,6 +54,8 @@ export default function Settings({ username, onLogout, section }: { username: st
       { id: "setup", label: "衣服設定", Icon: IconScissors, to: "/dressing/setup" },
       { id: "assets", label: "角色素材", Icon: IconCrown, to: "/dressing/assets" },
       { id: "images", label: "圖片及上傳設定", value: "手動去背", Icon: IconCloudUp },
+      { id: "share", label: "衣櫃分享", value: "唯讀連結", Icon: IconSparkle },
+      { id: "packages", label: "衣物及人物套件", value: "匯出／匯入", Icon: IconDownload },
     ]],
     ["資料及儲存", [
       { id: "offline-wardrobe", label: "離線衣櫃", Icon: IconCrown },
@@ -83,6 +87,8 @@ export default function Settings({ username, onLogout, section }: { username: st
         {section === "images" && <ImageSettings />}
         {section === "offline" && <LocalCache />}
         {section === "offline-wardrobe" && <OfflineWardrobe />}
+        {section === "share" && <ShareManager />}
+        {section === "packages" && <PackagesPanel />}
         {(section === "r2" || section === "storage") && <R2Usage advanced={<ThumbnailStatus />} />}
         {section === "ai" && <Connectors tokens={tokens} reload={() => api<{ tokens: TokenRow[] }>("/api/tokens").then((r) => setTokens(r.tokens))} />}
         {section === "ai-command" && <AiCommandEditor />}
