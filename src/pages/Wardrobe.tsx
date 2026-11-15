@@ -7,6 +7,8 @@ import { BulkCutoutSheet } from "../components/BulkCutoutSheet";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, Garment, STATUS_LABEL } from "../api";
 import { IconClose, IconFilter, IconGrid, IconMore, IconSearch, IconSort } from "../components/icons";
+import { SORT_LABEL, WearMap, isWearSort, sortByWear } from "../../shared/wearSort";
+import { DIARY_CHANGED, loadWearSummary } from "../diary";
 import { Button, Chips, Empty, GarmentTile, GRID_COLS, Link, Sheet, Spinner, useColumns, toast } from "../components/ui";
 import { navigate, usePath } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
@@ -15,7 +17,14 @@ import { localAccount, localGarments } from "../localWardrobe";
 
 /** 每批顯示數量：接近底部時自動顯示下一批（不需要按「載入更多」） */
 const BATCH = 48;
-const SORT_LABEL: Record<string, string> = { "": "最新加入", updated: "最近修改", oldest: "最早加入", name: "名稱", price_desc: "價錢高至低", price_asc: "價錢低至高" };
+const SORT_GROUPS: { label: string; keys: string[] }[] = [
+  { label: "加入及修改", keys: ["", "oldest", "updated", "name"] },
+  { label: "價格", keys: ["price_desc", "price_asc"] },
+  { label: "穿著紀錄（只計已穿著）", keys: ["most_worn", "recent_worn", "least_recent", "never_first"] },
+];
+const HEAD_H_KEY = "aw:wardrobe-head-h";
+/** 收合門檻（hysteresis）：向下累積 COLLAPSE_AFTER px 才收合，向上累積 EXPAND_AFTER px 才展開；回到頂部 TOP_RESET px 內一定展開 */
+const COLLAPSE_AFTER = 16, EXPAND_AFTER = 48, TOP_RESET = 48;
 
 export default function Wardrobe() {
   const path = usePath();
@@ -26,6 +35,7 @@ export default function Wardrobe() {
   const [searchOpen, setSearchOpen] = useState(!!params.get("q"));
   const [showFilters, setShowFilters] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const debounce = useRef<number | undefined>(undefined);
   const [selecting, setSelecting] = useState(false);
@@ -40,42 +50,53 @@ export default function Wardrobe() {
   const [cols, setCols] = useColumns("aw:wardrobe-cols", 3);
   const listRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
-  // Phase 3.8B.1：頁首收合（門檻＋累積距離，避免反覆抖動）；佔位高度只在展開時量度，收合時不改變版面
-  // 返回深處的位置時直接以收合狀態開始，令恢復位置與離開時的頁首高度一致
+  /*
+   * Phase 3.9A.1.1：衣櫃專用頁首。
+   * - 衣櫃頁不顯示全站頁首（App.tsx），只有這一個頁首：固定在視窗頂部（top:0＋safe-area-inset-top），沒有兩套頁首互相量度。
+   * - 佔位高度＝展開時的實際高度（ResizeObserver），只在展開時量度；收合只在佔位已捲出畫面後發生，所以收合不會令清單跳位，也不會留下空白。
+   * - 返回深處位置時以收合狀態開始：佔位使用上次量度的展開高度（sessionStorage），避免恢復位置偏移。
+   * - 搜尋、篩選、排序、顯示或更多面板打開時暫停自動收合。
+   */
   const [collapsed, setCollapsed] = useState(() => (readPosition("wardrobe?" + params.toString())?.y ?? 0) > 96);
   const collapsedRef = useRef(false);
   collapsedRef.current = collapsed;
-  const [headH, setHeadH] = useState(128);
+  const [headH, setHeadH] = useState(() => { try { return Number(sessionStorage.getItem(HEAD_H_KEY)) || 132; } catch { return 132; } });
+  const headHRef = useRef(headH);
+  headHRef.current = headH;
   useLayoutEffect(() => {
     const el = barRef.current;
     if (!el) return;
-    const measure = () => { if (!collapsedRef.current) setHeadH(Math.round(el.getBoundingClientRect().height)); };
+    const measure = () => {
+      if (collapsedRef.current) return;
+      const h = Math.round(el.getBoundingClientRect().height);
+      if (h > 0) { setHeadH(h); try { sessionStorage.setItem(HEAD_H_KEY, String(h)); } catch { /* ignore */ } }
+    };
     measure();
     const ob = new ResizeObserver(measure);
     ob.observe(el);
     return () => ob.disconnect();
   }, []);
+  const panelOpen = searchOpen || showFilters || displayOpen || sortOpen || moreOpen;
+  const frozen = useRef(false);
+  frozen.current = panelOpen;
   useEffect(() => {
     let last = window.scrollY, acc = 0, raf = 0;
     const tick = () => {
       raf = 0;
       const y = window.scrollY, dy = y - last;
       last = y;
-      if (y < 48) { acc = 0; setCollapsed(false); return; }
+      if (y < TOP_RESET) { acc = 0; setCollapsed(false); return; }
+      if (frozen.current) { acc = 0; return; }
       acc = Math.sign(dy) === Math.sign(acc) ? acc + dy : dy;
-      if (acc > 16 && y > 96) setCollapsed(true);
-      else if (acc < -48) setCollapsed(false);
+      // 只在展開時的佔位已完全捲出畫面後才收合：收合後畫面頂部不會出現空白
+      if (acc > COLLAPSE_AFTER && y > headHRef.current) { acc = 0; setCollapsed(true); }
+      else if (acc < -EXPAND_AFTER) { acc = 0; setCollapsed(false); }
     };
     const on = () => { if (!raf) raf = requestAnimationFrame(tick); };
     window.addEventListener("scroll", on, { passive: true });
     return () => { window.removeEventListener("scroll", on); if (raf) cancelAnimationFrame(raf); };
   }, []);
-  useEffect(() => {
-    const el = document.documentElement;
-    if (collapsed) el.dataset.headerCollapsed = "1"; else delete el.dataset.headerCollapsed;
-    if (collapsed) { setDisplayOpen(false); setMoreOpen(false); }
-  }, [collapsed]);
-  useEffect(() => () => { delete document.documentElement.dataset.headerCollapsed; }, []);
+  const closePanels = () => { setDisplayOpen(false); setSortOpen(false); setMoreOpen(false); };
 
   const category = params.get("category") || "";
   const subcategory = params.get("subcategory") || "";
@@ -88,8 +109,19 @@ export default function Wardrobe() {
   const identified = params.get("identified") || "";
   const priced = params.get("priced") || "";
   const sort = params.get("sort") || "";
+  const wearSort = isWearSort(sort) ? sort : null;
+  const [wear, setWear] = useState<WearMap | null>(null);
+  const [wearError, setWearError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wearSort) return;
+    let live = true;
+    const load = () => loadWearSummary().then((r) => { if (live) { setWear(r.garments); setWearError(null); } }).catch((e) => live && setWearError((e as Error).message));
+    load();
+    window.addEventListener(DIARY_CHANGED, load);
+    return () => { live = false; window.removeEventListener(DIARY_CHANGED, load); };
+  }, [wearSort]);
   /** 伺服器查詢（不含子分類）：子分類在本機篩選，選項由實際資料產生 */
-  const serverQuery = useMemo(() => { const p = new URLSearchParams(params); p.delete("subcategory"); return p; }, [params]);
+  const serverQuery = useMemo(() => { const p = new URLSearchParams(params); p.delete("subcategory"); if (isWearSort(p.get("sort") || "")) p.delete("sort"); return p; }, [params]);
   const queryKey = serverQuery.toString();
   const posKey = "wardrobe?" + params.toString();
   const initial = cachedList(serverQuery);
@@ -168,7 +200,12 @@ export default function Wardrobe() {
     const order = tax.categories.find((c) => c.name === category)?.subs.map((x) => x.name) ?? [];
     return [...counts.keys()].sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999) || a.localeCompare(b)).map((name) => ({ name, n: counts.get(name)! }));
   }, [all, category, tax]);
-  const items = useMemo(() => (all ? (subcategory ? all.filter((g) => g.subcategory === subcategory) : all) : null), [all, subcategory]);
+  const items = useMemo(() => {
+    if (!all) return null;
+    const list = subcategory ? all.filter((g) => g.subcategory === subcategory) : all;
+    // 穿著排序：穿著資料未讀取前保持原本次序（不顯示錯誤排序）
+    return wearSort && wear ? sortByWear(list, wearSort, wear) : list;
+  }, [all, subcategory, wearSort, wear]);
   const visible = items ? items.slice(0, shown) : null;
 
   // 自動分批顯示：接近底部時增加
@@ -205,24 +242,23 @@ export default function Wardrobe() {
 
   return (
     <div ref={pull.ref}>
-      {/* Phase 3.8B.1：統一衣櫃頁首（固定定位＋固定高度佔位：收合／展開不會令清單跳位或重新載入圖片） */}
+      {/* Phase 3.9A.1.1：衣櫃專用頁首（單一頁首；佔位＝展開時實際高度） */}
       <div aria-hidden style={{ height: headH }} data-testid="wardrobe-head-spacer" />
-      <div ref={barRef} data-testid="wardrobe-toolbar" data-collapsed={collapsed ? "1" : "0"} className={`wardrobe-head fixed inset-x-0 z-20 mx-auto max-w-5xl px-4 ${collapsed ? "" : "lace-b"}`}
-        style={{ top: collapsed ? 0 : "var(--app-header-h, 0px)", paddingTop: collapsed ? "env(safe-area-inset-top)" : 0 }}>
-        <div className={`flex items-center gap-1.5 ${collapsed ? "h-9 pt-0.5" : "h-11 pt-1.5"}`}>
+      <div ref={barRef} data-testid="wardrobe-toolbar" data-collapsed={collapsed ? "1" : "0"} className={`wardrobe-head safe-top fixed inset-x-0 top-0 z-30 mx-auto max-w-5xl px-4 ${collapsed ? "" : "lace-b"}`}>
+        <div className={`flex items-center gap-1.5 ${collapsed ? "h-9 pt-0.5" : "h-12 pt-1.5"}`}>
           {searchOpen ? (
             <div className="relative min-w-0 flex-1">
               <IconSearch className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[15px] text-[var(--aw-placeholder)]" />
               <input type="search" autoFocus className="field h-8 w-full rounded-full pl-9 pr-3 text-[16px]" placeholder="搜尋名稱、品牌、圖案…" aria-label="搜尋衣物" value={q}
                 onChange={(e) => { const v = e.target.value; setQ(v); clearTimeout(debounce.current); debounce.current = window.setTimeout(() => setParam("q", v.trim()), 350); }} />
             </div>
-          ) : <h1 className={`min-w-0 flex-1 truncate font-serif font-bold tracking-[0.08em] text-gold-soft transition-[font-size] ${collapsed ? "text-[16px]" : "text-[20px]"}`} data-testid="wardrobe-title">我的衣櫃</h1>}
-          <button type="button" aria-label={searchOpen ? "關閉搜尋" : "搜尋"} aria-pressed={searchOpen} data-testid="wardrobe-search" onClick={() => { if (searchOpen && q) { setQ(""); setParam("q", ""); } setSearchOpen(!searchOpen); }} className="chip grid h-8 w-8 shrink-0 place-items-center rounded-full text-[14px]">{searchOpen ? <IconClose /> : <IconSearch />}</button>
-          <button type="button" aria-label="篩選" aria-expanded={showFilters} data-testid="wardrobe-filter" onClick={() => setShowFilters((v) => !v)} className={`relative grid h-8 w-8 shrink-0 place-items-center rounded-full text-[14px] ${activeFilters || showFilters ? "chip-on" : "chip"}`}>
+          ) : <h1 className={`min-w-0 flex-1 truncate font-serif font-bold tracking-[0.08em] text-gold-soft transition-[font-size] ${collapsed ? "text-[16px]" : "text-[21px]"}`} data-testid="wardrobe-title">我的衣櫃</h1>}
+          <button type="button" aria-label={searchOpen ? "關閉搜尋" : "搜尋"} aria-pressed={searchOpen} data-testid="wardrobe-search" onClick={() => { if (searchOpen && q) { setQ(""); setParam("q", ""); } setSearchOpen(!searchOpen); }} className="icon-btn">{searchOpen ? <IconClose /> : <IconSearch />}</button>
+          <button type="button" aria-label="篩選" aria-expanded={showFilters} data-testid="wardrobe-filter" onClick={() => { closePanels(); setShowFilters((v) => !v); }} className={`icon-btn relative ${activeFilters || showFilters ? "icon-btn-on" : ""}`}>
             <IconFilter />{activeFilters > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-wine px-1 text-[9.5px] text-white" data-status-color>{activeFilters}</span>}
           </button>
           <div className="relative">
-            <button type="button" aria-label="更多" aria-expanded={moreOpen} data-testid="wardrobe-more" onClick={() => { setMoreOpen(!moreOpen); setDisplayOpen(false); }} className="chip grid h-8 w-8 shrink-0 place-items-center rounded-full text-[16px]"><IconMore /></button>
+            <button type="button" aria-label="更多" aria-expanded={moreOpen} data-testid="wardrobe-more" onClick={() => { const v = !moreOpen; closePanels(); setMoreOpen(v); }} className="icon-btn text-[16px]"><IconMore /></button>
             {moreOpen && (
               <div role="menu" className="pop absolute right-0 top-10 z-40 w-44 overflow-hidden rounded-2xl text-[13px]" onClick={() => setMoreOpen(false)}>
                 <button type="button" role="menuitem" data-testid="wardrobe-select" className="block w-full px-4 py-2.5 text-left" onClick={() => { setSelecting((v) => !v); setSelected(new Set()); }}>{selecting ? "結束多選" : "批量修改"}</button>
@@ -237,19 +273,37 @@ export default function Wardrobe() {
             <button key={c || "__all"} type="button" data-cat={c || "all"} aria-pressed={category === c} onClick={() => setParam("category", c)} className={`h-7 shrink-0 rounded-full px-3 text-[12.5px] ${category === c ? "chip-on" : "chip"}`}>{c || "全部"}</button>
           ))}
         </div>
-        {category && subOptions.length > 0 && (
+        {category && subOptions.length > 0 && (!collapsed || subcategory) && (
           <div className="hscroll scrollbar-none -mx-4 mt-1 flex gap-1.5 overflow-x-auto px-4" data-testid="wardrobe-subs">
-            {[{ name: "", n: all?.length ?? 0 }, ...subOptions].map((sub) => (
+            {(collapsed ? subOptions.filter((x) => x.name === subcategory) : [{ name: "", n: all?.length ?? 0 }, ...subOptions]).map((sub) => (
               <button key={sub.name || "__all"} type="button" data-sub={sub.name || "all"} aria-pressed={subcategory === sub.name} onClick={() => setParam("subcategory", sub.name)} className={`h-6 shrink-0 rounded-full px-2.5 text-[11.5px] ${subcategory === sub.name ? "chip-on" : "chip"}`}>{sub.name || "全部" + category}<span className="ml-1 opacity-70">{sub.n}</span></button>
             ))}
           </div>
         )}
-        <div className="flex h-8 items-center gap-1.5 pb-1">
-          <span className="min-w-0 flex-1 truncate text-[11.5px] tabular-nums text-mauve" data-testid="wardrobe-count">{items ? `${category ? subcategory || category : "全部"} ${total} 件` : ""}{stale ? "（本機）" : ""}<span className="ml-1.5" data-testid="wardrobe-sort-label">· {SORT_LABEL[sort] ?? "排序"}</span></span>
+        <div className="flex h-9 items-center gap-1.5 pb-1">
+          <span className="min-w-0 flex-1 truncate text-[11.5px] tabular-nums text-mauve" data-testid="wardrobe-count">{items ? `${category ? subcategory || category : "全部"} ${total} 件` : ""}{stale ? "（本機）" : ""}</span>
           <div className="relative">
-            <button type="button" aria-label="顯示設定：顯示方式、每排數量及排序" aria-expanded={displayOpen} data-testid="wardrobe-display" onClick={() => { setDisplayOpen(!displayOpen); setMoreOpen(false); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11.5px] ${displayOpen ? "chip-on" : "chip"}`}>{view === "grid" ? <IconGrid className="text-[12px]" /> : <IconSort className="text-[12px]" />}{view === "grid" ? `${cols} 欄` : "詳細"}</button>
+            <button type="button" aria-label={`排序：${SORT_LABEL[sort] ?? "最新加入"}`} aria-expanded={sortOpen} data-testid="wardrobe-sort" onClick={() => { const v = !sortOpen; closePanels(); setSortOpen(v); }} className={`flex h-7 max-w-[9.5rem] shrink-0 items-center gap-1 rounded-full px-2.5 text-[11.5px] ${sortOpen ? "chip-on" : "chip"}`}>
+              <IconSort className="shrink-0 text-[12px]" /><span className="truncate" data-testid="wardrobe-sort-label">{SORT_LABEL[sort] ?? "最新加入"}</span>
+            </button>
+            {sortOpen && (
+              <div role="menu" data-testid="wardrobe-sort-pop" className="pop absolute right-0 top-9 z-40 w-64 rounded-2xl p-3 text-[12.5px]">
+                {SORT_GROUPS.map((grp) => (
+                  <div key={grp.label} className="mb-2 last:mb-0">
+                    <p className="mb-1 text-[11px] text-mauve">{grp.label}</p>
+                    <div className="grid grid-cols-2 gap-1">
+                      {grp.keys.map((k) => <button key={k || "new"} type="button" role="menuitemradio" data-sort={k || "new"} aria-checked={sort === k} onClick={() => { setParam("sort", k); setSortOpen(false); }} className={`h-8 rounded-full text-[12px] ${sort === k ? "chip-on" : "chip"}`}>{SORT_LABEL[k]}</button>)}
+                    </div>
+                  </div>
+                ))}
+                <p className="mt-1 text-[10.5px] leading-snug text-mauve">未填價格排最後；從未穿著的衣物在「最常／最近／最久未穿」排最後。</p>
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <button type="button" aria-label="顯示方式及每排數量" aria-expanded={displayOpen} data-testid="wardrobe-display" onClick={() => { const v = !displayOpen; closePanels(); setDisplayOpen(v); }} className={`flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11.5px] ${displayOpen ? "chip-on" : "chip"}`}><IconGrid className="text-[12px]" />{view === "grid" ? `${cols} 欄` : "詳細"}</button>
             {displayOpen && (
-              <div data-testid="wardrobe-display-pop" className="pop absolute right-0 top-9 z-40 w-60 rounded-2xl p-3 text-[12.5px]">
+              <div data-testid="wardrobe-display-pop" className="pop absolute right-0 top-9 z-40 w-56 rounded-2xl p-3 text-[12.5px]">
                 <p className="mb-1 text-[11px] text-mauve">顯示方式</p>
                 <div className="grid grid-cols-2 gap-1">
                   {(["grid", "detail"] as const).map((v) => <button key={v} type="button" data-display-view={v} aria-pressed={view === v} onClick={() => changeView(v)} className={`h-8 rounded-full ${view === v ? "chip-on" : "chip"}`}>{v === "grid" ? "圖片" : "詳細"}</button>)}
@@ -260,15 +314,13 @@ export default function Wardrobe() {
                     {[2, 3, 4, 5].map((n) => <button key={n} type="button" data-cols={n} aria-pressed={cols === n} onClick={() => setCols(n)} className={`h-8 rounded-full ${cols === n ? "chip-on" : "chip"}`}>{n}</button>)}
                   </div>
                 </>}
-                <p className="mb-1 mt-2.5 text-[11px] text-mauve">排序</p>
-                <div className="grid grid-cols-2 gap-1">
-                  {Object.entries(SORT_LABEL).map(([k, label]) => <button key={k || "new"} type="button" data-sort={k || "new"} aria-pressed={sort === k} onClick={() => { setParam("sort", k); setDisplayOpen(false); }} className={`h-8 rounded-full text-[12px] ${sort === k ? "chip-on" : "chip"}`}>{label}</button>)}
-                </div>
               </div>
             )}
           </div>
         </div>
       </div>
+      {(displayOpen || sortOpen || moreOpen) && <div className="fixed inset-0 z-20" aria-hidden data-testid="wardrobe-pop-backdrop" onClick={closePanels} />}
+      {wearSort && wearError && !wear && <p className="mt-2 text-[11.5px] text-mauve" role="status">未能讀取穿著紀錄（{wearError}），暫時按最新加入顯示。</p>}
       <div role="status" className="overflow-hidden text-center text-[12px] text-gold-soft" style={{ height: pull.distance }}>
         {pull.distance > 0 && <span className="inline-block pt-3">{pull.distance >= 60 ? "放開即可刷新" : "向下拉以刷新"}</span>}
       </div>

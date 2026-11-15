@@ -438,9 +438,24 @@
 /* Phase 3.8B.1：主題預覽中點擊選色時短暫標示正在修改的元素 */
 .theme-scope [data-picked] { outline: 2px dashed var(--aw-focus); outline-offset: 2px; transition: outline-color 0.2s; }
 
-/* Phase 3.8B.1：衣櫃頁向下捲動時收合全站頁首，由衣櫃頁首接手（只用 transform，不影響版面、不重新載入圖片） */
-.app-header { transition: transform 0.2s ease; will-change: transform; }
-html[data-header-collapsed="1"] .app-header { transform: translateY(-100%); }
-.wardrobe-head { background: var(--aw-header); transition: top 0.2s ease, padding 0.2s ease; }
+/* Phase 3.9A.1.1：衣櫃頁只有衣櫃專用頁首（全站頁首不顯示），固定在頂部並包含 iPhone 安全區 */
+.wardrobe-head { background: var(--aw-header); }
 .wardrobe-head[data-collapsed="1"] { box-shadow: 0 1px 0 color-mix(in srgb, var(--aw-line) 40%, transparent), 0 6px 14px var(--aw-shadow-soft); }
 .hscroll { overscroll-behavior-x: contain; touch-action: pan-x pan-y; }
+
+/* ───── Phase 3.9A.1.1：統一的次要操作 ───── */
+/* 小型圖示按鈕：視覺 32px，觸控範圍以 ::before 擴大到約 44px */
+.icon-btn { position: relative; display: grid; place-items: center; width: 2rem; height: 2rem; flex: none; border-radius: 999px; font-size: 15px; color: var(--aw-icon-on); border: 1px solid color-mix(in srgb, var(--aw-line) 35%, transparent); background: transparent; }
+.icon-btn::before { content: ""; position: absolute; inset: -6px; }
+.icon-btn:active { background: color-mix(in srgb, var(--color-cream) 10%, transparent); }
+.icon-btn-on { background: var(--aw-selected); color: var(--aw-on-selected); border-color: var(--color-gold); }
+/* 簡潔單層卡片（設定列表、一般資料）：比 .frame 少一層內框 */
+.card-flat { border-radius: calc(var(--aw-radius) - 4px); border: 1px solid color-mix(in srgb, var(--aw-line) 30%, transparent); background: color-mix(in srgb, var(--aw-card) 88%, transparent); --color-mauve: var(--aw-text2); --chip-bg: color-mix(in srgb, var(--color-cream) 5%, transparent); --chip-line: color-mix(in srgb, var(--aw-line) 45%, transparent); color: var(--color-cream); }
+/* 分頁切換（膠囊） */
+.seg { display: flex; gap: 0.25rem; padding: 0.2rem; border-radius: 999px; background: color-mix(in srgb, var(--aw-header) 55%, transparent); }
+.seg > button, .seg > a { flex: 1; height: 2rem; border-radius: 999px; font-size: 13px; color: var(--aw-text2); white-space: nowrap; padding: 0 0.6rem; }
+.seg > [aria-selected="true"], .seg > [aria-current="page"] { background: var(--aw-selected); color: var(--aw-on-selected); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); }
+/* 底部固定操作欄：位於底部選單之上（App 內）或貼底（全螢幕編輯器），已考慮安全區及鍵盤 */
+.action-bar { position: sticky; z-index: 25; bottom: var(--action-bottom, var(--tabbar-height, 4rem)); background: color-mix(in srgb, var(--aw-header) 94%, transparent); backdrop-filter: blur(6px); border-top: 1px solid color-mix(in srgb, var(--aw-line) 30%, transparent); }
+/* 照片日曆格：圖片上的日期保持可讀 */
+.cal-photo-date { color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / 0.75), 0 0 6px rgb(0 0 0 / 0.5); }

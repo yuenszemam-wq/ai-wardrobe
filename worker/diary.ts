@@ -29,7 +29,35 @@ interface PhotoRow { id: string; entry_id: string; width: number; height: number
 const tagsOf = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === "string" ? v.split(/[,，#\s]+/) : []).map((x) => String(x).trim().slice(0, 20)).filter(Boolean).slice(0, 12);
 const parseTags = (s: string | null): string[] => { try { const v = JSON.parse(s ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
 
-function shape(e: EntryRow, items: ItemRow[], photos: PhotoRow[]) {
+/**
+ * 造型縮圖（Phase 3.9A.1.1）：紀錄來自已保存的角色造型或衣服配搭時，提供完整合成縮圖網址（D1 小縮圖，附版本）。
+ * 沒有完整縮圖時為 null（不會以第一件衣物冒充整套穿搭）。
+ */
+type SourceThumbs = Map<string, string>;
+async function sourceThumbs(env: Env, entries: EntryRow[]): Promise<SourceThumbs> {
+  const out: SourceThumbs = new Map();
+  const looks = [...new Set(entries.map((e) => e.look_id).filter((x): x is string => !!x))];
+  for (let i = 0; i < looks.length; i += 80) {
+    const part = looks.slice(i, i + 80);
+    const r = await env.DB.prepare(`SELECT look_id, updated_at FROM doll_look_thumbs WHERE look_id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ look_id: string; updated_at: string }>().catch(() => ({ results: [] as { look_id: string; updated_at: string }[] }));
+    for (const t of r.results) out.set("look:" + t.look_id, `/api/doll/looks/${t.look_id}/thumb?v=${encodeURIComponent(t.updated_at)}`);
+  }
+  for (const [k, v] of await outfitThumbs(env, entries)) out.set(k, v);
+  return out;
+}
+/** 衣服配搭的完整縮圖（Phase 3.9A.2 起保存造型時產生）；未有縮圖的舊造型回傳空 */
+async function outfitThumbs(env: Env, entries: EntryRow[]): Promise<SourceThumbs> {
+  const out: SourceThumbs = new Map();
+  const ids = [...new Set(entries.map((e) => e.outfit_id).filter((x): x is string => !!x))];
+  for (let i = 0; i < ids.length; i += 80) {
+    const part = ids.slice(i, i + 80);
+    const r = await env.DB.prepare(`SELECT outfit_id, version FROM outfit_thumbs WHERE outfit_id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ outfit_id: string; version: string }>().catch(() => ({ results: [] as { outfit_id: string; version: string }[] }));
+    for (const t of r.results) out.set("outfit:" + t.outfit_id, `/api/outfits/${t.outfit_id}/thumb?v=${encodeURIComponent(t.version)}`);
+  }
+  return out;
+}
+
+function shape(e: EntryRow, items: ItemRow[], photos: PhotoRow[], thumbs: SourceThumbs = new Map()) {
   const ph = photos.filter((p) => p.entry_id === e.id).sort((a, b) => a.position - b.position);
   return {
     ...e, is_favorite: !!e.is_favorite, tags: parseTags(e.tags),
@@ -37,6 +65,7 @@ function shape(e: EntryRow, items: ItemRow[], photos: PhotoRow[]) {
     photos: ph.map(({ entry_id: _e, ...p }) => p),
     cover_photo_id: e.cover_photo_id && ph.some((p) => p.id === e.cover_photo_id) ? e.cover_photo_id : ph[0]?.id ?? null,
     garment_count: new Set(items.filter((i) => i.entry_id === e.id).map((i) => i.garment_id)).size,
+    source_thumb: (e.look_id && thumbs.get("look:" + e.look_id)) || (e.outfit_id && thumbs.get("outfit:" + e.outfit_id)) || null,
   };
 }
 export type DiaryEntry = ReturnType<typeof shape>;
@@ -46,11 +75,12 @@ async function loadMany(env: Env, entries: EntryRow[]): Promise<DiaryEntry[]> {
   const out: DiaryEntry[] = [];
   for (let i = 0; i < entries.length; i += 80) {
     const part = entries.slice(i, i + 80), ph = part.map(() => "?").join(","), ids = part.map((e) => e.id);
-    const [items, photos] = await Promise.all([
+    const [items, photos, thumbs] = await Promise.all([
       env.DB.prepare(`SELECT * FROM diary_items WHERE entry_id IN (${ph})`).bind(...ids).all<ItemRow>(),
       env.DB.prepare(`SELECT id, entry_id, width, height, position, file_size FROM diary_photos WHERE entry_id IN (${ph})`).bind(...ids).all<PhotoRow>(),
+      sourceThumbs(env, part),
     ]);
-    for (const e of part) out.push(shape(e, items.results, photos.results));
+    for (const e of part) out.push(shape(e, items.results, photos.results, thumbs));
   }
   return out;
 }
@@ -221,7 +251,6 @@ export async function uploadPhoto(env: Env, actor: Actor, req: Request, entryId:
   const e = await env.DB.prepare("SELECT id FROM diary_entries WHERE id = ?").bind(entryId).first();
   if (!e) throw new HttpError(404, "diary_not_found", "找不到這筆穿搭紀錄");
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM diary_photos WHERE entry_id = ?").bind(entryId).first<{ n: number }>();
-  if ((count?.n ?? 0) >= MAX_PHOTOS) throw new HttpError(400, "too_many_photos", `每筆紀錄最多 ${MAX_PHOTOS} 張照片`);
   const form = await req.formData().catch(() => null);
   const file = form?.get("file"), thumb = form?.get("thumb");
   if (!file || typeof file === "string") throw new HttpError(400, "no_file", "請選擇照片");
@@ -237,9 +266,14 @@ export async function uploadPhoto(env: Env, actor: Actor, req: Request, entryId:
     if (!["image/jpeg", "image/webp"].includes(tmime)) throw new HttpError(415, "bad_thumb", "縮圖格式不正確");
   }
   const sha = await sha256Hex(bytes);
-  const dup = await env.DB.prepare("SELECT id FROM diary_photos WHERE entry_id = ? AND sha256 = ?").bind(entryId, sha).first<{ id: string }>();
+  // 冪等：手機為每張照片產生穩定的 op（client operation ID），重試時用同一個 op；另以內容雜湊作第二重保護
+  const op = form?.get("op");
+  const opId = typeof op === "string" && /^[a-z0-9]{12,32}$/.test(op) ? "dph_" + op : null;
+  const dup = await env.DB.prepare(`SELECT id FROM diary_photos WHERE entry_id = ? AND (sha256 = ?${opId ? " OR id = ?" : ""})`).bind(...(opId ? [entryId, sha, opId] : [entryId, sha])).first<{ id: string }>();
   if (dup) return { photo: { id: dup.id }, duplicate: true }; // 重試上傳：不重複建立
-  const id = newId("dph"), ext = info.mime === "image/png" ? "png" : info.mime === "image/webp" ? "webp" : "jpg";
+  if ((count?.n ?? 0) >= MAX_PHOTOS) throw new HttpError(400, "too_many_photos", `每筆紀錄最多 ${MAX_PHOTOS} 張照片`);
+  if (opId && await env.DB.prepare("SELECT id FROM diary_photos WHERE id = ?").bind(opId).first()) throw new HttpError(409, "photo_op_conflict", "照片識別碼已被使用");
+  const id = opId ?? newId("dph"), ext = info.mime === "image/png" ? "png" : info.mime === "image/webp" ? "webp" : "jpg";
   const key = `diary/${entryId}/${id}.${ext}`;
   await env.IMAGES.put(key, bytes, { httpMetadata: { contentType: info.mime } });
   try {
@@ -309,6 +343,18 @@ export async function garmentWear(env: Env, garmentId: string, today: string) {
     cost_per_wear: costPerWear(g?.price, s?.days ?? 0), price: g?.price ?? null,
     diary_since: since?.d ?? null, related: related.entries,
   };
+}
+
+/**
+ * Phase 3.9A.1.1：衣櫃穿著排序用的批量摘要（一次查詢全部衣物；只計今天或之前的「已穿著」紀錄，
+ * 每件衣物每日最多一次，套裝部件不重複計算）。回傳 { garments: { id: [穿著日數, 最近穿著日期] } }。
+ */
+export async function wearSummary(env: Env, today: string) {
+  if (!isDate(today)) throw new HttpError(400, "bad_date", "缺少今日日期");
+  const r = await env.DB.prepare("SELECT i.garment_id AS id, COUNT(DISTINCT e.worn_date) AS days, MAX(e.worn_date) AS last FROM diary_items i JOIN diary_entries e ON e.id = i.entry_id WHERE e.kind = 'worn' AND e.worn_date <= ? GROUP BY i.garment_id").bind(today).all<{ id: string; days: number; last: string }>();
+  const garments: Record<string, [number, string]> = {};
+  for (const x of r.results) garments[x.id] = [Number(x.days), x.last];
+  return { today, garments };
 }
 
 export async function diaryStats(env: Env, today: string, month?: string | null) {

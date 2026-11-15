@@ -2,7 +2,8 @@ import { TransparentImage } from "../components/TransparentImage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readListState, useListPosition, writeListState } from "../hooks/useListPosition";
 import { api, imageUrl } from "../api";
-import { IconCrown, IconHeart, IconPerson, IconPlus, IconScissors, IconSearch, IconShirt, IconSort } from "../components/icons";
+import { IconCrown, IconHeart, IconImage, IconPerson, IconPlus, IconScissors, IconSearch, IconShirt, IconSort, IconSparkle } from "../components/icons";
+import { navigate, usePath } from "../router";
 import { Empty, Link, Spinner, toast } from "../components/ui";
 
 export interface OutfitSummary {
@@ -25,9 +26,52 @@ type Filter = "all" | Kind;
 type Sort = "updated" | "created" | "name";
 const SORT_LABEL: Record<Sort, string> = { updated: "最近更新", created: "最新建立", name: "名稱" };
 const KEY = "aw:outfits:view";
+/** 我的背景／我的素材庫（Phase 3.9A.2 啟用） */
+const STUDIO_ASSETS_READY = false;
 
-/** 穿搭工作室主頁：兩個創作入口（衣服配搭／角色換裝），以及所有已保存造型的統一列表。 */
+/** 穿搭頁三個分頁（我的穿搭／日誌日曆／素材管理）的共用切換列；日誌日曆即 /diary */
+export type OutfitsTab = "mine" | "diary" | "assets";
+export function OutfitsTabs({ tab }: { tab: OutfitsTab }) {
+  const tabs: [OutfitsTab, string, string][] = [["mine", "我的穿搭", "/outfits"], ["diary", "日誌日曆", "/diary"], ["assets", "素材管理", "/outfits?tab=assets"]];
+  return (
+    <div className="seg mb-3" role="tablist" data-testid="outfits-tabs">
+      {tabs.map(([k, label, to]) => (
+        <button key={k} type="button" role="tab" data-outfits-tab={k} aria-selected={tab === k} onClick={() => { if (tab !== k) navigate(to, k !== "diary" && tab !== "diary", true); }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Phase 3.9A.1.1：穿搭頁重整為三個分頁。
+ * - 我的穿搭：衣服配搭／角色換裝兩個大小一致的入口，以及全部已保存造型（類型、搜尋、收藏、排序）。
+ * - 日誌日曆：/diary（照片月曆、緊湊月曆、週視圖、月份列表）。
+ * - 素材管理：緊湊設定列表（衣服設定、角色素材、我的背景、我的素材庫）。
+ */
 export default function Outfits() {
+  const path = usePath();
+  const tab: OutfitsTab = new URLSearchParams(path.split("?")[1] || "").get("tab") === "assets" ? "assets" : "mine";
+  return (
+    <div data-testid="outfits-home" data-tab={tab}>
+      <h1 className="pb-2 pt-4 font-serif text-[22px] font-bold tracking-[0.12em] text-gold-soft">穿搭</h1>
+      <OutfitsTabs tab={tab} />
+      {tab === "assets" ? <AssetsTab /> : <MineTab />}
+    </div>
+  );
+}
+
+function AssetsTab() {
+  return (
+    <div className="card-flat divide-y divide-[color-mix(in_srgb,var(--aw-line)_25%,transparent)] overflow-hidden" data-testid="studio-tools">
+      <ToolRow to="/dressing/setup" testid="entry-setup" Icon={IconScissors} title="衣服設定" text="每件衣物的位置、網格、遮罩及骨架" />
+      <ToolRow to="/dressing/assets" testid="entry-assets" Icon={IconCrown} title="角色素材" text="身體、頭部、髮型、姿勢" />
+      <ToolRow to="/studio/assets?kind=background" testid="entry-backgrounds" Icon={IconImage} title="我的背景" text="衣服配搭及角色換裝共用" soon={!STUDIO_ASSETS_READY} />
+      <ToolRow to="/studio/assets" testid="entry-library" Icon={IconSparkle} title="我的素材庫" text="裝飾、道具、配件及其他圖片" soon={!STUDIO_ASSETS_READY} />
+    </div>
+  );
+}
+
+function MineTab() {
   const [outfits, setOutfits] = useState<OutfitSummary[] | null>(null);
   const [looks, setLooks] = useState<LookSummary[] | null>(null);
   const saved = useMemo(() => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") as { filter?: Filter; sort?: Sort }; } catch { return {}; } }, []);
@@ -38,6 +82,7 @@ export default function Outfits() {
   const [fav, setFav] = useState(session.fav);
   const [q, setQ] = useState(session.q);
   const [search, setSearch] = useState(!!session.q);
+  const [sortOpen, setSortOpen] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
   useEffect(() => { writeListState("outfits", { fav, q }); }, [fav, q]);
   useEffect(() => {
@@ -53,7 +98,7 @@ export default function Outfits() {
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const out = all.filter((e) => (filter === "all" || e.kind === filter) && (!fav || e.is_favorite) && (!needle || e.name.toLowerCase().includes(needle)));
-    return out.sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name, "zh-Hant") : (sort === "created" ? b.created_at : b.updated_at).localeCompare(sort === "created" ? a.created_at : a.updated_at)));
+    return out.sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name, "zh-Hant") || a.id.localeCompare(b.id) : (sort === "created" ? b.created_at : b.updated_at).localeCompare(sort === "created" ? a.created_at : a.updated_at) || a.id.localeCompare(b.id)));
   }, [all, filter, fav, q, sort]);
   useListPosition("outfits", useMemo(() => (outfits && looks ? list.map((e) => e.kind + ":" + e.id) : null), [outfits, looks, list]), gridRef);
   const count = (k: Filter) => (k === "all" ? all.length : all.filter((e) => e.kind === k).length);
@@ -71,40 +116,36 @@ export default function Outfits() {
   }
 
   return (
-    <div data-testid="outfits-home">
-      <h1 className="pb-3 pt-5 font-serif text-[22px] font-bold tracking-[0.12em] text-gold-soft">穿搭工作室</h1>
-      {/* 主要功能：兩個中型入口 */}
+    <>
+      {/* 主要功能：兩個大小一致、較緊湊的入口 */}
       <div className="grid grid-cols-2 gap-2.5" data-testid="studio-main">
-        <EntryCard to="/outfits/new" testid="entry-outfit" Icon={IconShirt} title="衣服配搭" text="自由組合衣櫃單品" />
-        <EntryCard to="/dressing" testid="entry-look" Icon={IconPerson} title="角色換裝" text="為角色打造新造型" hot />
-      </div>
-      {/* Phase 3.9A.1：日常使用（日誌、日曆、穿著分析），小型快捷 */}
-      <div className="mt-2 grid grid-cols-3 gap-2" data-testid="studio-daily">
-        <Link to="/diary?view=list" className="chip flex h-10 items-center justify-center rounded-full text-[13px]" data-testid="entry-diary">穿搭日誌</Link>
-        <Link to="/diary" className="chip flex h-10 items-center justify-center rounded-full text-[13px]" data-testid="entry-calendar">穿搭日曆</Link>
-        <Link to="/diary/new" className="chip flex h-10 items-center justify-center rounded-full text-[13px]" data-testid="entry-record-today">記錄今日</Link>
-      </div>
-      {/* 管理工具：較小的一行入口 */}
-      <div className="mt-2 grid grid-cols-2 gap-2" data-testid="studio-tools">
-        <ToolLink to="/dressing/setup" testid="entry-setup" Icon={IconScissors} title="衣服設定" />
-        <ToolLink to="/dressing/assets" testid="entry-assets" Icon={IconCrown} title="角色素材" />
+        <EntryCard to="/outfits/new" testid="entry-outfit" Icon={IconShirt} title="衣服配搭" text="自由組合單品" />
+        <EntryCard to="/dressing" testid="entry-look" Icon={IconPerson} title="角色換裝" text="建立人物造型" hot />
       </div>
 
       <div className="mt-4 flex items-center justify-between">
-        <h2 className="font-serif text-[18px] font-bold tracking-[0.1em] text-gold-soft">我的穿搭</h2>
+        <h2 className="font-serif text-[18px] font-bold tracking-[0.1em] text-gold-soft">已保存造型</h2>
         <div className="flex items-center gap-1.5">
-          <button type="button" aria-label="搜尋造型" aria-pressed={search} onClick={() => { setSearch(!search); setQ(""); }} className={`grid h-9 w-9 place-items-center rounded-full text-[16px] ${search ? "chip-on" : "chip"}`}><IconSearch /></button>
-          <button type="button" aria-label="只看收藏" aria-pressed={fav} data-testid="filter-fav" onClick={() => setFav(!fav)} className={`grid h-9 w-9 place-items-center rounded-full text-[17px] ${fav ? "chip-on" : "chip"}`}><IconHeart filled={fav} /></button>
-          <button type="button" aria-label={`排序：${SORT_LABEL[sort]}`} data-testid="sort" onClick={() => setSort(sort === "updated" ? "created" : sort === "created" ? "name" : "updated")} className="chip grid h-9 w-9 place-items-center rounded-full text-[17px]"><IconSort /></button>
+          <button type="button" aria-label="搜尋造型" aria-pressed={search} onClick={() => { setSearch(!search); setQ(""); }} className={`icon-btn ${search ? "icon-btn-on" : ""}`}><IconSearch /></button>
+          <button type="button" aria-label="只看收藏" aria-pressed={fav} data-testid="filter-fav" onClick={() => setFav(!fav)} className={`icon-btn ${fav ? "icon-btn-on" : ""}`}><IconHeart filled={fav} /></button>
+          <div className="relative">
+            <button type="button" aria-label={`排序：${SORT_LABEL[sort]}`} aria-expanded={sortOpen} data-testid="sort" onClick={() => setSortOpen(!sortOpen)} className={`icon-btn ${sortOpen ? "icon-btn-on" : ""}`}><IconSort /></button>
+            {sortOpen && <>
+              <div className="fixed inset-0 z-30" aria-hidden onClick={() => setSortOpen(false)} />
+              <div role="menu" className="pop absolute right-0 top-10 z-40 w-36 overflow-hidden rounded-2xl text-[13px]">
+                {(Object.keys(SORT_LABEL) as Sort[]).map((k) => <button key={k} type="button" role="menuitemradio" aria-checked={sort === k} data-outfit-sort={k} onClick={() => { setSort(k); setSortOpen(false); }} className={`block w-full px-4 py-2.5 text-left ${sort === k ? "text-gold-soft" : ""}`}>{SORT_LABEL[k]}{sort === k ? " ✓" : ""}</button>)}
+              </div>
+            </>}
+          </div>
         </div>
       </div>
-      {search && <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋造型名稱" aria-label="搜尋造型名稱" className="mt-2 h-10 w-full rounded-full bg-field px-4 text-[14px] text-ink ring-1 ring-gold focus:outline-none" />}
-      <div className="mt-3 grid grid-cols-3 rounded-full bg-cream/5 p-1 ring-1 ring-gold/30" role="tablist" data-testid="kind-filter">
+      {search && <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋造型名稱" aria-label="搜尋造型名稱" className="field mt-2 h-10 w-full rounded-full px-4 text-[16px]" />}
+      <div className="seg mt-2.5" role="tablist" data-testid="kind-filter">
         {([["all", "全部"], ["outfit", "衣服配搭"], ["look", "角色換裝"]] as [Filter, string][]).map(([k, label]) => (
-          <button key={k} type="button" role="tab" data-filter={k} aria-selected={filter === k} onClick={() => setFilter(k)} className={`h-9 rounded-full text-[13.5px] ${filter === k ? "chip-on" : "text-cream/80"}`}>{label}</button>
+          <button key={k} type="button" role="tab" data-filter={k} aria-selected={filter === k} onClick={() => setFilter(k)}>{label}</button>
         ))}
       </div>
-      <div className="mt-2.5 flex items-center justify-between text-[12px] text-mauve">
+      <div className="mt-2 flex items-center justify-between text-[12px] text-mauve">
         <span data-testid="count">共 {list.length} 套造型{list.length !== count(filter) ? `（全部 ${count(filter)}）` : ""}</span>
         <span>{SORT_LABEL[sort]}</span>
       </div>
@@ -116,44 +157,50 @@ export default function Outfits() {
       ) : (
         <div ref={gridRef} className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {list.map((e) => (
-            <div key={e.kind + e.id} className="paper relative p-2" data-card={e.kind} data-id={e.id} data-pos-id={e.kind + ":" + e.id}>
+            <div key={e.kind + e.id} className="paper relative overflow-hidden p-0" data-card={e.kind} data-id={e.id} data-pos-id={e.kind + ":" + e.id}>
               <Link to={e.kind === "outfit" ? `/outfits/${e.id}` : `/dressing/${e.id}`} className="block">
                 {e.outfit ? <OutfitPreview o={e.outfit} /> : <LookPreview l={e.look!} />}
-                <div className="mt-2 flex items-center px-0.5">
-                  <span className="flex items-center gap-1 rounded-full bg-amethyst/15 px-2 py-0.5 text-[11px] text-ink/80">{e.kind === "outfit" ? <IconShirt className="text-[12px]" /> : <IconPerson className="text-[12px]" />}{e.kind === "outfit" ? "衣服配搭" : "角色換裝"}</span>
+                <div className="px-2.5 pb-2 pt-1.5">
+                  <div className="truncate pr-7 font-serif text-[15px] font-bold text-ink">{e.name}</div>
+                  <div className="flex items-center gap-1 text-[11.5px] text-mauve">{e.kind === "outfit" ? <IconShirt className="text-[12px]" /> : <IconPerson className="text-[12px]" />}<span>{e.kind === "outfit" ? "衣服配搭" : "角色換裝"}</span><span aria-hidden>·</span><span>{e.item_count} 件</span></div>
                 </div>
-                <div className="mt-1 truncate px-0.5 font-serif text-[15px] font-bold text-ink">{e.name}</div>
-                <div className="px-0.5 text-[12px] text-mauve">{e.item_count} 件衣物</div>
               </Link>
-              <button type="button" aria-label={e.is_favorite ? "取消收藏" : "收藏"} aria-pressed={e.is_favorite} data-testid="card-fav" onClick={() => void toggleFav(e)} className={`absolute bottom-[3.1rem] right-2 grid h-8 w-8 place-items-center rounded-full text-[18px] ${e.is_favorite ? "text-[var(--aw-chart)]" : "text-mauve"}`}><IconHeart filled={e.is_favorite} /></button>
+              <button type="button" aria-label={e.is_favorite ? "取消收藏" : "收藏"} aria-pressed={e.is_favorite} data-testid="card-fav" onClick={() => void toggleFav(e)} className={`absolute bottom-2.5 right-1.5 grid h-8 w-8 place-items-center rounded-full text-[17px] ${e.is_favorite ? "text-[var(--aw-chart)]" : "text-mauve"}`}><IconHeart filled={e.is_favorite} /></button>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-/** 主要功能入口：中型卡片（比 Phase 3.6 的版本矮一半） */
+/** 主要功能入口：兩張大小一致的卡片 */
 function EntryCard({ to, Icon, title, text, hot, testid }: { to: string; Icon: typeof IconShirt; title: string; text: string; hot?: boolean; testid: string }) {
   return (
-    <Link to={to} className={`frame ${hot ? "frame-hot" : ""} relative block px-3 py-2.5`}>
-      <span data-testid={testid} className="flex items-center gap-2.5">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-gold/60 text-[19px] text-gold-soft"><Icon /></span>
-        <span className="min-w-0 flex-1">
-          <span className="block font-serif text-[15px] font-bold tracking-[0.06em] text-white">{title}</span>
-          <span className="block truncate text-[11px] leading-snug text-cream/75">{text}</span>
+    <Link to={to} className={`frame ${hot ? "frame-hot" : ""} relative block h-[5.25rem] px-3 py-2.5`}>
+      <span data-testid={testid} className="flex h-full flex-col justify-between">
+        <span className="flex items-start justify-between"><Icon className="text-[20px] text-gold-soft" /><IconPlus className="text-[13px] text-gold-soft" /></span>
+        <span>
+          <span className="block font-serif text-[16px] font-bold tracking-[0.06em]">{title}</span>
+          <span className="block truncate text-[11px] leading-snug text-mauve">{text}</span>
         </span>
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-gold/70 text-[11px] text-gold-soft"><IconPlus /></span>
       </span>
     </Link>
   );
 }
-/** 管理工具：小型一行入口 */
-function ToolLink({ to, Icon, title, testid }: { to: string; Icon: typeof IconShirt; title: string; testid: string }) {
+/** 管理工具：緊湊設定列表的一行 */
+function ToolRow({ to, Icon, title, text, testid, soon }: { to: string; Icon: typeof IconShirt; title: string; text: string; testid: string; soon?: boolean }) {
+  if (soon) return (
+    <div className="flex min-h-[3.25rem] items-center gap-3 px-3.5 py-2 opacity-60" aria-disabled>
+      <Icon className="shrink-0 text-[18px] text-gold-soft" />
+      <span data-testid={testid} className="min-w-0 flex-1"><span className="block text-[14px]">{title}</span><span className="block truncate text-[11.5px] text-mauve">{text}</span></span>
+      <span className="text-[11px] text-mauve">即將推出</span>
+    </div>
+  );
   return (
-    <Link to={to} className="chip flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px]">
-      <span data-testid={testid} className="flex min-w-0 flex-1 items-center gap-2"><Icon className="shrink-0 text-[15px] text-gold-soft" /><span className="truncate">{title}</span></span>
+    <Link to={to} className="flex min-h-[3.25rem] items-center gap-3 px-3.5 py-2">
+      <Icon className="shrink-0 text-[18px] text-gold-soft" />
+      <span data-testid={testid} className="min-w-0 flex-1"><span className="block text-[14px]">{title}</span><span className="block truncate text-[11.5px] text-mauve">{text}</span></span>
       <span aria-hidden className="text-mauve">›</span>
     </Link>
   );

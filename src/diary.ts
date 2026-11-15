@@ -3,10 +3,11 @@
  * - 本地日期：一律以手機本地時區的年月日組成（不使用 toISOString，避免深夜紀錄被 UTC 移到前一日／後一日）。
  * - 照片：上傳前在手機壓縮（最長邊 2560px JPEG），以 Canvas 重新編碼＝移除 EXIF／GPS 等 metadata；另製作小縮圖（WebP）存 D1。
  * - 上傳失敗可重試；同一照片重試不會重複建立（伺服器按 SHA-256 去重）。
- * - 草稿：未保存的表單保存在這部手機（localStorage），失敗不會遺失已填寫資料。
+ * - 草稿：未保存的表單及未上傳照片保存在這部手機（IndexedDB，見 diaryDrafts.ts），失敗不會遺失已填寫資料。
  */
 import { ApiError, api } from "./api";
-import { cachedApi } from "./localWardrobe";
+import { cachedApi, localAccount } from "./localWardrobe";
+import type { WearMap } from "../shared/wearSort";
 
 export type DiaryKind = "worn" | "planned" | "inspiration";
 export const KIND_LABEL: Record<DiaryKind, string> = { worn: "已穿著", planned: "計劃穿搭", inspiration: "靈感穿搭" };
@@ -17,6 +18,8 @@ export interface DiaryEntry {
   id: string; title: string | null; worn_date: string; worn_time: string | null; kind: DiaryKind; outfit_id: string | null; look_id: string | null; source_name: string | null;
   occasion: string | null; location: string | null; weather: string | null; tags: string[]; notes: string | null; rating: number | null; is_favorite: boolean;
   cover_photo_id: string | null; tz: string | null; created_at: string; updated_at: string; items: DiaryItem[]; photos: DiaryPhoto[]; garment_count: number;
+  /** 已保存造型的完整合成縮圖（沒有則 null） */
+  source_thumb?: string | null;
 }
 export interface WearInfo { worn_days: number; entries: number; first: string | null; last: string | null; month: number; year: number; days_since: number | null; cost_per_wear: number | null; price: number | null; diary_since: string | null; related: DiaryEntry[] }
 
@@ -40,6 +43,28 @@ export const snapUrl = (id: string) => `/api/diary/snaps/${id}`;
 export async function loadMonth(month: string) { return cachedApi<{ entries: DiaryEntry[] }>(`/api/diary?month=${month}&order=asc&limit=500`, "diary:" + month); }
 export const loadEntry = (id: string) => cachedApi<DiaryEntry>(`/api/diary/${id}`, "diary-entry:" + id);
 export const loadWear = (gid: string) => cachedApi<WearInfo>(`/api/garments/${gid}/wear?today=${localDate()}`, "wear:" + gid);
+
+// ───── 共用快取（Phase 3.9A.1.1）─────
+// 首頁多個元件、衣櫃穿著排序共用同一個請求（60 秒內不重複讀取）。快取按帳戶分開；
+// 新增、修改、刪除日誌或照片後主動清除（invalidateDiary），並通知已開啟的元件重新讀取，不需等候逾時。
+const shared = new Map<string, { at: number; p: Promise<unknown> }>();
+export const DIARY_CHANGED = "aw:diary-changed";
+export function sharedApi<T>(path: string, key: string, ttl = 60_000): Promise<T> {
+  const k = (localAccount() ?? "") + "|" + path;
+  const hit = shared.get(k);
+  if (hit && Date.now() - hit.at < ttl) return hit.p as Promise<T>;
+  const p = cachedApi<T>(path, key).then((r) => r.data);
+  shared.set(k, { at: Date.now(), p });
+  p.catch(() => shared.delete(k));
+  return p;
+}
+export function invalidateDiary() { shared.clear(); try { window.dispatchEvent(new Event(DIARY_CHANGED)); } catch { /* 非瀏覽器 */ } }
+/** 衣櫃穿著排序：全部衣物的穿著日數及最近穿著日期（一次請求） */
+export const loadWearSummary = () => sharedApi<{ today: string; garments: WearMap }>(`/api/diary/wear-summary?today=${localDate()}`, "wear-summary");
+/** 一段日期範圍（例如跨月的一週、最近紀錄），由舊至新 */
+export const loadRange = (from: string, to: string, limit = 500) => sharedApi<{ entries: DiaryEntry[] }>(`/api/diary?from=${from}&to=${to}&order=asc&limit=${limit}`, `diary-range:${from}:${to}`);
+/** 最近的紀錄（不限本月；例如 12 月 1 日仍可顯示 11 月 30 日） */
+export const loadRecent = (limit = 12) => sharedApi<{ entries: DiaryEntry[] }>(`/api/diary?to=${localDate()}&order=desc&limit=${limit}`, "diary-recent");
 
 // ───── 照片處理 ─────
 export interface PendingPhoto { key: string; file: File; rotate: 0 | 90 | 180 | 270; crop: "original" | "3:4" | "1:1"; preview: string; state: "waiting" | "uploading" | "done" | "failed"; progress: number; error?: string; size?: number; uploadedId?: string }
@@ -76,10 +101,11 @@ export async function processPhoto(file: Blob, opt: { rotate: number; crop: "ori
 }
 
 /** 上傳一張照片（顯示進度）；伺服器按內容去重，重試安全 */
-export function uploadPhoto(entryId: string, main: Blob, thumb: Blob, onProgress: (p: number) => void): Promise<{ photo: { id: string }; duplicate?: boolean }> {
+export function uploadPhoto(entryId: string, main: Blob, thumb: Blob, onProgress: (p: number) => void, op?: string): Promise<{ photo: { id: string }; duplicate?: boolean }> {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
     fd.set("file", main, "photo.jpg"); fd.set("thumb", thumb, "thumb");
+    if (op) fd.set("op", op);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/diary/${entryId}/photos`);
     xhr.setRequestHeader("x-requested-with", "ai-wardrobe");
@@ -88,7 +114,7 @@ export function uploadPhoto(entryId: string, main: Blob, thumb: Blob, onProgress
     xhr.onload = () => {
       let data: { error?: { code: string; message: string } } | null = null;
       try { data = JSON.parse(xhr.responseText); } catch { /* ignore */ }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data as never);
+      if (xhr.status >= 200 && xhr.status < 300) { invalidateDiary(); resolve(data as never); }
       else { if (xhr.status === 401) window.dispatchEvent(new Event("aw:unauthorized")); reject(new ApiError(xhr.status, data?.error?.code || "upload_failed", data?.error?.message || `上傳失敗（${xhr.status}）`)); }
     };
     xhr.onerror = () => reject(new Error("網絡中斷，可以稍後重試"));
@@ -96,16 +122,13 @@ export function uploadPhoto(entryId: string, main: Blob, thumb: Blob, onProgress
   });
 }
 
-// ───── 草稿（這部手機） ─────
-const DRAFT = "aw:diary-draft:";
-export function saveDraft(key: string, v: unknown) { try { localStorage.setItem(DRAFT + key, JSON.stringify({ v, at: Date.now() })); } catch { /* 空間不足 */ } }
-export function readDraft<T>(key: string): T | null { try { const s = localStorage.getItem(DRAFT + key); return s ? (JSON.parse(s).v as T) : null; } catch { return null; } }
-export function clearDraft(key: string) { try { localStorage.removeItem(DRAFT + key); } catch { /* ignore */ } }
+// 草稿：見 diaryDrafts.ts（IndexedDB，包括未上傳照片）
 
+const changed = <T>(p: Promise<T>) => p.then((v) => { invalidateDiary(); return v; });
 export const diaryApi = {
-  create: (body: unknown) => api<DiaryEntry>("/api/diary", { method: "POST", json: body }),
-  update: (id: string, body: unknown) => api<DiaryEntry>(`/api/diary/${id}`, { method: "PATCH", json: body }),
-  duplicate: (id: string, body: unknown) => api<DiaryEntry>(`/api/diary/${id}/duplicate`, { method: "POST", json: body }),
-  remove: (id: string) => api(`/api/diary/${id}`, { method: "DELETE" }),
-  removePhoto: (id: string, pid: string) => api(`/api/diary/${id}/photos/${pid}`, { method: "DELETE" }),
+  create: (body: unknown) => changed(api<DiaryEntry>("/api/diary", { method: "POST", json: body })),
+  update: (id: string, body: unknown) => changed(api<DiaryEntry>(`/api/diary/${id}`, { method: "PATCH", json: body })),
+  duplicate: (id: string, body: unknown) => changed(api<DiaryEntry>(`/api/diary/${id}/duplicate`, { method: "POST", json: body })),
+  remove: (id: string) => changed(api(`/api/diary/${id}`, { method: "DELETE" })),
+  removePhoto: (id: string, pid: string) => changed(api(`/api/diary/${id}/photos/${pid}`, { method: "DELETE" })),
 };

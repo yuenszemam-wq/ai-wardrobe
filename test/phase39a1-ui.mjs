@@ -20,8 +20,11 @@ const photo2 = await sharp({ create: { width: 1200, height: 900, channels: 3, ba
 try {
   console.log("記錄今日穿搭");
   await page.goto(A.base + "/outfits");
-  await page.waitForSelector('[data-testid="studio-daily"]');
-  check("穿搭主頁有日誌、日曆及記錄今日入口", (await page.locator('[data-testid="studio-daily"] a').count()) === 3, await page.locator('[data-testid="studio-daily"]').innerHTML());
+  await page.waitForSelector('[data-testid="outfits-tabs"]');
+  check("穿搭頁有「我的穿搭／日誌日曆／素材管理」三個分頁", (await page.locator('[data-outfits-tab]').count()) === 3);
+  await page.click('[data-outfits-tab="diary"]');
+  await page.waitForSelector('[data-testid="diary"]');
+  check("日誌日曆分頁：日曆及「記錄今日」入口", (await page.locator('[data-testid="entry-record-today"]').count()) === 1);
   await page.click('[data-testid="entry-record-today"]');
   await page.waitForSelector('[data-testid="diary-editor"]');
   check("預設今天（本地日期）及已穿著", (await page.inputValue('[data-testid="diary-date"]')) === today && (await page.getAttribute('[data-kind="worn"]', "aria-pressed")) === "true");
@@ -33,6 +36,7 @@ try {
   await page.click('[data-pick-garment="gar_d1"] a, [data-pick-garment="gar_d1"] button >> nth=0');
   await page.click('[data-testid="diary-picker-done"]');
   check("選擇衣物", (await page.locator('[data-testid="diary-item-list"] [data-item="gar_d1"]').count()) === 1);
+  await page.click('[data-testid="diary-more-toggle"]');
   await page.fill('[data-testid="diary-occasion"]', "下午茶");
   await page.fill('[data-testid="diary-tags"]', "#茶會 #甜美");
   await shot("01-editor");

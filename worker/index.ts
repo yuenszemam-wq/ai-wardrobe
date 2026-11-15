@@ -14,7 +14,7 @@ import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, de
 import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
 import { Actor, Env, HttpError, errorResponse, json, nowIso, readJson, requireScope, requireSession } from "./util";
-import { createEntry, deleteEntry, deletePhoto, diaryStats, duplicateEntry, garmentWear, getEntry, listDiary, servePhoto, serveSnap, updateEntry, uploadPhoto } from "./diary";
+import { createEntry, deleteEntry, deletePhoto, diaryStats, wearSummary, duplicateEntry, garmentWear, getEntry, listDiary, servePhoto, serveSnap, updateEntry, uploadPhoto } from "./diary";
 import { Counter, DEFAULT_ALERTS, PURPOSES, R2_PRICING, alertSettings, appUsage, backgroundAllowed, estimateCost, flushUsage, forecast, freeTierUse, meteredBucket, officialUsage } from "./r2usage";
 
 export default {
@@ -433,6 +433,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (method === "GET") { requireScope(actor, "read"); return json(await listDiary(env, url.searchParams)); }
     if (method === "POST") { requireSession(actor); return json(await createEntry(env, actor, await readJson(req)), 201); }
   }
+  if (path === "/api/diary/wear-summary" && method === "GET") { requireScope(actor, "read"); return json(await wearSummary(env, url.searchParams.get("today") ?? "")); }
   if (path === "/api/diary/stats" && method === "GET") { requireScope(actor, "read"); return json(await diaryStats(env, url.searchParams.get("today") ?? "", url.searchParams.get("month"))); }
   m = path.match(/^\/api\/diary\/photos\/(dph_[\w-]+)(\/thumb)?$/);
   if (m && method === "GET") { requireScope(actor, "read"); return servePhoto(req, env, m[1], !!m[2]); }

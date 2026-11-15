@@ -37,8 +37,8 @@ try {
   check("最終顯示全部衣物", Number(await page.getAttribute('[data-testid="wardrobe-list"]', "data-shown")) === 122);
   const barTop = await page.locator('[data-testid="wardrobe-toolbar"]').boundingBox();
   check("捲動後頁首收合並固定在頂部（約 100–125px，不含安全區）", barTop.y >= 0 && barTop.y < 10 && barTop.height >= 85 && barTop.height <= 125 && (await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed")) === "1", barTop);
-  check("收合時全站頁首隱藏，避免兩條頁首重疊", (await page.evaluate(() => document.documentElement.dataset.headerCollapsed)) === "1" && (await page.evaluate(() => document.querySelector("header.app-header").getBoundingClientRect().bottom)) <= 1);
-  check("收合時只有一條分隔（沒有重複蕾絲）", !(await page.getAttribute('[data-testid="wardrobe-toolbar"]', "class")).includes("lace-b") && !(await page.getAttribute("header.app-header", "class")).includes("lace-b"));
+  check("衣櫃頁只有一個頁首（沒有全站頁首重疊）", (await page.locator("header.app-header").count()) === 0);
+  check("收合時只有一條分隔（沒有重複蕾絲）", !(await page.getAttribute('[data-testid="wardrobe-toolbar"]', "class")).includes("lace-b"));
 
   console.log("主分類及子分類（由實際資料產生）");
   const req0 = A.requests.length;
@@ -63,8 +63,11 @@ try {
 
   console.log("顯示設定彈層");
   await page.click('[data-testid="wardrobe-display"]');
-  check("每排數量及排序在同一個彈層", (await page.locator('[data-cols]').count()) === 4 && (await page.locator('[data-sort]').count()) === 6);
+  check("顯示設定彈層只有顯示方式及每排數量（排序已分開）", (await page.locator('[data-cols]').count()) === 4 && (await page.locator('[data-sort]').count()) === 0);
   await page.click('[data-cols="4"]');
+  await page.click('[data-testid="wardrobe-display"]');
+  await page.click('[data-testid="wardrobe-sort"]');
+  check("獨立排序選單：10 種排序", (await page.locator('[data-sort]').count()) === 10);
   await page.click('[data-sort="name"]');
   await page.waitForFunction(() => new URL(location.href).searchParams.get("sort") === "name");
   check("排序及每排數量生效", (await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="wardrobe-list"]')).gridTemplateColumns.split(" ").length)) === 4);
@@ -72,7 +75,7 @@ try {
 
   console.log("返回位置：第 87 件");
   await page.click('[data-cat="all"]');
-  await page.click('[data-testid="wardrobe-display"]');
+  await page.click('[data-testid="wardrobe-sort"]');
   await page.click('[data-sort="new"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="wardrobe-count"]')?.textContent.includes("122 件") && !new URL(location.href).searchParams.get("sort"));
   for (let i = 0; i < 8 && !(await page.locator('[data-gid="gar_t087"]').count()); i++) { await page.mouse.wheel(0, 5000); await page.waitForTimeout(250); }
