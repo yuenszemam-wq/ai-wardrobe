@@ -12,22 +12,38 @@ import { highResolutionBlob } from "../imageCache";
 export type Img = HTMLImageElement | HTMLCanvasElement | ImageBitmap;
 const dimsOf = (i: Img) => ("naturalWidth" in i ? { w: i.naturalWidth, h: i.naturalHeight } : { w: i.width, h: i.height });
 
+/*
+ * Phase 3.9A.2.1：圖片快取有上限（LRU），離開工作室時全部釋放。
+ * 以前的全域 Promise map 沒有上限，object URL 亦從不釋放：在 iPhone 長時間使用工作室或角色換裝會不斷佔用記憶體。
+ * 被淘汰的項目只移出快取（畫面上仍在使用的圖片元素不受影響）；releaseImageCache() 在工作室卸載時釋放全部 object URL。
+ */
+const MAX_IMAGES = 80;
 const imgCache = new Map<string, Promise<HTMLImageElement>>();
+const objectUrls = new Set<string>();
 /** 讀取圖片（經共用高清快取：已下載的圖片離線亦可使用） */
 export function loadImage(src: string): Promise<HTMLImageElement> {
   let p = imgCache.get(src);
-  if (!p) {
-    p = highResolutionBlob(src).then(async (blob) => {
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.src = url;
-      try { await img.decode(); } catch { URL.revokeObjectURL(url); throw new Error("圖片未能解碼"); }
-      return img; // 保留 object URL：同一圖片在編輯期間重複使用
-    });
-    imgCache.set(src, p);
-    p.catch(() => imgCache.delete(src));
-  }
+  if (p) { imgCache.delete(src); imgCache.set(src, p); return p; } // 最近使用移到最後
+  p = highResolutionBlob(src).then(async (blob) => {
+    const url = URL.createObjectURL(blob);
+    objectUrls.add(url);
+    const img = new Image();
+    img.src = url;
+    try { await img.decode(); } catch { URL.revokeObjectURL(url); objectUrls.delete(url); throw new Error("圖片未能解碼"); }
+    return img;
+  });
+  imgCache.set(src, p);
+  p.catch(() => imgCache.delete(src));
+  while (imgCache.size > MAX_IMAGES) imgCache.delete(imgCache.keys().next().value as string);
   return p;
+}
+export const imageCacheSize = () => imgCache.size;
+/** 離開工作室：釋放所有 object URL 及快取 */
+export function releaseImageCache() {
+  imgCache.clear();
+  // 延遲釋放：讓正在卸載的畫面完成最後一次繪畫
+  const urls = [...objectUrls]; objectUrls.clear();
+  setTimeout(() => urls.forEach((u) => URL.revokeObjectURL(u)), 1500);
 }
 
 // ───── 遮罩 ─────
@@ -147,6 +163,34 @@ export function composeScene(layers: Layer[], background: BackgroundSpec | null,
   if (withBackground) paintBackground(ctx, background, W, H, images.background);
   for (const l of layers) { const im = images.layer(l); if (im) drawLayer(ctx, l, im, W, H); }
   return c;
+}
+/**
+ * 高清匯出（Phase 3.9A.2.1）：逐個圖層載入 → 套用遮罩 → 畫上 → 立即釋放，不會同時保留所有圖層的高清畫布。
+ * 每個圖層的處理解像度＝它在輸出圖片中的實際像素大小（最多 4096），細小配件不會建立 3200px 的畫布。
+ * iPhone Safari 畫布總記憶體有限：任何畫布建立或編碼失敗都會清楚回報，不會輸出缺少圖層的圖片。
+ */
+export async function exportScene(layers: Layer[], background: BackgroundSpec | null, srcOf: (l: Layer) => string | null, bgSrc: string | null, W: number, H: number, withBackground: boolean, onProgress?: (done: number, total: number) => void): Promise<Blob> {
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("這部裝置未能建立高清畫布，請改用標準解像度");
+  try {
+    if (withBackground) paintBackground(ctx, background, W, H, bgSrc ? await loadImage(bgSrc) : null);
+    const vis = layers.filter((l) => !l.hidden);
+    let n = 0;
+    for (const l of vis) {
+      const src = srcOf(l);
+      if (!src) throw new Error(`「${l.name || "圖層"}」缺少圖片，未能匯出`);
+      const img = await loadImage(src);
+      const side = Math.min(4096, Math.ceil(Math.max((l.w / 100) * W, (l.h / 100) * H) * 1.05));
+      const m = maskedCanvas(img, l.mask, Math.max(64, side));
+      drawLayer(ctx, l, m, W, H);
+      m.width = 0; m.height = 0; // 立即釋放
+      onProgress?.(++n, vis.length);
+    }
+    const blob = await toBlob(c, "image/png").catch(() => { throw new Error("圖片太大，這部裝置未能輸出，請改用標準解像度"); });
+    return blob;
+  } finally { c.width = 0; c.height = 0; }
 }
 export const toBlob = (c: HTMLCanvasElement, type = "image/png", q?: number) => new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("未能產生圖片"))), type, q));
 export const blobToBase64 = (b: Blob) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).replace(/^data:[^,]+,/, "")); r.onerror = () => rej(r.error); r.readAsDataURL(b); });

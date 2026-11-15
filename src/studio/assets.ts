@@ -60,7 +60,7 @@ async function thumbOf(src: HTMLCanvasElement | ImageBitmap) {
   return b;
 }
 
-export async function uploadStudioAsset(img: PreparedImage, opts: { kind: AssetKind; name: string; inLibrary: boolean }): Promise<StudioAsset> {
+export async function uploadStudioAsset(img: PreparedImage, opts: { kind: AssetKind; name: string; inLibrary: boolean; opId?: string }): Promise<StudioAsset> {
   if (!navigator.onLine) throw new Error("目前離線：素材需要連線才可以上傳");
   const fd = new FormData();
   fd.set("file", img.blob, img.hasAlpha ? "asset.png" : "asset.jpg");
@@ -68,6 +68,8 @@ export async function uploadStudioAsset(img: PreparedImage, opts: { kind: AssetK
   fd.set("kind", opts.kind);
   fd.set("name", opts.name);
   if (opts.inLibrary) fd.set("in_library", "1");
+  // 冪等：同一次上傳重試（網絡中斷後）沿用同一個 op_id，伺服器取回第一次建立的素材
+  if (opts.opId) fd.set("op_id", opts.opId);
   return api<StudioAsset>("/api/studio/assets", { method: "POST", body: fd });
 }
 

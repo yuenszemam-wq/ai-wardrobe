@@ -80,21 +80,38 @@ export default function Wardrobe() {
   const frozen = useRef(false);
   frozen.current = panelOpen;
   useEffect(() => {
-    let last = window.scrollY, acc = 0, raf = 0;
-    const tick = () => {
-      raf = 0;
-      const y = window.scrollY, dy = y - last;
-      last = y;
+    /*
+     * Phase 3.9A.2.1（WebKit）：Safari 的慣性捲動及一次大幅捲動，scroll 事件可能被合併或延遲，
+     * 只靠逐次累積的位移會錯過收合（WebKit 測試一次捲動 800px 未收合）。所以：
+     * - 位置同時讀取 scrollingElement（部分 WebKit 版本 window.scrollY 會延遲）；
+     * - 單次位移超過頁首高度＝直接按方向處理；
+     * - 捲動停止 140ms 後再按「停定位置與上次停定位置」判斷一次（不受事件合併影響）。
+     */
+    const pos = () => Math.max(window.scrollY || 0, document.scrollingElement?.scrollTop ?? 0);
+    let last = pos(), settled = last, acc = 0, raf = 0, idle = 0;
+    const decide = (y: number, dy: number) => {
       if (y < TOP_RESET) { acc = 0; setCollapsed(false); return; }
       if (frozen.current) { acc = 0; return; }
+      if (Math.abs(dy) > headHRef.current) { acc = 0; if (dy > 0 && y > headHRef.current) setCollapsed(true); else if (dy < 0) setCollapsed(false); return; }
       acc = Math.sign(dy) === Math.sign(acc) ? acc + dy : dy;
       // 只在展開時的佔位已完全捲出畫面後才收合：收合後畫面頂部不會出現空白
       if (acc > COLLAPSE_AFTER && y > headHRef.current) { acc = 0; setCollapsed(true); }
       else if (acc < -EXPAND_AFTER) { acc = 0; setCollapsed(false); }
     };
-    const on = () => { if (!raf) raf = requestAnimationFrame(tick); };
+    const tick = () => { raf = 0; const y = pos(); decide(y, y - last); last = y; };
+    const settle = () => {
+      idle = 0;
+      const y = pos(), dy = y - settled;
+      settled = y; last = y;
+      if (y < TOP_RESET) { acc = 0; setCollapsed(false); return; }
+      if (frozen.current) return;
+      if (dy > COLLAPSE_AFTER && y > headHRef.current && !collapsedRef.current) setCollapsed(true);
+      else if (dy < -EXPAND_AFTER && collapsedRef.current) setCollapsed(false);
+    };
+    const on = () => { if (!raf) raf = requestAnimationFrame(tick); if (idle) clearTimeout(idle); idle = window.setTimeout(settle, 140); };
     window.addEventListener("scroll", on, { passive: true });
-    return () => { window.removeEventListener("scroll", on); if (raf) cancelAnimationFrame(raf); };
+    window.addEventListener("scrollend", settle as EventListener, { passive: true });
+    return () => { window.removeEventListener("scroll", on); window.removeEventListener("scrollend", settle as EventListener); if (raf) cancelAnimationFrame(raf); if (idle) clearTimeout(idle); };
   }, []);
   const closePanels = () => { setDisplayOpen(false); setSortOpen(false); setMoreOpen(false); };
 

@@ -5,6 +5,20 @@ import { api, imageUrl } from "../api";
 import { IconCrown, IconHeart, IconImage, IconPerson, IconPlus, IconScissors, IconSearch, IconShirt, IconSort, IconSparkle } from "../components/icons";
 import { navigate, usePath } from "../router";
 import { Empty, Link, Spinner, toast } from "../components/ui";
+import { StudioDraft, dropStudioDraft, listStudioDrafts, onDraftsChange } from "../studioDrafts";
+
+/** 全部造型（按 next_cursor 逐頁讀取；以前只讀取最多 200 套） */
+export async function loadAllOutfits(): Promise<OutfitSummary[]> {
+  const out: OutfitSummary[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < 25; i++) {
+    const r: { outfits: OutfitSummary[]; next_cursor?: string | null } = await api(`/api/outfits${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
+    out.push(...r.outfits);
+    if (!r.next_cursor) break;
+    cursor = r.next_cursor;
+  }
+  return out;
+}
 
 export interface OutfitSummary {
   id: string;
@@ -89,7 +103,7 @@ function MineTab() {
   const gridRef = useRef<HTMLDivElement>(null);
   useEffect(() => { writeListState("outfits", { fav, q }); }, [fav, q]);
   useEffect(() => {
-    api<{ outfits: OutfitSummary[] }>("/api/outfits").then((r) => setOutfits(r.outfits)).catch((e) => { setOutfits([]); toast((e as Error).message, "err"); });
+    loadAllOutfits().then(setOutfits).catch((e) => { setOutfits([]); toast((e as Error).message, "err"); });
     api<{ looks: LookSummary[] }>("/api/doll/looks").then((r) => setLooks(r.looks)).catch(() => setLooks([]));
   }, []);
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify({ filter, sort })); } catch { /* 私密瀏覽 */ } }, [filter, sort]);
@@ -125,6 +139,7 @@ function MineTab() {
         <EntryCard to="/outfits/new" testid="entry-outfit" Icon={IconShirt} title="衣服配搭" text="自由組合單品" />
         <EntryCard to="/dressing" testid="entry-look" Icon={IconPerson} title="角色換裝" text="建立人物造型" hot />
       </div>
+      <DraftStrip />
 
       <div className="mt-4 flex items-center justify-between">
         <h2 className="font-serif text-[18px] font-bold tracking-[0.1em] text-gold-soft">已保存造型</h2>
@@ -174,6 +189,30 @@ function MineTab() {
         </div>
       )}
     </>
+  );
+}
+
+/** Phase 3.9A.3：未保存的創作草稿（這部手機，按帳戶分開）；可繼續編輯或捨棄 */
+function DraftStrip() {
+  const [drafts, setDrafts] = useState<StudioDraft[]>([]);
+  useEffect(() => { const load = () => void listStudioDrafts().then(setDrafts).catch(() => setDrafts([])); load(); return onDraftsChange(load); }, []);
+  if (!drafts.length) return null;
+  const open = (d: StudioDraft) => navigate(d.kind === "outfit" ? `${d.target ? `/outfits/${d.target}` : "/outfits/new"}?draft=${encodeURIComponent(d.id)}` : `${d.target ? `/dressing/${d.target}` : "/dressing"}?draft=${encodeURIComponent(d.id)}`);
+  return (
+    <section className="mt-3" data-testid="draft-strip">
+      <h2 className="mb-1.5 font-serif text-[14px] font-bold text-gold-soft">未保存的草稿（{drafts.length}）</h2>
+      <div className="scrollbar-none -mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+        {drafts.map((d) => (
+          <div key={d.id} className="chip flex shrink-0 items-center gap-1 rounded-2xl py-1 pl-3 pr-1 text-[12px]" data-draft-id={d.id}>
+            <button type="button" className="text-left" onClick={() => open(d)}>
+              <span className="block max-w-[9rem] truncate font-bold">{d.title || "未命名"}</span>
+              <span className="block text-[10.5px] opacity-75">{d.kind === "outfit" ? "衣服配搭" : "角色換裝"}・{d.target ? "修改中" : "新造型"}・{new Date(d.at).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+            </button>
+            <button type="button" aria-label={`捨棄草稿 ${d.title}`} className="grid h-7 w-7 place-items-center" data-draft-drop onClick={() => { if (confirm("捨棄這份草稿？已保存的造型不受影響。")) void dropStudioDraft(d.id); }}>✕</button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

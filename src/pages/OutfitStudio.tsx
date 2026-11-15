@@ -20,14 +20,17 @@ import { navigate } from "../router";
 import { useTaxonomy } from "../taxonomy";
 import { loadFullList } from "../wardrobeList";
 import { BackgroundSpec, CANVAS_H, CANVAS_W, Layer, LayerMask, MAX_LAYERS, duplicateLayer, garmentIdsOf, moveLayer, reorderByTopFirstIds, sameScene, slotFor, toLayerLocal, toTopFirst } from "../../shared/studioScene";
-import { AlphaGrid, Img, alphaAt, alphaGrid, composeScene, drawLayer, loadImage, maskedCanvas, paintBackground, sceneThumb, toBlob } from "../studio/render";
+import { AlphaGrid, alphaAt, alphaGrid, drawLayer, exportScene, loadImage, maskedCanvas, paintBackground, releaseImageCache, sceneThumb } from "../studio/render";
+import { StudioDraft, draftIdFor, dropStudioDraft, getStudioDraft, newDraftId, putStudioDraft, takeLegacyOutfitDraft } from "../studioDrafts";
 import { BackgroundPanel } from "../studio/BackgroundPanel";
 import { ASSET_KIND_LABEL, AssetKind, StudioAsset, cutoutBlob, listStudioAssets, patchStudioAsset, prepareImage, saveCutout, uploadStudioAsset, versionToGarment } from "../studio/assets";
 
 type Tab = "garments" | "layers" | "background" | "assets";
 type Scene = { layers: Layer[]; background: BackgroundSpec | null };
 type LayerView = Layer & { src: string | null; category?: string | null; has_cutout?: boolean; missing?: boolean };
-interface Loaded { id: string; name: string; notes: string | null; is_favorite: boolean; status: string; updated_at: string; background: BackgroundSpec | null; layers: (Layer & { image_url: string | null; category?: string | null; has_cutout?: boolean; missing?: boolean })[] }
+type LayerExtra = { category?: string | null; has_cutout?: boolean; missing?: boolean; latest_image_id?: string | null; image_outdated?: boolean; image_fallback?: boolean };
+interface Loaded { id: string; name: string; notes: string | null; is_favorite: boolean; status: string; updated_at: string; thumb_url?: string | null; background: BackgroundSpec | null; layers: (Layer & { image_url: string | null } & LayerExtra)[] }
+type DraftData = { name: string; notes: string; favorite: boolean; scene: Scene; srcs: Record<string, string | null>; extra: Record<string, LayerExtra> };
 type Gesture =
   | { kind: "move"; id: string; sx: number; sy: number; box: Layer }
   | { kind: "scale"; id: string; cx: number; cy: number; d0: number; box: Layer }
@@ -40,8 +43,9 @@ const HISTORY_MAX = 60;
 const ACCESSORY = new Set(["鞋", "襪", "頭飾", "手袋", "配件", "其他裝飾"]);
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const uid = () => "ly_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-const DRAFT = (id?: string) => `aw:outfit-draft:${id ?? "new"}`;
+const newOp = () => "op_" + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
 const garmentSrc = (g: Garment) => (g.transparent_image_id ? `/api/images/${g.transparent_image_id}` : null);
+const queryDraft = () => { try { return new URLSearchParams(location.search).get("draft"); } catch { return null; } };
 const PANEL_H = { mini: 64, mid: 0.36, max: 0.62 };
 
 export default function OutfitStudio({ id }: { id?: string }) {
@@ -49,7 +53,12 @@ export default function OutfitStudio({ id }: { id?: string }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [scene, setScene] = useState<Scene>({ layers: [], background: null });
   const [srcs, setSrcs] = useState<Record<string, LayerView["src"]>>({});
-  const [extra, setExtra] = useState<Record<string, { category?: string | null; has_cutout?: boolean; missing?: boolean }>>({});
+  const [extra, setExtra] = useState<Record<string, LayerExtra>>({});
+  // 草稿：每份造型（包括每份新造型）有自己的草稿 ID；衝突草稿等使用者選擇
+  const draftId = useRef<string>("");
+  const [draftState, setDraftState] = useState<"idle" | "saved" | "fallback" | "failed">("idle");
+  const [conflict, setConflict] = useState<StudioDraft<DraftData> | null>(null);
+  const createOp = useRef<string | null>(null);
   const [name, setName] = useState("新穿搭");
   const [notes, setNotes] = useState("");
   const [favorite, setFavorite] = useState(false);
@@ -79,43 +88,79 @@ export default function OutfitStudio({ id }: { id?: string }) {
   useEffect(() => { try { localStorage.setItem("aw:studio-panel", panel); } catch { /* ignore */ } }, [panel]);
 
   // ───── 載入 ─────
+  useEffect(() => () => releaseImageCache(), []);
   useEffect(() => {
     history.current = { past: [], future: [] };
-    setSelected(null); setCam({ z: 1, x: 0, y: 0 });
-    const applyDraft = (base: { name: string; notes: string; favorite: boolean; scene: Scene; srcs: Record<string, string | null> }, serverUpdated: string | null) => {
-      try {
-        const d = JSON.parse(localStorage.getItem(DRAFT(id)) || "null") as null | { at: number; base: string | null; name: string; notes: string; favorite: boolean; scene: Scene; srcs: Record<string, string | null> };
-        if (d && d.base === serverUpdated) { setName(d.name); setNotes(d.notes); setFavorite(d.favorite); setScene(d.scene); setSrcs({ ...base.srcs, ...d.srcs }); toast("已恢復未保存的草稿"); return true; }
-      } catch { /* 草稿損壞：忽略 */ }
-      return false;
+    setSelected(null); setCam({ z: 1, x: 0, y: 0 }); setConflict(null); setDraftState("idle");
+    createOp.current = null;
+    let live = true;
+    const qd = queryDraft();
+    draftId.current = qd ?? (id ? draftIdFor("outfit", id) : newDraftId("outfit"));
+    const apply = (d: DraftData, base: { srcs: Record<string, string | null>; extra: Record<string, LayerExtra> }) => {
+      setName(d.name); setNotes(d.notes); setFavorite(d.favorite); setScene(d.scene); setSrcs({ ...base.srcs, ...d.srcs }); setExtra({ ...base.extra, ...(d.extra ?? {}) });
+    };
+    /** 讀取草稿（含舊版 localStorage 草稿：搬到新格式一次） */
+    const readDraft = async (): Promise<StudioDraft<DraftData> | null> => {
+      const d = await getStudioDraft<DraftData>(draftId.current);
+      if (d) return d;
+      const old = !qd ? takeLegacyOutfitDraft(id) : null;
+      if (!old) return null;
+      const migrated: StudioDraft<DraftData> = { id: draftId.current, kind: "outfit", target: id ?? null, base: old.base, title: old.name, at: old.at, data: { name: old.name, notes: old.notes, favorite: old.favorite, scene: old.scene as Scene, srcs: old.srcs, extra: {} } };
+      await putStudioDraft(migrated);
+      return migrated;
     };
     if (!id) {
-      const base = { name: "新穿搭", notes: "", favorite: false, scene: { layers: [], background: null }, srcs: {} };
+      const base = { name: "新穿搭", notes: "", favorite: false, scene: { layers: [], background: null } as Scene };
       setLoaded({ id: "", name: base.name, notes: null, is_favorite: false, status: "active", updated_at: "", background: null, layers: [] });
-      setName(base.name); setNotes(""); setFavorite(false); setScene(base.scene); setSrcs({});
+      setName(base.name); setNotes(""); setFavorite(false); setScene(base.scene); setSrcs({}); setExtra({});
       setSavedKey(keyOf(base.scene, base.name, "", false));
-      applyDraft(base, null);
-      return;
+      void readDraft().then((d) => { if (live && d) { apply(d.data, { srcs: {}, extra: {} }); toast("已恢復未保存的草稿"); } });
+      return () => { live = false; };
     }
     setLoaded(null);
-    api<Loaded>(`/api/outfits/${id}`).then((o) => {
-      const sc: Scene = { layers: o.layers.map(({ image_url: _u, category: _c, has_cutout: _h, missing: _m, ...l }) => l as Layer), background: o.background };
-      const s: Record<string, string | null> = {}; const ex: typeof extra = {};
-      for (const l of o.layers) { s[l.layer_id] = l.image_url; ex[l.layer_id] = { category: l.category, has_cutout: l.has_cutout, missing: l.missing }; }
+    api<Loaded>(`/api/outfits/${id}`).then(async (o) => {
+      if (!live) return;
+      const sc: Scene = { layers: o.layers.map(({ image_url: _u, category: _c, has_cutout: _h, missing: _m, latest_image_id: _li, image_outdated: _io, image_fallback: _if, ...l }) => l as Layer), background: o.background };
+      const s: Record<string, string | null> = {}; const ex: Record<string, LayerExtra> = {};
+      for (const l of o.layers) { s[l.layer_id] = l.image_url; ex[l.layer_id] = { category: l.category, has_cutout: l.has_cutout, missing: l.missing, latest_image_id: l.latest_image_id, image_outdated: l.image_outdated, image_fallback: l.image_fallback }; }
       updatedAt.current = o.updated_at;
       setLoaded(o); setName(o.name); setNotes(o.notes ?? ""); setFavorite(o.is_favorite); setScene(sc); setSrcs(s); setExtra(ex);
       setSavedKey(keyOf(sc, o.name, o.notes ?? "", o.is_favorite));
-      applyDraft({ name: o.name, notes: o.notes ?? "", favorite: o.is_favorite, scene: sc, srcs: s }, o.updated_at);
+      const d = await readDraft();
+      if (!live || !d) return;
+      // 同一版本＝直接恢復；版本不同＝衝突草稿（不自動覆蓋，由使用者選擇）
+      if (d.base === o.updated_at) { apply(d.data, { srcs: s, extra: ex }); toast("已恢復未保存的草稿"); }
+      else setConflict(d);
     }).catch((e) => toast((e as Error).message, "err"));
+    return () => { live = false; };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   const keyOf = (sc: Scene, n: string, no: string, f: boolean) => JSON.stringify([sc, n, no, f]);
   const dirty = !!loaded && keyOf(scene, name, notes, favorite) !== savedKey;
-  // 草稿：未保存的修改保存在這部手機（素材已上傳，只保存設定）
+  // 草稿：未保存的修改保存在這部手機（IndexedDB；素材已上傳，只保存設定）。衝突草稿等待選擇期間不寫入，避免覆蓋。
+  const pending = useRef<null | (() => Promise<void>)>(null);
   useEffect(() => {
-    if (!loaded) return;
-    const t = window.setTimeout(() => { try { if (dirty) localStorage.setItem(DRAFT(id), JSON.stringify({ at: Date.now(), base: updatedAt.current, name, notes, favorite, scene, srcs })); else localStorage.removeItem(DRAFT(id)); } catch { /* 容量不足 */ } }, 300);
+    if (!loaded || conflict) return;
+    const did = draftId.current;
+    const write = async () => {
+      pending.current = null;
+      if (!dirty) { await dropStudioDraft(did); setDraftState("idle"); return; }
+      const r = await putStudioDraft<DraftData>({ id: did, kind: "outfit", target: id ?? null, base: updatedAt.current, title: name.trim() || "新穿搭", at: Date.now(), data: { name, notes, favorite, scene, srcs, extra } });
+      setDraftState(r);
+      // 新造型：網址記錄草稿 ID，重新整理或重新打開 App 都可以回到這份草稿
+      if (!id && r !== "failed" && queryDraft() !== did) window.history.replaceState(window.history.state, "", `/outfits/new?draft=${encodeURIComponent(did)}`);
+    };
+    pending.current = write;
+    const t = window.setTimeout(() => void write(), 350);
     return () => clearTimeout(t);
-  }, [scene, name, notes, favorite, dirty, loaded, id, srcs]);
+  }, [scene, name, notes, favorite, dirty, loaded, id, srcs, extra, conflict]);
+  // 切換 App、鎖機或關閉頁面：立即寫入（iOS 不保證 beforeunload）
+  useEffect(() => {
+    const flush = () => { if (pending.current) void pending.current(); };
+    const vis = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", vis);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", vis); flush(); };
+  }, []);
   useEffect(() => { const on = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } }; window.addEventListener("beforeunload", on); return () => window.removeEventListener("beforeunload", on); }, [dirty]);
 
   // ───── 歷史 ─────
@@ -300,7 +345,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
   function addGarment(g: Garment, force = false) {
     const existing = toTopFirst(scene.layers).find((l) => l.garment_id === g.id && l.layer_type === "garment");
     if (existing && !force) { setSelected(existing.layer_id); toast("已選取畫布上的這件衣物；需要多一件可按「再加入一件」"); return; }
-    addLayer(blank({ garment_id: g.id, name: displayName(g), ...slotFor(g.category) }), garmentSrc(g), { category: g.category });
+    addLayer(blank({ garment_id: g.id, name: displayName(g), image_id: g.transparent_image_id ?? null, ...slotFor(g.category) }), garmentSrc(g), { category: g.category });
     rememberRecent(g.id);
   }
   function duplicate(lid: string) {
@@ -313,27 +358,67 @@ export default function OutfitStudio({ id }: { id?: string }) {
   const removeLayer = (lid: string) => { commit((s) => ({ ...s, layers: s.layers.filter((l) => l.layer_id !== lid) })); if (selected === lid) setSelected(null); };
 
   // ───── 保存 ─────
+  /**
+   * 縮圖只在「所有可見圖層及背景圖片都已載入」時產生（Phase 3.9A.2.1）：以前只檢查有網址的圖層，
+   * 背景圖片未載入或圖片讀取失敗時仍會產生不完整的縮圖。未準備好＝不送縮圖，伺服器會移除舊縮圖，之後自動補建。
+   */
+  const sceneReady = (sc: Scene) => {
+    if (sc.background?.type === "image" && sc.background.image && !bgImg) return false;
+    return sc.layers.every((l) => l.hidden || !srcs[l.layer_id] || !!rendered(l));
+  };
+  const makeThumb = async (sc: Scene) => { if (!sceneReady(sc)) return undefined; try { return await sceneThumb(sc.layers, sc.background, { layer: (l) => rendered(l)?.canvas ?? null, background: bgImg }); } catch { return undefined; } };
   async function save(): Promise<string | null> {
     if (!scene.layers.length && !id) { toast("請先加入衣物或素材", "err"); return null; }
     if (!navigator.onLine) { toast("目前離線：修改已保存為這部手機的草稿，連線後再保存", "err"); return null; }
     setSaving(true);
     try {
-      // 完整縮圖（與畫布一致）：所有圖片載入完成才產生；有圖片未能讀取時不產生縮圖（不會產生缺少圖層的縮圖）
-      let thumb: string | undefined;
-      const missing = scene.layers.filter((l) => !l.hidden && srcs[l.layer_id] && !rendered(l));
-      if (!missing.length) { try { thumb = await sceneThumb(scene.layers, scene.background, { layer: (l) => rendered(l)?.canvas ?? null, background: bgImg }); } catch { /* 縮圖失敗不影響保存 */ } }
-      const body = { name: name.trim() || "新穿搭", notes, is_favorite: favorite, layers: scene.layers, background: scene.background, ...(thumb ? { thumb } : {}), ...(id && updatedAt.current ? { base_updated_at: updatedAt.current } : {}), ...(id && loaded?.status === "review" && scene.layers.length ? { status: "active" } : {}) };
+      const thumb = await makeThumb(scene);
+      // 建立新造型：同一個 op_id 重試（網絡中斷後）不會建立兩套
+      if (!id && !createOp.current) createOp.current = newOp();
+      const body = { name: name.trim() || "新穿搭", notes, is_favorite: favorite, layers: scene.layers, background: scene.background, ...(thumb ? { thumb } : {}), ...(id && updatedAt.current ? { base_updated_at: updatedAt.current } : {}), ...(id && loaded?.status === "review" && scene.layers.length ? { status: "active" } : {}), ...(!id ? { op_id: createOp.current } : {}) };
       const res = await api<Loaded>(id ? `/api/outfits/${id}` : "/api/outfits", { method: id ? "PATCH" : "POST", json: body });
       updatedAt.current = res.updated_at;
-      setSavedKey(keyOf(scene, body.name, notes, favorite)); setName(body.name);
-      try { localStorage.removeItem(DRAFT(id)); } catch { /* ignore */ }
-      toast(thumb ? "已保存造型" : missing.length ? "已保存造型（部分圖片未能讀取，縮圖稍後再更新）" : "已保存造型");
+      // 伺服器記錄的圖片版本（新加入的衣物）寫回圖層，畫面與保存一致
+      const pinned = new Map(res.layers.map((l) => [l.layer_id, l.image_id ?? null]));
+      const savedScene = { ...scene, layers: scene.layers.map((l) => (l.layer_type === "garment" && pinned.get(l.layer_id) !== undefined ? { ...l, image_id: pinned.get(l.layer_id) } : l)) };
+      setScene(savedScene);
+      setSavedKey(keyOf(savedScene, body.name, notes, favorite)); setName(body.name);
+      await dropStudioDraft(draftId.current); setDraftState("idle");
+      toast(thumb ? "已保存造型" : "已保存造型（部分圖片未載入，縮圖稍後自動補建）");
       if (!id) navigate(`/outfits/${res.id}`, true);
       return res.id;
     } catch (e) {
-      toast(`${(e as Error).message}（修改仍保留在畫面及草稿）`, "err");
+      const msg = (e as Error).message;
+      toast(`${msg}（修改仍保留在畫面及草稿）`, "err");
       return null;
     } finally { setSaving(false); }
+  }
+  // 縮圖補建：打開已保存（未修改）的造型而沒有縮圖時，圖片全部載入後自動補建一次
+  const rebuilt = useRef(false);
+  useEffect(() => {
+    if (!id || !loaded || loaded.thumb_url || rebuilt.current || dirty || !scene.layers.length || !navigator.onLine) return;
+    if (!sceneReady(scene)) return;
+    rebuilt.current = true;
+    void (async () => {
+      const thumb = await makeThumb(scene); if (!thumb) return;
+      try { const r = await api<Loaded>(`/api/outfits/${id}`, { method: "PATCH", json: { thumb, base_updated_at: updatedAt.current } }); updatedAt.current = r.updated_at; setLoaded((o) => (o ? { ...o, thumb_url: r.thumb_url, updated_at: r.updated_at } : o)); } catch { /* 下次再試 */ }
+    })();
+  }, [imgs, bgImg, loaded, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** 衝突草稿：載入（覆蓋目前畫面，保存時以最新版本為基礎）、另存為新造型或捨棄 */
+  async function resolveConflict(action: "load" | "copy" | "discard") {
+    const d = conflict; if (!d) return;
+    if (action === "discard") { await dropStudioDraft(d.id); setConflict(null); toast("已捨棄草稿"); return; }
+    if (action === "load") {
+      setName(d.data.name); setNotes(d.data.notes); setFavorite(d.data.favorite); setScene(d.data.scene);
+      setSrcs((m) => ({ ...m, ...d.data.srcs })); setExtra((m) => ({ ...m, ...(d.data.extra ?? {}) }));
+      setConflict(null); toast("已載入草稿；保存會覆蓋另一處的修改");
+      return;
+    }
+    try {
+      const r = await api<{ id: string }>("/api/outfits", { method: "POST", json: { name: `${d.data.name}（草稿副本）`, notes: d.data.notes, is_favorite: d.data.favorite, layers: d.data.scene.layers, background: d.data.scene.background, op_id: "op_copy_" + d.id.replace(/[^\w-]/g, "").slice(0, 40) + "_" + d.at.toString(36) } });
+      await dropStudioDraft(d.id); setConflict(null); toast("已另存為新造型");
+      navigate(`/outfits/${r.id}`);
+    } catch (e) { toast((e as Error).message, "err"); }
   }
 
   // ───── 最近使用 ─────
@@ -376,7 +461,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
         <button type="button" aria-label="返回我的穿搭" onClick={() => { if (!dirty || confirm("有未保存的修改（已保存為草稿）。離開？")) navigate("/outfits"); }} className="icon-btn"><IconChevronLeft /></button>
         <div className="min-w-0 flex-1">
           <input value={name} onChange={(e) => setName(e.target.value)} aria-label="造型名稱" maxLength={120} className="w-full truncate bg-transparent font-serif text-[17px] font-bold text-gold-soft outline-none" data-testid="studio-name" />
-          <p className="text-[10.5px] text-mauve" data-testid="studio-status">衣服配搭・{saving ? "保存中…" : dirty ? "未保存" : id ? "已保存" : "新造型"}</p>
+          <p className="text-[10.5px] text-mauve" data-testid="studio-status" data-draft={draftState}>衣服配搭・{saving ? "保存中…" : dirty ? (draftState === "failed" ? "未保存・草稿未能保存" : draftState === "fallback" ? "未保存・草稿只存於暫存空間" : draftState === "saved" ? "未保存・已存草稿" : "未保存") : id ? "已保存" : "新造型"}</p>
         </div>
         <button type="button" aria-label={favorite ? "取消收藏" : "收藏"} aria-pressed={favorite} onClick={() => setFavorite(!favorite)} className={`icon-btn ${favorite ? "text-[var(--aw-chart)]" : ""}`}><IconHeart filled={favorite} /></button>
         <button type="button" onClick={() => void save()} disabled={saving} className="btn-jewel h-9 rounded-full px-4 text-[14px] disabled:opacity-60" data-testid="studio-save">{saving ? "保存中" : "保存"}</button>
@@ -386,8 +471,8 @@ export default function OutfitStudio({ id }: { id?: string }) {
             <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => setMetaOpen(true)}>名稱及備註</button>
             <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={async () => { const oid = dirty || !id ? await save() : id; if (oid) navigate(`/diary/new?outfit=${oid}`); }}>加入穿搭日誌</button>
             <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" data-testid="studio-export-open" onClick={() => setExportOpen(true)}>匯出圖片</button>
-            {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={async () => { try { const r = await api<{ id: string }>("/api/outfits", { method: "POST", json: { name: `${name}（副本）`, notes, layers: scene.layers, background: scene.background } }); toast("已複製成新造型"); navigate(`/outfits/${r.id}`); } catch (e) { toast((e as Error).message, "err"); } }}>複製造型</button>}
-            {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left text-wine" onClick={async () => { if (!confirm("刪除這套造型？衣物不會被刪除。")) return; await api(`/api/outfits/${id}`, { method: "DELETE" }); try { localStorage.removeItem(DRAFT(id)); } catch { /* ignore */ } toast("已刪除"); navigate("/outfits", true); }}>刪除造型</button>}
+            {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={async () => { try { const thumb = await makeThumb(scene); const r = await api<{ id: string }>("/api/outfits", { method: "POST", json: { name: `${name}（副本）`, notes, layers: scene.layers, background: scene.background, op_id: newOp(), ...(thumb ? { thumb } : {}) } }); toast("已複製成新造型"); navigate(`/outfits/${r.id}`); } catch (e) { toast((e as Error).message, "err"); } }} data-testid="studio-duplicate">複製造型</button>}
+            {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left text-wine" onClick={async () => { if (!confirm("刪除這套造型？衣物不會被刪除。")) return; await api(`/api/outfits/${id}`, { method: "DELETE" }); await dropStudioDraft(draftId.current); toast("已刪除"); navigate("/outfits", true); }}>刪除造型</button>}
           </div></>}
         </div>
       </header>}
@@ -460,6 +545,7 @@ export default function OutfitStudio({ id }: { id?: string }) {
               <Button variant="ghost" onClick={act(() => patchLayer(l.layer_id, { flip_y: !l.flip_y }))} data-op="flip-y">垂直翻轉</Button>
               <Button variant="ghost" onClick={act(() => patchLayer(l.layer_id, { locked: !l.locked }))} data-op="lock">{l.locked ? "解鎖" : "鎖定"}</Button>
               {l.layer_type === "garment" && <Button variant="ghost" onClick={act(() => patchLayer(l.layer_id, { ...slotFor(extra[l.layer_id]?.category), rotation: 0 }))}>重設位置</Button>}
+              {l.layer_type === "garment" && extra[l.layer_id]?.image_outdated && extra[l.layer_id]?.latest_image_id && <Button variant="ghost" className="col-span-2" data-op="update-image" onClick={act(() => { const nid = extra[l.layer_id]!.latest_image_id!; setSrcs((m) => ({ ...m, [l.layer_id]: `/api/images/${nid}` })); setExtra((m) => ({ ...m, [l.layer_id]: { ...m[l.layer_id], image_outdated: false } })); patchLayer(l.layer_id, { image_id: nid }); })}>改用衣櫃最新圖片</Button>}
               {l.layer_type === "studio_asset" && <Button variant="ghost" onClick={act(async () => { try { await patchStudioAsset(l.asset_id!, { in_library: true }); toast("已保存到我的素材庫"); } catch (e) { toast((e as Error).message, "err"); } })} data-op="to-library">保存到素材庫</Button>}
               {l.layer_type === "studio_asset" && <Button variant="ghost" onClick={act(async () => { const n = prompt("另存為衣櫃衣物：名稱", l.name || "自訂配件"); if (!n) return; try { const r = await versionToGarment(l.asset_version_id!, { name: n, category: "其他裝飾", variant: l.variant }); toast("已建立新的衣櫃衣物"); void r; } catch (e) { toast((e as Error).message, "err"); } })} data-op="to-garment">另存為衣櫃衣物</Button>}
               <Button variant="ghost" className="col-span-2 text-wine" onClick={act(() => removeLayer(l.layer_id))} data-op="remove"><IconTrash />移除圖層</Button>
@@ -469,6 +555,10 @@ export default function OutfitStudio({ id }: { id?: string }) {
       })()}
       {metaOpen && <Sheet title="名稱及備註" onClose={() => setMetaOpen(false)}><div className="space-y-2"><input value={name} onChange={(e) => setName(e.target.value)} className="field h-10 w-full rounded-full px-3 text-[16px]" placeholder="造型名稱" /><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="field w-full rounded-2xl px-3 py-2 text-[16px]" placeholder="備註" /><Button className="w-full" onClick={() => setMetaOpen(false)}>完成</Button></div></Sheet>}
       {exportOpen && <ExportSheet name={name} scene={scene} srcs={srcs} onClose={() => setExportOpen(false)} />}
+      {conflict && <div className="fixed inset-x-2 top-[calc(env(safe-area-inset-top)+3.4rem)] z-50 rounded-2xl p-3 text-[12.5px] shadow-xl" style={{ background: "var(--aw-sheet)" }} role="alertdialog" aria-label="草稿與已保存版本不同" data-testid="draft-conflict">
+        <p className="mb-2">這部手機有一份未保存的草稿（{new Date(conflict.at).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}），但這套造型之後已在另一處修改。</p>
+        <div className="grid grid-cols-3 gap-1.5"><Button variant="ghost" onClick={() => void resolveConflict("load")} data-conflict="load">載入草稿</Button><Button variant="ghost" onClick={() => void resolveConflict("copy")} data-conflict="copy">另存副本</Button><Button variant="ghost" className="text-wine" onClick={() => void resolveConflict("discard")} data-conflict="discard">捨棄草稿</Button></div>
+      </div>}
     </div>
   );
 }
@@ -520,7 +610,7 @@ function SelectedBar({ l, tool, setTool, maskMode, setMaskMode, brush, setBrush,
 }
 
 /** 圖層列表：上方＝最前，背景永遠在最底（不在列表內） */
-function LayersTab({ layers, srcs, extra, selected, onSelect, onReorder, onPatch, onMenu }: { layers: Layer[]; srcs: Record<string, string | null>; extra: Record<string, { missing?: boolean }>; selected: string | null; onSelect: (id: string) => void; onReorder: (ids: string[]) => void; onPatch: (id: string, p: Partial<Layer>) => void; onMenu: (id: string) => void }) {
+function LayersTab({ layers, srcs, extra, selected, onSelect, onReorder, onPatch, onMenu }: { layers: Layer[]; srcs: Record<string, string | null>; extra: Record<string, LayerExtra>; selected: string | null; onSelect: (id: string) => void; onReorder: (ids: string[]) => void; onPatch: (id: string, p: Partial<Layer>) => void; onMenu: (id: string) => void }) {
   if (!layers.length) return <p className="py-6 text-center text-[12px] text-mauve">未有圖層。加入衣物或素材後，可以在這裡調整前後次序、隱藏、鎖定及複製。</p>;
   const items = toTopFirst(layers).map((l) => ({ ...l, id: l.layer_id }));
   const groups = new Map<string, number>(); for (const l of layers) if (l.group_id) groups.set(l.group_id, (groups.get(l.group_id) ?? 0) + 1);
@@ -531,7 +621,7 @@ function LayersTab({ layers, srcs, extra, selected, onSelect, onReorder, onPatch
         <div className={`flex items-center gap-1.5 rounded-xl p-1 ${l.layer_id === selected ? "chip-on" : "chip"}`} data-layer={l.layer_id}>
           <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => onSelect(l.layer_id)}>
             <span className="checker relative block h-11 w-8 shrink-0 overflow-hidden rounded-lg">{srcs[l.layer_id] && <img src={srcs[l.layer_id]!} alt="" className="h-full w-full object-contain" loading="lazy" />}</span>
-            <span className="min-w-0 flex-1 text-[12.5px]"><span className="block truncate">{l.name || "圖層"}</span><span className="block truncate text-[10.5px] opacity-70">{l.layer_type === "studio_asset" ? "素材" : l.layer_type === "garment_part" ? "套裝部件" : "衣物"}{l.group_id && (groups.get(l.group_id) ?? 0) > 1 ? "・同套裝" : ""}{l.mask ? "・遮罩" : ""}{extra[l.layer_id]?.missing ? "・缺少圖片" : ""}</span></span>
+            <span className="min-w-0 flex-1 text-[12.5px]"><span className="block truncate">{l.name || "圖層"}</span><span className="block truncate text-[10.5px] opacity-70">{l.layer_type === "studio_asset" ? "素材" : l.layer_type === "garment_part" ? "套裝部件" : "衣物"}{l.group_id && (groups.get(l.group_id) ?? 0) > 1 ? "・同套裝" : ""}{l.mask ? "・遮罩" : ""}{extra[l.layer_id]?.missing ? "・缺少圖片" : extra[l.layer_id]?.image_outdated ? "・衣櫃有新圖片" : extra[l.layer_id]?.image_fallback ? "・原圖片已刪除" : ""}</span></span>
           </button>
           <button type="button" aria-label={l.hidden ? "顯示" : "隱藏"} aria-pressed={l.hidden} data-action="hide" onClick={() => onPatch(l.layer_id, { hidden: !l.hidden })} className="grid h-8 w-8 place-items-center">{l.hidden ? <IconEyeOff /> : <IconEye />}</button>
           <button type="button" aria-label={l.locked ? "解鎖" : "鎖定"} aria-pressed={l.locked} data-action="lock" onClick={() => onPatch(l.layer_id, { locked: !l.locked })} className={`grid h-8 w-8 place-items-center ${l.locked ? "" : "opacity-40"}`}><IconLock /></button>
@@ -639,15 +729,19 @@ export function AssetUploadSheet({ file, onClose, onDone, defaultKind = "decorat
     try { const r = await cutoutBlob(img.blob); setCut(r.ok ? { state: "done", url: r.url, blob: r.blob } : { state: "failed", note: r.note }); if (r.ok) setShow("cutout"); }
     catch (e) { setCut({ state: "failed", note: (e as Error).message }); }
   }
+  // 重試不會重複上傳原圖：同一個 op_id；原圖已上傳成功、只有去背圖失敗時，重試只上傳去背圖
+  const op = useRef("op_" + Math.random().toString(36).slice(2, 12) + Date.now().toString(36));
+  const uploaded = useRef<StudioAsset | null>(null);
+  const cutSaved = useRef<StudioAsset | null>(null);
   async function confirm() {
     if (!img) return;
     setBusy(true);
     try {
-      let a = await uploadStudioAsset(img, { kind, name, inLibrary: keep === "library" });
+      let a = uploaded.current ?? (uploaded.current = await uploadStudioAsset(img, { kind, name, inLibrary: keep === "library", opId: op.current }));
       let variant: "original" | "cutout" = "original";
-      if (show === "cutout" && cut.blob) { const r = await saveCutout(a.version!.id, cut.blob); a = r; variant = "cutout"; }
+      if (show === "cutout" && cut.blob) { a = cutSaved.current ?? (cutSaved.current = await saveCutout(a.version!.id, cut.blob)); variant = "cutout"; }
       onDone(a, variant);
-    } catch (e) { toast((e as Error).message, "err"); } finally { setBusy(false); }
+    } catch (e) { toast(`${(e as Error).message}${uploaded.current ? "（原圖已上傳，重試只會補上未完成的部分）" : ""}`, "err"); } finally { setBusy(false); }
   }
   return (
     <Sheet title="加入圖片素材" onClose={onClose}>
@@ -682,21 +776,18 @@ function ExportSheet({ name, scene, srcs, onClose }: { name: string; scene: Scen
   async function run() {
     setState({ busy: true, msg: "載入高清圖片…" });
     try {
-      const W = CANVAS_W * scale, H = CANVAS_H * scale;
-      const map = new Map<string, Img>();
-      for (const l of scene.layers) {
-        if (l.hidden) continue;
-        const src = srcs[l.layer_id];
-        if (!src) throw new Error(`「${l.name || "圖層"}」缺少圖片，未能匯出`);
-        const img = await loadImage(src);
-        map.set(l.layer_id, maskedCanvas(img, l.mask, Math.max(W, H)));
-      }
-      const bi = scene.background?.type === "image" && scene.background.image ? await loadImage(`/api/studio/versions/${scene.background.image.version_id}${scene.background.image.variant === "cutout" ? "?cutout=1" : ""}`) : null;
-      setState({ busy: true, msg: "合成圖片…" });
       // 舊造型（沒有背景設定）沿用原本的奶油色底；選擇不包含背景＝真正透明
       const bg = withBg ? scene.background ?? { v: 1 as const, type: "solid" as const, color: "#fffaf6", color2: "#fffaf6", stops: [{ color: "#fffaf6", at: 0 }, { color: "#fffaf6", at: 1 }], angle: 0, size: 10, gap: 10, opacity: 1, image: null } : null;
-      const c = composeScene(scene.layers, bg, { layer: (l) => map.get(l.layer_id), background: bi }, W, H, withBg);
-      const blob = await toBlob(c, "image/png");
+      const bgSrc = withBg && scene.background?.type === "image" && scene.background.image ? `/api/studio/versions/${scene.background.image.version_id}${scene.background.image.variant === "cutout" ? "?cutout=1" : ""}` : null;
+      let blob: Blob;
+      try {
+        blob = await exportScene(scene.layers, bg, (l) => srcs[l.layer_id] ?? null, bgSrc, CANVAS_W * scale, CANVAS_H * scale, withBg, (d, t) => setState({ busy: true, msg: `合成圖片… ${d}/${t}` }));
+      } catch (e) {
+        // 高清失敗（多數是 iPhone 畫布記憶體不足）：自動改用標準解像度，並如實說明
+        if (scale === 1 || /缺少圖片/.test((e as Error).message)) throw e;
+        setState({ busy: true, msg: "高清輸出記憶體不足，改用標準解像度…" });
+        blob = await exportScene(scene.layers, bg, (l) => srcs[l.layer_id] ?? null, bgSrc, CANVAS_W, CANVAS_H, withBg);
+      }
       const file = new File([blob], `${name.trim() || "穿搭"}.png`, { type: "image/png" });
       if (navigator.canShare?.({ files: [file] })) {
         try { await navigator.share({ files: [file] }); setState({ busy: false, msg: "已開啟分享面板" }); }

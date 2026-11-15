@@ -9,6 +9,9 @@
  */
 import { parseImage, storeImage } from "./images";
 import { createGarment } from "./garments";
+import { findOp, opStatements, validOpId } from "./ops";
+import { drainPurge, queueStatements } from "./purge";
+import { hasTable } from "./schema";
 import { Actor, Env, HttpError, audit, newId, nowIso, sha256Hex, str } from "./util";
 
 export const ASSET_KINDS = ["background", "decoration", "prop", "accessory", "other"] as const;
@@ -41,11 +44,14 @@ async function readThumb(form: FormData | null) {
   return { bytes, mime };
 }
 
-/** 引用：造型圖層及背景（背景以 JSON 保存，按素材 ID 搜尋） */
-async function usage(env: Env, assetId: string) {
+/**
+ * 引用：造型圖層、造型背景及角色造型（背景及角色造型以 JSON 保存，按素材 ID 搜尋）。
+ * 查詢失敗會拋出錯誤（以前角色造型查詢失敗時當作「沒有引用」，可能誤刪仍在使用的素材）。
+ */
+export async function usage(env: Env, assetId: string) {
   const layers = (await env.DB.prepare("SELECT DISTINCT l.outfit_id AS id, o.name FROM outfit_layers l JOIN outfits o ON o.id = l.outfit_id WHERE l.asset_id = ?").bind(assetId).all<{ id: string; name: string }>()).results;
   const bgs = (await env.DB.prepare("SELECT id, name FROM outfits WHERE background LIKE ?").bind(`%"asset_id":"${assetId}"%`).all<{ id: string; name: string }>()).results;
-  const looks = (await env.DB.prepare("SELECT id, name FROM doll_looks WHERE state LIKE ?").bind(`%${assetId}%`).all<{ id: string; name: string }>().catch(() => ({ results: [] as { id: string; name: string }[] }))).results;
+  const looks = (await hasTable(env, "doll_looks")) ? (await env.DB.prepare("SELECT id, name FROM doll_looks WHERE state LIKE ?").bind(`%${assetId}%`).all<{ id: string; name: string }>()).results : [];
   const map = new Map<string, { id: string; name: string; kind: "outfit" | "look" }>();
   for (const x of [...layers, ...bgs]) map.set("o" + x.id, { ...x, kind: "outfit" });
   for (const x of looks) map.set("l" + x.id, { ...x, kind: "look" });
@@ -64,13 +70,32 @@ export async function listAssets(env: Env, p: URLSearchParams) {
   const kind = kindOf(p.get("kind")); if (kind) { where.push("a.kind = ?"); args.push(kind); }
   if (p.get("favorite") === "1") where.push("a.is_favorite = 1");
   const q = p.get("q")?.trim(); if (q) { where.push("a.name LIKE ?"); args.push("%" + q.replace(/[%_]/g, "") + "%"); }
-  const rows = (await env.DB.prepare(`SELECT a.* FROM studio_assets a WHERE ${where.join(" AND ")} ORDER BY a.updated_at DESC LIMIT 300`).bind(...args).all<AssetRow>()).results;
-  const vids = rows.map((r) => r.current_version_id).filter((x): x is string => !!x);
+  const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM studio_assets a WHERE ${where.join(" AND ")}`).bind(...args).first<{ n: number }>())?.n ?? 0;
+  // 分頁：cursor＝「updated_at|id」；回應附 total 及 next_cursor
+  const cur = p.get("cursor")?.split("|");
+  if (cur && cur.length === 2) { where.push("(a.updated_at < ? OR (a.updated_at = ? AND a.id < ?))"); args.push(cur[0], cur[0], cur[1]); }
+  const limit = Math.min(300, Math.max(1, Number(p.get("limit")) || 300));
+  const rows = (await env.DB.prepare(`SELECT a.* FROM studio_assets a WHERE ${where.join(" AND ")} ORDER BY a.updated_at DESC, a.id DESC LIMIT ?`).bind(...args, limit + 1).all<AssetRow>()).results;
+  const more = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const vids = page.map((r) => r.current_version_id).filter((x): x is string => !!x);
   const vers = new Map<string, VersionRow>();
   for (let i = 0; i < vids.length; i += 80) { const part = vids.slice(i, i + 80); for (const v of (await env.DB.prepare(`SELECT id, asset_id, r2_key, cutout_key, mime_type, width, height, file_size, sha256, has_alpha, created_at FROM studio_asset_versions WHERE id IN (${part.map(() => "?").join(",")})`).bind(...part).all<VersionRow>()).results) vers.set(v.id, v); }
-  const usedRows = (await env.DB.prepare("SELECT asset_id, COUNT(DISTINCT outfit_id) AS n FROM outfit_layers WHERE asset_id IS NOT NULL GROUP BY asset_id").all<{ asset_id: string; n: number }>()).results;
-  const used = new Map(usedRows.map((r) => [r.asset_id, Number(r.n)]));
-  return { assets: rows.map((a) => shape(a, a.current_version_id ? vers.get(a.current_version_id) ?? null : null, used.get(a.id) ?? 0)) };
+  const used = await usageCounts(env, page.map((a) => a.id));
+  return { assets: page.map((a) => shape(a, a.current_version_id ? vers.get(a.current_version_id) ?? null : null, used.get(a.id) ?? 0)), total, next_cursor: more && page.length ? `${page[page.length - 1].updated_at}|${page[page.length - 1].id}` : null };
+}
+
+/** 每個素材被多少個造型／角色造型使用（圖層＋背景＋角色造型） */
+async function usageCounts(env: Env, ids: string[]): Promise<Map<string, number>> {
+  const sets = new Map<string, Set<string>>(ids.map((id) => [id, new Set<string>()]));
+  for (let i = 0; i < ids.length; i += 80) {
+    const part = ids.slice(i, i + 80);
+    for (const r of (await env.DB.prepare(`SELECT DISTINCT asset_id, outfit_id FROM outfit_layers WHERE asset_id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ asset_id: string; outfit_id: string }>()).results) sets.get(r.asset_id)?.add("o" + r.outfit_id);
+  }
+  const scan = (owner: string, text: string | null) => { for (const m of (text ?? "").matchAll(/sta_[a-z2-7]+/g)) sets.get(m[0])?.add(owner); };
+  for (const r of (await env.DB.prepare("SELECT id, background FROM outfits WHERE background LIKE '%sta_%'").all<{ id: string; background: string | null }>()).results) scan("o" + r.id, r.background);
+  if (await hasTable(env, "doll_looks")) for (const r of (await env.DB.prepare("SELECT id, state FROM doll_looks WHERE state LIKE '%sta_%'").all<{ id: string; state: string | null }>()).results) scan("l" + r.id, r.state);
+  return new Map([...sets].map(([k, v]) => [k, v.size]));
 }
 
 export async function getAsset(env: Env, id: string) {
@@ -83,6 +108,10 @@ export async function getAsset(env: Env, id: string) {
 /** 上傳新素材（建立素材及第一個版本） */
 export async function createAsset(env: Env, actor: Actor, req: Request) {
   const form = await req.formData().catch(() => null);
+  // 冪等：網絡在提交後中斷、App 重試同一次上傳（同一 op_id）＝取回第一次建立的素材，不會重複上傳
+  const opId = validOpId(form?.get("op_id"));
+  const done = await findOp(env, opId, "studio.asset_create");
+  if (done && (await env.DB.prepare("SELECT id FROM studio_assets WHERE id = ?").bind(done).first())) return getAsset(env, done);
   const kind = kindOf(form?.get("kind")) ?? "decoration";
   const { bytes, info } = await readImage(form, "file");
   const thumb = await readThumb(form);
@@ -96,6 +125,7 @@ export async function createAsset(env: Env, actor: Actor, req: Request) {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO studio_assets (id, kind, name, is_favorite, in_library, current_version_id, created_at, updated_at) VALUES (?,?,?,0,?,?,?,?)").bind(id, kind, name, inLib, vid, now, now),
       env.DB.prepare("INSERT INTO studio_asset_versions (id, asset_id, r2_key, cutout_key, mime_type, width, height, file_size, sha256, has_alpha, thumb, thumb_mime, created_at) VALUES (?,?,?,NULL,?,?,?,?,?,?,?,?,?)").bind(vid, id, key, info.mime, info.width, info.height, bytes.byteLength, sha, info.hasAlpha ? 1 : 0, thumb?.bytes ?? null, thumb?.mime ?? null, now),
+      ...(await opStatements(env, opId, "studio.asset_create", id)),
     ]);
   } catch (e) { await env.IMAGES.delete(key).catch(() => undefined); throw e; }
   await audit(env, actor, "studio.asset_create", id, { kind });
@@ -112,12 +142,17 @@ export async function addCutout(env: Env, actor: Actor, req: Request, versionId:
   if (!info.hasAlpha) throw new HttpError(400, "not_transparent", "去背圖沒有透明通道，未有保存");
   if (info.width !== v.width || info.height !== v.height) throw new HttpError(400, "size_mismatch", "去背圖尺寸與原圖不同");
   const thumb = await readThumb(form);
-  const target = v.cutout_key ? newId("stv") : v.id;
-  const key = keyFor(a!.kind, v.asset_id, target, "png", true);
+  // 每次去背都寫入新的檔案名稱（不可變）：兩部裝置同時去背不會互相覆蓋同一個 R2 檔案，快取亦不會混淆
+  let target = v.cutout_key ? newId("stv") : v.id;
+  const key = keyFor(a!.kind, v.asset_id, `${target}-${newId("c").slice(2, 10)}`, "png", true);
   await env.IMAGES.put(key, bytes, { httpMetadata: { contentType: "image/png" } });
   try {
-    if (target === v.id) await env.DB.prepare("UPDATE studio_asset_versions SET cutout_key = ?, cutout_size = ? WHERE id = ? AND cutout_key IS NULL").bind(key, bytes.byteLength, v.id).run();
-    else await env.DB.batch([
+    if (target === v.id) {
+      const r = await env.DB.prepare("UPDATE studio_asset_versions SET cutout_key = ?, cutout_size = ? WHERE id = ? AND cutout_key IS NULL").bind(key, bytes.byteLength, v.id).run();
+      // 另一個去背剛剛先完成：改為建立新版本（兩個結果都保留，不會遺失）
+      if (!r.meta.changes) target = newId("stv");
+    }
+    if (target !== v.id) await env.DB.batch([
       env.DB.prepare("INSERT INTO studio_asset_versions (id, asset_id, r2_key, cutout_key, cutout_size, mime_type, width, height, file_size, sha256, has_alpha, thumb, thumb_mime, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(target, v.asset_id, v.r2_key, key, bytes.byteLength, v.mime_type, v.width, v.height, v.file_size, v.sha256, v.has_alpha, thumb?.bytes ?? v.thumb, thumb?.mime ?? v.thumb_mime, nowIso()),
       env.DB.prepare("UPDATE studio_assets SET current_version_id = ?, updated_at = ? WHERE id = ?").bind(target, nowIso(), v.asset_id),
     ]);
@@ -160,12 +195,11 @@ export async function deleteAsset(env: Env, actor: Actor, id: string) {
 async function purgeAsset(env: Env, id: string): Promise<number> {
   const vers = (await env.DB.prepare("SELECT r2_key, cutout_key FROM studio_asset_versions WHERE asset_id = ?").bind(id).all<{ r2_key: string; cutout_key: string | null }>()).results;
   const keys = [...new Set(vers.flatMap((v) => [v.r2_key, v.cutout_key]).filter((k): k is string => !!k))];
-  await env.DB.batch([env.DB.prepare("DELETE FROM studio_asset_versions WHERE asset_id = ?").bind(id), env.DB.prepare("DELETE FROM studio_assets WHERE id = ?").bind(id)]);
-  const still: string[] = [];
-  for (const k of keys) if (await env.DB.prepare("SELECT 1 FROM studio_asset_versions WHERE r2_key = ? OR cutout_key = ? LIMIT 1").bind(k, k).first()) still.push(k);
-  const del = keys.filter((k) => !still.includes(k));
-  if (del.length) await env.IMAGES.delete(del);
-  return del.length;
+  // 紀錄刪除及清理佇列在同一個交易；R2 刪除失敗時檔案留在佇列，之後重試（drainPurge 刪除前會再核對引用）
+  await env.DB.batch([env.DB.prepare("DELETE FROM studio_asset_versions WHERE asset_id = ?").bind(id), env.DB.prepare("DELETE FROM studio_assets WHERE id = ?").bind(id), ...(await queueStatements(env, keys, "studio_asset"))]);
+  const r = await drainPurge(env, { keys });
+  if (r.failed.length) console.warn("studio_purge_failed", r.failed.length);
+  return r.deleted.length;
 }
 /** 造型刪除後：只用於該造型、而且已沒有任何引用的素材一併清理（素材庫內的素材保留） */
 export async function purgeUnusedAssets(env: Env, ids: string[]) {

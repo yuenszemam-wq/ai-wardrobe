@@ -96,6 +96,7 @@ export class FakeR2 {
     return { body: new Blob([o.bytes]).stream(), size: o.bytes.byteLength, httpMetadata: o.httpMetadata };
   }
   async delete(keys) {
+    if (this.failNextDelete) { this.failNextDelete = false; throw new Error("simulated R2 delete failure"); }
     for (const k of Array.isArray(keys) ? keys : [keys]) this.objects.delete(k);
   }
   async list({ limit = 1000 } = {}) {
@@ -120,6 +121,7 @@ export function makeEnv(opts = {}) {
   if (!opts.withoutR2Usage) DB.migrate(new URL("../migrations/0012_r2_usage.sql", import.meta.url));
   if (!opts.withoutDiary) DB.migrate(new URL("../migrations/0013_outfit_diary.sql", import.meta.url));
   if (!opts.withoutStudio) DB.migrate(new URL("../migrations/0014_studio_v2.sql", import.meta.url));
+  if (!opts.withoutStudio && !opts.withoutStability) DB.migrate(new URL("../migrations/0015_studio_stability.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),
