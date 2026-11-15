@@ -2,6 +2,7 @@ import { thumbnailApi, thumbnailStatus, processThumbnailJobs, claimBrowserThumbn
 import { bulkEdit, splitGarment } from "./organize";
 import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./auth";
 import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, syncManifest, syncRows, updateGarment } from "./garments";
+import { handleAiLab } from "./aiLab/routes";
 import { getCustomColors, addCustomColor, deleteHomeBg, getSettings, serveHomeBg, updateSettings, uploadHomeBg } from "./settings";
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
@@ -274,6 +275,9 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       return json(await deleteTaxNode(env, actor, m[1]));
     }
   }
+
+  // ───── AI Lab（Workers AI；預設關閉）─────
+  { const r = await handleAiLab(req, env, actor, path, method); if (r) return r; }
 
   // ───── 圖片 ─────
   if (path === "/api/images/upload" && (method === "POST" || method === "PUT")) {

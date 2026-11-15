@@ -6,8 +6,8 @@ export interface VisionRequest {
   system: string;
   user: string;
   /** 已縮小的 JPEG／PNG 位元組（不保存、不寫入日誌） */
-  image: Uint8Array;
-  mime: string;
+  image?: Uint8Array | null;
+  mime?: string;
   maxTokens: number;
   timeoutMs: number;
 }
@@ -42,7 +42,7 @@ export class WorkersAiProvider implements AiProvider {
     // 依官方 schema：messages ＋ image（base64 data URL）；max_tokens 限制輸出
     const input = {
       messages: [{ role: "system", content: req.system }, { role: "user", content: req.user }],
-      image: `data:${req.mime};base64,${toBase64(req.image)}`,
+      ...(req.image ? { image: `data:${req.mime};base64,${toBase64(req.image)}` } : {}),
       max_tokens: req.maxTokens,
       temperature: 0.1,
     };

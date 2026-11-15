@@ -42,6 +42,7 @@ jobs:
       - run: node test/phase39b2.mjs
       - run: node test/phase37.mjs
       - run: node test/d1-limits.mjs
+      - run: node test/ai-lab.mjs
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
         env:
