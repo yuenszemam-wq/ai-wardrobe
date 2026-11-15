@@ -148,6 +148,7 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
       ctx.strokeStyle = L.tool === "erase" ? "#b0306f" : "#2e7d32"; ctx.lineWidth = 1.2 * dpr; ctx.stroke();
     }
     c.dataset.zoom = s.toFixed(4);
+    c.dataset.view = `${s},${tx},${ty}`;
   }, []);
   const redraw = useCallback(() => { if (!S.current.raf) S.current.raf = requestAnimationFrame(draw); }, [draw]);
 
@@ -191,7 +192,8 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
     const dpr = window.devicePixelRatio || 1;
     c.width = Math.max(1, Math.round(el.clientWidth * dpr)); c.height = Math.max(1, Math.round(el.clientHeight * dpr));
     c.style.width = el.clientWidth + "px"; c.style.height = el.clientHeight + "px";
-    if (!S.current.userZoomed) fit(); else redraw();
+    // 筆畫進行中不重新排版（避免畫到一半位置改變）
+    if (!S.current.userZoomed && S.current.pointers.size === 0) fit(); else redraw();
   }, [fit, redraw]);
 
   // ───────── 載入 ─────────
@@ -226,6 +228,12 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
     return () => ac.abort();
   }, [phase, downscale, target, resizeCanvas, recompose]);
 
+  // 工作室開啟時鎖定背後頁面捲動（避免 iOS 捲動或橡皮筋效果令畫布位移）
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
   // 釋放記憶體
   useEffect(() => () => {
     const st = S.current;
@@ -400,7 +408,7 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
   };
   const onDown = (e: RPointerEvent<HTMLCanvasElement>) => {
     const st = S.current; if (!st.img || busy) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 合成事件或已釋放的指標 */ }
     const p = toImg(e.clientX, e.clientY);
     if (e.pointerType === "pen") st.penSeen = performance.now();
     st.pointers.set(e.pointerId, { x: p.sx, y: p.sy, type: e.pointerType });
@@ -460,7 +468,10 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
     if (st.stroke) {
       // 使用合併事件（coalesced）令快速筆畫更平滑
       const ev = e.nativeEvent as PointerEvent;
-      const list = typeof ev.getCoalescedEvents === "function" ? ev.getCoalescedEvents() : [];
+      let list = typeof ev.getCoalescedEvents === "function" ? ev.getCoalescedEvents() : [];
+      // 部分瀏覽器的合併事件座標不可靠：最後一個必須與本事件位置一致才使用（筆畫插值本身已保證連續）
+      const last = list[list.length - 1];
+      if (!last || Math.abs(last.clientX - e.clientX) > 1 || Math.abs(last.clientY - e.clientY) > 1) list = [];
       if (list.length > 1) for (const ce of list) { const q = toImg(ce.clientX, ce.clientY); recompose(st.stroke.to(q.x, q.y)); }
       else recompose(st.stroke.to(p.x, p.y));
       return;
