@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconCamera, IconImage, IconPlus, IconScissors } from "../components/icons";
 import { Button, Sheet, Spinner, toast } from "../components/ui";
+import { CutoutStudio } from "../cutoutStudio/CutoutStudio";
 import { ASSET_KIND_LABEL, AssetKind, StudioAsset, cutoutBlob, listStudioAssets, prepareImage, saveCutout, uploadStudioAsset } from "./assets";
 
 const RECENT = "aw:studio-asset-recent";
@@ -48,6 +49,7 @@ export function AssetUploadSheet({ file, onClose, onDone, defaultKind = "decorat
   const [cut, setCut] = useState<{ state: "idle" | "running" | "done" | "failed"; url?: string; blob?: Blob; note?: string }>({ state: "idle" });
   const [show, setShow] = useState<"original" | "cutout">("original");
   const [busy, setBusy] = useState(false);
+  const [studio, setStudio] = useState(false);
   useEffect(() => { let live = true; prepareImage(file).then((r) => live && setImg(r)).catch((e) => live && setErr((e as Error).message)); return () => { live = false; }; }, [file]);
   async function runCut() {
     if (!img) return;
@@ -72,6 +74,8 @@ export function AssetUploadSheet({ file, onClose, onDone, defaultKind = "decorat
       onDone(a, variant);
     } catch (e) { toast(`${(e as Error).message}${uploaded.current ? "（原圖已上傳，重試只會補上未完成的部分）" : ""}`, "err"); } finally { setBusy(false); }
   }
+  if (studio && img) return <CutoutStudio target={{ kind: "blob", blob: img.blob, name }} onClose={() => setStudio(false)}
+    onExport={(b) => { if (cut.url) URL.revokeObjectURL(cut.url); setCut({ state: "done", blob: b, url: URL.createObjectURL(b) }); setShow("cutout"); setStudio(false); }} />;
   return (
     <Sheet title="加入圖片素材" onClose={onClose}>
       <div className="space-y-2.5 text-[12.5px]" data-testid="asset-upload" data-cut={cut.state}>
@@ -83,6 +87,7 @@ export function AssetUploadSheet({ file, onClose, onDone, defaultKind = "decorat
               : cut.state === "failed" ? <><span className="text-wine" role="alert">去背失敗：{cut.note}（已保留原圖）</span><Button variant="ghost" onClick={() => void runCut()}>重試</Button></>
               : <>{(["original", "cutout"] as const).map((v) => <button key={v} type="button" aria-pressed={show === v} data-show-variant={v} onClick={() => setShow(v)} className={`h-8 rounded-full px-3 ${show === v ? "chip-on" : "chip"}`}>{v === "original" ? "原圖" : "去背圖"}</button>)}</>}
           </div>
+          {!img.hasAlpha && cut.state !== "running" && <div className="text-center"><button type="button" className="chip h-8 rounded-full px-3" onClick={() => setStudio(true)} data-testid="asset-manual-cutout">手動去背／選取</button></div>}
           <label className="flex items-center gap-2"><span className="w-10 text-mauve">名稱</span><input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} className="field h-9 flex-1 rounded-full px-3 text-[16px]" /></label>
           <div className="flex flex-wrap gap-1"><span className="w-10 self-center text-mauve">用途</span>{Object.entries(ASSET_KIND_LABEL).map(([k, l]) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k as AssetKind)} className={`h-7 rounded-full px-2.5 ${kind === k ? "chip-on" : "chip"}`}>{l}</button>)}</div>
           <div className="seg" role="radiogroup" aria-label="保存方式">

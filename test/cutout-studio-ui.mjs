@@ -25,7 +25,7 @@ const r2bytes = async (key) => env.IMAGES.objects.get(key).bytes;
 /** 圖片座標 → 螢幕座標 */
 async function screenOf(ix, iy) {
   return page.evaluate(([ix, iy]) => {
-    const c = document.querySelector('[data-testid="studio-canvas"]');
+    const c = document.querySelector('[data-testid="cs-canvas"]');
     const [s, tx, ty] = c.dataset.view.split(",").map(Number);
     const r = c.getBoundingClientRect();
     return [r.left + tx + ix * s, r.top + ty + iy * s];
@@ -34,7 +34,7 @@ async function screenOf(ix, iy) {
 /** 畫布上某圖片座標的顯示顏色（背景預覽設為黑色時，透明＝黑） */
 async function viewPixel(ix, iy) {
   return page.evaluate(([ix, iy]) => {
-    const c = document.querySelector('[data-testid="studio-canvas"]');
+    const c = document.querySelector('[data-testid="cs-canvas"]');
     const [s, tx, ty] = c.dataset.view.split(",").map(Number);
     const k = c.width / c.getBoundingClientRect().width;
     return [...c.getContext("2d").getImageData(Math.round((tx + ix * s) * k), Math.round((ty + iy * s) * k), 1, 1).data];
@@ -44,7 +44,7 @@ const isBlack = (p) => p[0] < 20 && p[1] < 20 && p[2] < 20;
 const isWhite = (p) => p[0] > 235 && p[1] > 235 && p[2] > 235;
 const isPink = (p) => p[0] > 200 && p[1] < 170 && p[2] > 140;
 const isDress = (p) => p[0] > 30 && p[0] < 60 && p[2] > 40 && p[2] < 70;
-const maskVer = async () => Number(await page.getAttribute('[data-testid="studio-canvas"]', "data-mask-version")) || 0;
+const maskVer = async () => Number(await page.getAttribute('[data-testid="cs-canvas"]', "data-mask-version")) || 0;
 const settle = () => page.waitForTimeout(150);
 async function stroke(points) {
   const [x0, y0] = await screenOf(...points[0]);
@@ -55,7 +55,7 @@ async function stroke(points) {
 const frames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 const tool = async (t) => { await page.click(`[data-tool="${t}"]`); await frames(); await settle(); };
 const pointer = (type, id, x, y) => page.evaluate(([type, id, x, y]) => {
-  document.querySelector('[data-testid="studio-canvas"]').dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: id === 1, buttons: type === "pointerup" ? 0 : 1 }));
+  document.querySelector('[data-testid="cs-canvas"]').dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: id === 1, buttons: type === "pointerup" ? 0 : 1 }));
 }, [type, id, x, y]);
 
 try {
@@ -64,7 +64,7 @@ try {
   console.log("開啟工作室");
   await page.evaluate(() => { window.scrollTo(0, 0); document.querySelector('[data-testid="studio-start"]').click(); });
   await page.waitForSelector('[data-testid="cutout-studio"]');
-  await page.waitForFunction(() => Number(document.querySelector('[data-testid="studio-canvas"]')?.dataset.maskVersion) > 0, null, { timeout: 15000 });
+  await page.waitForFunction(() => Number(document.querySelector('[data-testid="cs-canvas"]')?.dataset.maskVersion) > 0, null, { timeout: 15000 });
   check("工具列包含 9 個工具", (await page.locator("[data-tool]").count()) === 9);
   check("沒有顯示未實作的「智能選取」", (await page.getByText("智能選取").count()) === 0);
   await page.click('[data-bg="black"]');
@@ -75,15 +75,15 @@ try {
   console.log("自動去背 → 可編輯遮罩");
   await tool("auto");
   await page.click('[data-testid="auto-run"]');
-  await page.waitForFunction(() => document.querySelector('[data-testid="studio-history"]')?.textContent?.startsWith("1"), null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="cs-history"]')?.textContent?.startsWith("1"), null, { timeout: 15000 });
   await settle();
   check("自動去背：背景透明（黑色預覽）", isBlack(await viewPixel(sx(100), sy(150))), await viewPixel(sx(100), sy(150)));
   check("自動去背：裙上白色蝴蝶結保留", isWhite(await viewPixel(sx(450), sy(440))), await viewPixel(sx(450), sy(440)));
   check("自動去背：裙保留", isDress(await viewPixel(sx(450), sy(700))), await viewPixel(sx(450), sy(700)));
   await shot("02-auto");
-  await page.click('[data-testid="studio-undo"]'); await settle();
+  await page.click('[data-testid="cs-undo"]'); await settle();
   check("Undo：回到自動去背前", isWhite(await viewPixel(sx(100), sy(150))));
-  await page.click('[data-testid="studio-redo"]'); await settle();
+  await page.click('[data-testid="cs-redo"]'); await settle();
   check("Redo：再次套用", isBlack(await viewPixel(sx(100), sy(150))));
 
   console.log("背景預覽");
@@ -107,7 +107,7 @@ try {
   const [bx, by] = await screenOf(sx(130), sy(1000));
   await page.mouse.click(bx, by);
   await page.waitForSelector('[data-testid="selection-actions"]');
-  check("點擊後先顯示選取範圍（未套用）", isPink(await viewPixel(sx(130), sy(1050))) || (await page.getAttribute('[data-testid="studio-canvas"]', "data-selection")) === "1");
+  check("點擊後先顯示選取範圍（未套用）", isPink(await viewPixel(sx(130), sy(1050))) || (await page.getAttribute('[data-testid="cs-canvas"]', "data-selection")) === "1");
   await page.click('[data-testid="sel-remove"]'); await settle();
   check("移除選取：手袋透明", isBlack(await viewPixel(sx(130), sy(1000))), await viewPixel(sx(130), sy(1000)));
   check("相連選取不影響裙", isDress(await viewPixel(sx(450), sy(700))));
@@ -118,7 +118,7 @@ try {
   await page.waitForSelector('[data-testid="selection-actions"]');
   await page.click('[data-testid="sel-remove"]'); await settle();
   check("套索移除：蝴蝶結透明", isBlack(await viewPixel(sx(450), sy(440))), await viewPixel(sx(450), sy(440)));
-  await page.click('[data-testid="studio-undo"]'); await settle();
+  await page.click('[data-testid="cs-undo"]'); await settle();
   check("Undo 套索", isWhite(await viewPixel(sx(450), sy(440))));
 
   console.log("多邊形及矩形");
@@ -139,7 +139,7 @@ try {
 
   console.log("雙指縮放不誤擦");
   await tool("erase");
-  const zoom0 = Number(await page.getAttribute('[data-testid="studio-canvas"]', "data-zoom"));
+  const zoom0 = Number(await page.getAttribute('[data-testid="cs-canvas"]', "data-zoom"));
   const [p1x, p1y] = await screenOf(sx(420), sy(650));
   const [p2x, p2y] = await screenOf(sx(480), sy(750));
   await pointer("pointerdown", 1, p1x, p1y);
@@ -149,36 +149,36 @@ try {
   await pointer("pointerup", 2, p2x + 72, p2y + 72);
   await pointer("pointerup", 1, p1x - 72, p1y - 72);
   await settle();
-  const zoom1 = Number(await page.getAttribute('[data-testid="studio-canvas"]', "data-zoom"));
+  const zoom1 = Number(await page.getAttribute('[data-testid="cs-canvas"]', "data-zoom"));
   check("雙指張開：畫面放大", zoom1 > zoom0 * 1.2, [zoom0, zoom1]);
-  check("歷史沒有增加誤擦步驟", (await page.textContent('[data-testid="studio-history"]')).startsWith("4"), await page.textContent('[data-testid="studio-history"]'));
-  const cb = await page.evaluate(() => { const r = document.querySelector('[data-testid="studio-canvas"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
+  check("歷史沒有增加誤擦步驟", (await page.textContent('[data-testid="cs-history"]')).startsWith("4"), await page.textContent('[data-testid="cs-history"]'));
+  const cb = await page.evaluate(() => { const r = document.querySelector('[data-testid="cs-canvas"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
   await page.mouse.move(cb[0], cb[1]);
   await page.mouse.wheel(0, -300); await settle();
-  check("滑鼠滾輪縮放", Number(await page.getAttribute('[data-testid="studio-canvas"]', "data-zoom")) > zoom1, await page.getAttribute('[data-testid="studio-canvas"]', "data-zoom"));
+  check("滑鼠滾輪縮放", Number(await page.getAttribute('[data-testid="cs-canvas"]', "data-zoom")) > zoom1, await page.getAttribute('[data-testid="cs-canvas"]', "data-zoom"));
   // 放大後在指定圖片座標擦一點，之後在輸出 PNG 檢查同一位置
-  await page.click('[data-testid="studio-fit"]'); await settle();
+  await page.click('[data-testid="cs-fit"]'); await settle();
   check("第一隻手指的筆畫已取消（沒有誤擦）", isDress(await viewPixel(sx(420), sy(650))), await viewPixel(sx(420), sy(650)));
   // 放大至 3 倍並以裙中心為中心
-  await page.evaluate(() => { const c = document.querySelector('[data-testid="studio-canvas"]'); const r = c.getBoundingClientRect(); c.dispatchEvent(new WheelEvent("wheel", { deltaY: -700, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, cancelable: true })); });
+  await page.evaluate(() => { const c = document.querySelector('[data-testid="cs-canvas"]'); const r = c.getBoundingClientRect(); c.dispatchEvent(new WheelEvent("wheel", { deltaY: -700, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, cancelable: true })); });
   await settle();
   await page.fill('[data-testid="brush-size"]', "12");
   const target = [Math.round(sx(450)), Math.round(sy(600))];
   const [tx1, ty1] = await screenOf(...target);
   await stroke([target, [target[0] + 1, target[1]]]);
   await shot("03-zoomed-erase");
-  await page.click('[data-testid="studio-fit"]');
+  await page.click('[data-testid="cs-fit"]');
 
   console.log("邊緣修正");
   await tool("edge");
   const before = await maskVer();
   await page.click('[data-testid="edge-feather"]');
-  await page.waitForFunction((v) => Number(document.querySelector('[data-testid="studio-canvas"]').dataset.maskVersion) > v, before, { timeout: 15000 });
-  check("邊緣柔化已套用（可復原）", (await page.textContent('[data-testid="studio-history"]')).startsWith("6"), await page.textContent('[data-testid="studio-history"]'));
+  await page.waitForFunction((v) => Number(document.querySelector('[data-testid="cs-canvas"]').dataset.maskVersion) > v, before, { timeout: 15000 });
+  check("邊緣柔化已套用（可復原）", (await page.textContent('[data-testid="cs-history"]')).startsWith("6"), await page.textContent('[data-testid="cs-history"]'));
 
   console.log("完成及儲存");
-  await page.click('[data-testid="studio-done"]');
-  await page.waitForSelector('[data-testid="studio-finish"]');
+  await page.click('[data-testid="cs-done"]');
+  await page.waitForSelector('[data-testid="cs-finish"]');
   check("完成頁顯示透明像素統計", /透明像素/.test(await page.textContent('[data-testid="finish-alpha"]')));
   await shot("04-finish");
   await page.click('[data-testid="finish-save"]');
@@ -210,8 +210,8 @@ try {
   await page.waitForSelector('[data-testid="studio-start"]');
   // 衣物詳情預設顯示主圖（去背圖）
   await page.evaluate(() => { window.scrollTo(0, 0); document.querySelector('[data-testid="studio-start"]').click(); });
-  await page.waitForFunction(() => Number(document.querySelector('[data-testid="studio-canvas"]')?.dataset.maskVersion) > 0, null, { timeout: 15000 });
-  check("提示從既有去背圖繼續編輯", /既有去背圖/.test(await page.textContent('[data-testid="studio-note"]')), await page.textContent('[data-testid="studio-note"]'));
+  await page.waitForFunction(() => Number(document.querySelector('[data-testid="cs-canvas"]')?.dataset.maskVersion) > 0, null, { timeout: 15000 });
+  check("提示從既有去背圖繼續編輯", /既有去背圖/.test(await page.textContent('[data-testid="cs-note"]')), await page.textContent('[data-testid="cs-note"]'));
   await page.click('[data-bg="black"]'); await settle();
   check("舊遮罩：手袋仍是透明", isBlack(await viewPixel(sx(130), sy(1000))));
   await tool("restore");
@@ -229,11 +229,11 @@ try {
   check("只保留選取：裙被移除", isBlack(await viewPixel(sx(450), sy(700))));
   const nGar = (await env.DB.prepare("SELECT COUNT(*) AS n FROM garments").first()).n;
   const nOrig = (await env.DB.prepare("SELECT COUNT(*) AS n FROM garment_images WHERE image_type = 'original'").first()).n;
-  await page.click('[data-testid="studio-done"]');
-  await page.waitForSelector('[data-testid="studio-finish"]');
+  await page.click('[data-testid="cs-done"]');
+  await page.waitForSelector('[data-testid="cs-finish"]');
   await page.fill('[data-testid="finish-new-name"]', "粉紅手袋");
   await page.click('[data-testid="finish-new"]');
-  await page.waitForSelector('[data-testid="studio-finish"]', { state: "detached", timeout: 15000 });
+  await page.waitForSelector('[data-testid="cs-finish"]', { state: "detached", timeout: 15000 });
   check("另存後返回同一張原圖繼續編輯", await page.locator('[data-testid="cutout-studio"]').isVisible());
   const newG = await env.DB.prepare("SELECT * FROM garments WHERE name = '粉紅手袋'").first();
   check("新增一件待整理衣物", !!newG && newG.status === "review" && (await env.DB.prepare("SELECT COUNT(*) AS n FROM garments").first()).n === nGar + 1, newG);
@@ -249,18 +249,40 @@ try {
   await shot("05-after-new");
 
   console.log("由拆出的衣物重新編輯：回到原本的原圖");
-  await page.click('[data-testid="studio-cancel"]');
+  await page.click('[data-testid="cs-cancel"]');
   await page.goto(A.base + `/g/${newG.id}`);
   await page.waitForSelector('[data-testid="studio-start"]');
   await page.evaluate(() => { window.scrollTo(0, 0); document.querySelector('[data-testid="studio-start"]').click(); });
-  await page.waitForFunction(() => Number(document.querySelector('[data-testid="studio-canvas"]')?.dataset.maskVersion) > 0, null, { timeout: 15000 });
-  check("跨衣物來源：提示從既有去背圖繼續", /既有去背圖/.test(await page.textContent('[data-testid="studio-note"]')));
+  await page.waitForFunction(() => Number(document.querySelector('[data-testid="cs-canvas"]')?.dataset.maskVersion) > 0, null, { timeout: 15000 });
+  check("跨衣物來源：提示從既有去背圖繼續", /既有去背圖/.test(await page.textContent('[data-testid="cs-note"]')));
   await page.click('[data-bg="black"]'); await settle();
   await tool("restore");
   await page.fill('[data-testid="brush-size"]', "120");
   await stroke([[sx(450), sy(650)], [sx(450), sy(750)]]);
   check("可從原本的原圖還原裙的像素", isDress(await viewPixel(sx(450), sy(700))), await viewPixel(sx(450), sy(700)));
-  await page.click('[data-testid="studio-cancel"]');
+  await page.click('[data-testid="cs-cancel"]');
+
+  console.log("創作工作室素材上傳：手動去背（圖片模式）");
+  const oid = (await page.evaluate(async () => (await (await fetch("/api/outfits", { method: "POST", headers: { "content-type": "application/json", "x-requested-with": "ai-wardrobe" }, body: JSON.stringify({ name: "素材測試", layers: [] }) })).json()).id));
+  await page.goto(A.base + `/outfits/${oid}`);
+  await page.waitForSelector('[data-tab="assets"]');
+  await page.click('[data-tab="assets"]');
+  const bagJpg = await sharp({ create: { width: 400, height: 300, channels: 3, background: "#ffffff" } }).composite([{ input: Buffer.from('<svg width="400" height="300"><rect x="120" y="80" width="160" height="140" fill="#7a1f2b"/></svg>') }]).jpeg().toBuffer();
+  await page.setInputFiles('[data-testid="asset-file"]', { name: "手袋.jpg", mimeType: "image/jpeg", buffer: bagJpg });
+  await page.waitForSelector('[data-testid="asset-manual-cutout"]');
+  await page.click('[data-testid="asset-manual-cutout"]');
+  await page.waitForFunction(() => Number(document.querySelector('[data-testid="cs-canvas"]')?.dataset.maskVersion) > 0, null, { timeout: 15000 });
+  check("素材上傳可開啟 Cutout Studio（沒有測試 id 衝突）", (await page.locator('[data-testid="cs-canvas"]').count()) === 1);
+  await tool("wand");
+  const [wx, wy] = await screenOf(5, 5);
+  await page.mouse.click(wx, wy);
+  await page.waitForSelector('[data-testid="selection-actions"]');
+  await page.click('[data-testid="sel-remove"]'); await settle();
+  await page.click('[data-testid="cs-done"]');
+  await page.waitForSelector('[data-testid="finish-use"]');
+  await page.click('[data-testid="finish-use"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="asset-upload"]')?.dataset.cut === "done", null, { timeout: 10000 });
+  check("手動去背結果回到素材上傳並顯示去背圖", (await page.getAttribute('[data-testid="asset-preview"]', "data-show")) === "cutout");
 
   console.log("權限");
   const anon = await fetch(`${A.base}/api/images/${np.id}`);

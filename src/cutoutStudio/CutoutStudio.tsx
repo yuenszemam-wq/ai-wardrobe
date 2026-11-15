@@ -589,24 +589,24 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
     <div className="fixed inset-0 z-[80] flex flex-col bg-[#1d1720] text-[#f6eef4]" style={{ overscrollBehavior: "contain", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }} data-testid="cutout-studio">
       {/* 頂部 */}
       <div className="flex items-center gap-1 px-2 py-1.5">
-        <button type="button" onClick={onClose} className="h-10 rounded-full px-3 text-[14px]" data-testid="studio-cancel">取消</button>
+        <button type="button" onClick={onClose} className="h-10 rounded-full px-3 text-[14px]" data-testid="cs-cancel">取消</button>
         <div className="flex-1" />
-        <button type="button" aria-label="復原" disabled={!hist.undo} onClick={undo} className="grid h-10 w-10 place-items-center rounded-full disabled:opacity-30" data-testid="studio-undo"><IconUndo /></button>
-        <button type="button" aria-label="重做" disabled={!hist.redo} onClick={redo} className="grid h-10 w-10 place-items-center rounded-full disabled:opacity-30" data-testid="studio-redo"><IconRedo /></button>
-        <button type="button" aria-pressed={compare} onPointerDown={() => setCompare(true)} onPointerUp={() => setCompare(false)} onPointerLeave={() => setCompare(false)} onClick={(e) => e.preventDefault()} className={`h-10 rounded-full px-3 text-[13px] ${compare ? "bg-white/20" : ""}`} data-testid="studio-compare">按住對比</button>
+        <button type="button" aria-label="復原" disabled={!hist.undo} onClick={undo} className="grid h-10 w-10 place-items-center rounded-full disabled:opacity-30" data-testid="cs-undo"><IconUndo /></button>
+        <button type="button" aria-label="重做" disabled={!hist.redo} onClick={redo} className="grid h-10 w-10 place-items-center rounded-full disabled:opacity-30" data-testid="cs-redo"><IconRedo /></button>
+        <button type="button" aria-pressed={compare} onPointerDown={() => setCompare(true)} onPointerUp={() => setCompare(false)} onPointerLeave={() => setCompare(false)} onClick={(e) => e.preventDefault()} className={`h-10 rounded-full px-3 text-[13px] ${compare ? "bg-white/20" : ""}`} data-testid="cs-compare">按住對比</button>
         <div className="flex-1" />
-        <button type="button" disabled={phase !== "ready" || !!busy} onClick={() => void doFinish()} className="h-10 rounded-full bg-[#b0306f] px-4 text-[14px] font-semibold text-white disabled:opacity-40" data-testid="studio-done">完成</button>
+        <button type="button" disabled={phase !== "ready" || !!busy} onClick={() => void doFinish()} className="h-10 rounded-full bg-[#b0306f] px-4 text-[14px] font-semibold text-white disabled:opacity-40" data-testid="cs-done">完成</button>
       </div>
 
       {/* 畫布 */}
       <div ref={wrap} className="relative min-h-0 flex-1 overflow-hidden">
         {phase === "ask-size" && target.kind === "garment" && (
-          <div className="absolute inset-0 grid place-items-center p-6 text-center text-[14px]" data-testid="studio-size-ask">
+          <div className="absolute inset-0 grid place-items-center p-6 text-center text-[14px]" data-testid="cs-size-ask">
             <div className="max-w-sm space-y-3">
               <p>這張圖片有 {target.image.width}×{target.image.height}（{(target.image.width * target.image.height / 1e6).toFixed(1)} MP），超過手機安全編輯尺寸（{STUDIO_SAFE_PIXELS / 1e6} MP），可能令 iPhone 記憶體不足。</p>
               <p className="text-[12px] opacity-80">降解析度處理只用於這次編輯；輸出圖片亦會較小，原圖不受影響。</p>
               <div className="flex justify-center gap-2">
-                <Button onClick={() => { setDownscale(true); setPhase("loading"); }} data-testid="studio-downscale">降解析度編輯</Button>
+                <Button onClick={() => { setDownscale(true); setPhase("loading"); }} data-testid="cs-downscale">降解析度編輯</Button>
                 <Button variant="ghost" onClick={() => { setDownscale(false); setPhase("loading"); }}>仍用原解析度</Button>
               </div>
             </div>
@@ -614,18 +614,18 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
         )}
         {phase === "loading" && <div className="absolute inset-0 grid place-items-center text-[14px]" role="status">載入原圖中…</div>}
         {phase === "error" && <div className="absolute inset-0 grid place-items-center p-6 text-center text-[14px]" role="alert">{err}</div>}
-        <canvas ref={canvas} className="absolute inset-0 block" style={{ touchAction: "none", visibility: phase === "ready" ? "visible" : "hidden", cursor: tool === "move" ? "grab" : "crosshair" }} data-testid="studio-canvas"
+        <canvas ref={canvas} className="absolute inset-0 block" style={{ touchAction: "none", visibility: phase === "ready" ? "visible" : "hidden", cursor: tool === "move" ? "grab" : "crosshair" }} data-testid="cs-canvas"
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={(e) => onUp(e)} onPointerCancel={(e) => onUp(e, true)}
           onPointerLeave={() => { S.current.cursor = null; redraw(); }} />
         {busy && <div className="pointer-events-none absolute inset-x-0 top-2 text-center"><span className="rounded-full bg-black/60 px-3 py-1 text-[12px]" role="status">{busy}</span></div>}
         {phase === "ready" && (
           <div className="absolute bottom-2 left-2 flex items-center gap-1 text-[11px]">
-            <button type="button" onClick={fit} className="rounded-full bg-black/50 px-2.5 py-1" data-testid="studio-fit">{zoomPct}%｜符合畫面</button>
-            <span className="rounded-full bg-black/50 px-2.5 py-1" data-testid="studio-history">{hist.n} 步</span>
+            <button type="button" onClick={fit} className="rounded-full bg-black/50 px-2.5 py-1" data-testid="cs-fit">{zoomPct}%｜符合畫面</button>
+            <span className="rounded-full bg-black/50 px-2.5 py-1" data-testid="cs-history">{hist.n} 步</span>
           </div>
         )}
         {phase === "ready" && (
-          <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-1" data-testid="studio-bg">
+          <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-1" data-testid="cs-bg">
             {BGS.map((b) => (
               <button key={b.id} type="button" aria-label={`背景：${b.label}`} aria-pressed={bg === b.id} onClick={() => setBg(b.id)} data-bg={b.id}
                 className={`h-6 w-6 rounded-full border ${bg === b.id ? "border-white border-2" : "border-white/40"} ${b.id === "checker" ? "checker" : ""}`}
@@ -635,10 +635,10 @@ export function CutoutStudio({ target, onClose, onSaved, onExport, autoStart = f
           </div>
         )}
       </div>
-      {note && phase === "ready" && <p className="px-3 pt-1 text-[11px] opacity-75" data-testid="studio-note">{note}</p>}
+      {note && phase === "ready" && <p className="px-3 pt-1 text-[11px] opacity-75" data-testid="cs-note">{note}</p>}
 
       {/* 工具設定 */}
-      <div className="px-3 pb-1 pt-2 text-[#f6eef4] [&_.text-mauve]:text-[#d8c4d2]" data-testid="studio-panel">{phase === "ready" && toolPanel}</div>
+      <div className="px-3 pb-1 pt-2 text-[#f6eef4] [&_.text-mauve]:text-[#d8c4d2]" data-testid="cs-panel">{phase === "ready" && toolPanel}</div>
       {/* 底部工具列 */}
       <div className="scrollbar-none flex gap-1 overflow-x-auto px-2 pb-2 pt-1" role="toolbar" aria-label="去背工具">
         {TOOLS.map((t) => (
@@ -696,7 +696,7 @@ function FinishSheet({ r, target, source, summary, onBack, onSaved, onExport }: 
   const run = async (fn: () => Promise<void>) => { setBusy(true); setErr(""); try { await fn(); } catch (e) { setErr((e as Error).message || "保存失敗"); } finally { setBusy(false); } };
   const fileName = `${(g?.name || (target.kind === "blob" ? target.name : "cutout")).replace(/[\\/:*?"<>|]/g, "_")}-cutout.png`;
   return (
-    <div className="fixed inset-0 z-[90] flex flex-col bg-[#1d1720]/95 p-3 text-[#f6eef4]" data-testid="studio-finish" style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))", paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+    <div className="fixed inset-0 z-[90] flex flex-col bg-[#1d1720]/95 p-3 text-[#f6eef4]" data-testid="cs-finish" style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))", paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
       <div className="flex items-center"><button type="button" onClick={onBack} disabled={busy} className="h-10 px-2 text-[14px]" data-testid="finish-back">‹ 繼續編輯</button><div className="flex-1" /><span className="text-[12px] opacity-75">{r.width}×{r.height}｜PNG {(r.blob.size / 1024 / 1024).toFixed(2)} MB</span></div>
       <div className="checker relative mx-auto my-2 min-h-0 w-full max-w-md flex-1 overflow-hidden rounded-2xl">
         <img src={compare && srcUrl ? srcUrl : url} alt={compare ? "原圖" : "透明去背結果"} className="absolute inset-0 h-full w-full object-contain" data-testid="finish-preview" data-transparent={r.transparent} data-semi={r.semi} />
