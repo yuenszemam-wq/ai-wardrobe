@@ -23,6 +23,8 @@ for (let i = 0; i < 40; i++) {
   await addGarment(env, { id: `gar_u${n}`, name: `介面測試 ${n}`, category: i % 2 ? "連身裙" : "上衣", subcategory: i % 2 ? "JSK" : "Blouse", svg: `<path d="M300 200 L600 200 L800 1100 L100 1100 Z" fill="${COLORS[i % 4]}"/>`, w: 450, h: 600, price: i % 3 ? 200 + i : null, created: new Date(Date.UTC(2026, 0, 1, 0, 0, 40 - i)).toISOString() });
 }
 const api = (method, path, body) => page.evaluate(async ([method, path, body]) => { const r = await fetch(path, { method, headers: { "content-type": "application/json", "x-requested-with": "ai-wardrobe" }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; }, [method, path, body]);
+// WebKit（行動版）不支援 mouse.wheel：改用捲動頁面（同樣觸發 scroll 事件）
+const wheel = async (dy) => { if (process.env.PW_BROWSER === "webkit") await page.evaluate((d) => window.scrollBy(0, d), dy); else await page.mouse.wheel(0, dy); };
 const photo = (c) => sharp({ create: { width: 600, height: 800, channels: 3, background: c } }).jpeg().toBuffer();
 
 try {
@@ -40,13 +42,13 @@ try {
   const gap = await page.evaluate(() => { const b = document.querySelector('[data-testid="wardrobe-toolbar"]').getBoundingClientRect(); const f = document.querySelector("[data-gid]").getBoundingClientRect(); return Math.round(f.top - b.bottom); });
   check("頁首與第一件衣物之間沒有過大空白（< 40px）", gap >= 0 && gap < 40, gap);
   await shot("01-wardrobe-expanded");
-  await page.mouse.wheel(0, 800); await page.waitForTimeout(400);
+  await wheel(800); await page.waitForTimeout(400);
   const col = await page.locator('[data-testid="wardrobe-toolbar"]').boundingBox();
   check("向下捲動收合，固定在頂部，高度約 100–140px", (await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed")) === "1" && col.y === 0 && col.height >= 85 && col.height <= 140, col);
   await shot("02-wardrobe-collapsed");
   // 抖動：在門檻附近小幅來回捲動不會反覆切換
   let flips = 0, last = await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed");
-  for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, i % 2 ? 12 : -12); await page.waitForTimeout(80); const c = await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed"); if (c !== last) flips++; last = c; }
+  for (let i = 0; i < 8; i++) { await wheel(i % 2 ? 12 : -12); await page.waitForTimeout(80); const c = await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed"); if (c !== last) flips++; last = c; }
   check("小幅來回捲動不會反覆收合／展開（hysteresis）", flips === 0, flips);
   await page.click('[data-testid="wardrobe-sort"]');
   check("排序選單打開", await page.locator('[data-testid="wardrobe-sort-pop"]').isVisible());
