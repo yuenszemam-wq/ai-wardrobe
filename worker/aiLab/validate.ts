@@ -110,7 +110,8 @@ export function validateAiOutput(raw: unknown, tax: Taxonomy): ValidatedAi {
   const brandCandidate = cleanText(o.brand_candidate, 60);
   const multi = o.has_multiple_items === true;
   const name = cleanText(o.suggested_name, 60);
-  const details = [description, decorations.length ? `裝飾：${decorations.join("、")}` : null].filter(Boolean).join("｜") || null;
+  const attrText = Object.entries(attributes).map(([k, v]) => `${attrDef(k)!.name} ${Array.isArray(v) ? v.join("、") : v}`).join("、");
+  const details = [description, decorations.length ? `裝飾：${decorations.join("、")}` : null, attrText ? `屬性：${attrText}` : null].filter(Boolean).join("｜") || null;
 
   const fields: Record<string, unknown> = {
     name, category: cat?.name ?? null, subcategory: sub?.name ?? null,

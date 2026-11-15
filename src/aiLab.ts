@@ -51,7 +51,7 @@ export async function prepareAiImage(blob: Blob, maxSide = 1024): Promise<Blob> 
   } finally { if ("close" in src) src.close(); }
 }
 
-export interface RecognizeResult { cached?: boolean; replay?: boolean; ok?: boolean; suggestion_id?: number; suggestion?: { id: number }; warnings?: string[]; retried?: boolean }
+export interface RecognizeResult { cached?: boolean; replay?: boolean; ok?: boolean; suggestion_id?: number; suggestion?: { suggestion_id: number }; warnings?: string[]; retried?: boolean }
 
 export async function recognizeGarment(g: Garment, opts: { force?: boolean; image?: GarmentImage | null } = {}): Promise<RecognizeResult> {
   const img = opts.image ?? aiSourceImage(g);

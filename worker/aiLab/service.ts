@@ -131,7 +131,7 @@ export async function recognize(env: AiLabEnv, actor: Actor, inp: RecognizeInput
   } else {
     res = await submitSuggestion(env, actor, { garment_id: inp.garment_id, idempotency_key: idemKey, base_version: inp.base_version, source: "workers-ai", image_id: inp.image_id, vision_checked: true, fields: v.fields!, ai_lab: { ...meta, attributes: v.attributes, warnings: v.warnings.slice(0, 20) } });
   }
-  const sid = (res as { id?: number }).id ?? null;
+  const sid = (res as { suggestion_id?: number }).suggestion_id ?? null;
   await env.DB.prepare("UPDATE ai_usage_events SET suggestion_id = ? WHERE request_id IN (?, ?)").bind(sid, inp.request_id, `${inp.request_id}-r1`.slice(0, 80)).run();
   return { cached: false, ok: Boolean(v?.ok), suggestion: res, attributes: v?.attributes ?? null, warnings: v?.warnings ?? [], retried };
 }
