@@ -43,15 +43,23 @@ function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<
 export const newOp = () => { const a = new Uint8Array(12); crypto.getRandomValues(a); return [...a].map((b) => b.toString(36).padStart(2, "0")).join("").slice(0, 20); };
 
 /** 保存草稿；回傳 "full"（含照片）或 "text"（只保存文字，照片未能保存） */
+/** 逾時保護：個別瀏覽器的 IndexedDB 可能長時間沒有回應，不可令編輯頁卡在載入中 */
+const within = <T>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error("草稿資料庫逾時")), ms))]);
+/** 照片以 ArrayBuffer 保存（部分 Safari 版本在 IndexedDB 保存 Blob 不穩定），讀取時還原為 File */
+type Stored<F> = Omit<DiaryDraft<F>, "photos"> & { photos: (Omit<DraftPhoto, "blob"> & { buf: ArrayBuffer; type: string })[] };
+async function pack<F>(d: DiaryDraft<F>): Promise<Stored<F>> { return { ...d, photos: await Promise.all(d.photos.map(async ({ blob, ...p }) => ({ ...p, buf: await blob.arrayBuffer(), type: blob.type || "image/jpeg" }))) }; }
+function unpack<F>(s: Stored<F> | DiaryDraft<F>): DiaryDraft<F> {
+  return { ...s, photos: (s.photos as (DraftPhoto | (Omit<DraftPhoto, "blob"> & { buf: ArrayBuffer; type: string }))[]).map((p) => ("buf" in p ? (({ buf, type, ...rest }) => ({ ...rest, blob: new File([buf], rest.name || "photo", { type }) }))(p) : p)) };
+}
 export async function putDraft<F>(id: string, d: DiaryDraft<F>): Promise<"full" | "text"> {
-  try { await run("readwrite", (s) => s.put(d, keyOf(id))); return "full"; }
+  try { const v = await pack(d); await within(run("readwrite", (s) => s.put(v, keyOf(id))), 4000); return "full"; }
   catch {
     try { localStorage.setItem(LS + keyOf(id), JSON.stringify({ ...d, photos: [] })); } catch { /* 空間不足 */ }
     return "text";
   }
 }
 export async function getDraft<F>(id: string): Promise<DiaryDraft<F> | null> {
-  try { const v = await run<DiaryDraft<F>>("readonly", (s) => s.get(keyOf(id))); if (v) return v; } catch { /* 退回 localStorage */ }
+  try { const v = await within(run<Stored<F>>("readonly", (s) => s.get(keyOf(id))), 2500); if (v) return unpack(v); } catch { /* 退回 localStorage */ }
   try {
     const s = localStorage.getItem(LS + keyOf(id)) ?? localStorage.getItem(LS + id);
     if (!s) return null;
@@ -62,7 +70,7 @@ export async function getDraft<F>(id: string): Promise<DiaryDraft<F> | null> {
 }
 /** 刪除一個草稿（只刪除這個帳戶的這個草稿 ID） */
 export async function dropDraft(id: string) {
-  try { await run("readwrite", (s) => s.delete(keyOf(id))); } catch { /* ignore */ }
+  try { await within(run("readwrite", (s) => s.delete(keyOf(id))), 2500); } catch { /* ignore */ }
   try { localStorage.removeItem(LS + keyOf(id)); localStorage.removeItem(LS + id); } catch { /* ignore */ }
 }
 /** 把新增中的草稿搬到已建立紀錄的 ID（日誌已保存但仍有照片待上傳） */
