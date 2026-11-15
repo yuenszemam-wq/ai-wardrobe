@@ -6,6 +6,7 @@ import { IconCrown, IconHeart, IconImage, IconPerson, IconPlus, IconScissors, Ic
 import { navigate, usePath } from "../router";
 import { Empty, Link, Spinner, toast } from "../components/ui";
 import { StudioDraft, dropStudioDraft, listStudioDrafts, onDraftsChange } from "../studioDrafts";
+import { clearDraft } from "../doll/drafts";
 
 /** 全部造型（按 next_cursor 逐頁讀取；以前只讀取最多 200 套） */
 export async function loadAllOutfits(): Promise<OutfitSummary[]> {
@@ -208,7 +209,7 @@ function DraftStrip() {
               <span className="block max-w-[9rem] truncate font-bold">{d.title || "未命名"}</span>
               <span className="block text-[10.5px] opacity-75">{d.kind === "outfit" ? "衣服配搭" : "角色換裝"}・{d.target ? "修改中" : "新造型"}・{new Date(d.at).toLocaleString("zh-HK", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
             </button>
-            <button type="button" aria-label={`捨棄草稿 ${d.title}`} className="grid h-7 w-7 place-items-center" data-draft-drop onClick={() => { if (confirm("捨棄這份草稿？已保存的造型不受影響。")) void dropStudioDraft(d.id); }}>✕</button>
+            <button type="button" aria-label={`捨棄草稿 ${d.title}`} className="grid h-7 w-7 place-items-center" data-draft-drop onClick={() => { if (!confirm("捨棄這份草稿？已保存的造型不受影響。")) return; const rk = (d.data as { recoveryKey?: string } | null)?.recoveryKey; if (rk) void clearDraft(rk).catch(() => undefined); void dropStudioDraft(d.id); }}>✕</button>
           </div>
         ))}
       </div>

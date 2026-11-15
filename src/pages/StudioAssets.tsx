@@ -7,7 +7,7 @@ import { IconChevronLeft, IconHeart, IconMore, IconPlus, IconSearch } from "../c
 import { Button, Empty, Link, Sheet, Spinner, toast } from "../components/ui";
 import { navigate, usePath } from "../router";
 import { ASSET_KIND_LABEL, AssetKind, StudioAsset, deleteStudioAsset, getStudioAsset, listStudioAssets, patchStudioAsset } from "../studio/assets";
-import { AssetUploadSheet } from "./OutfitStudio";
+import { AssetUploadSheet } from "../studio/AssetPicker";
 
 export default function StudioAssets() {
   const path = usePath();

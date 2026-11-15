@@ -478,6 +478,12 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (method === "GET") { requireScope(actor, "read"); return json(await studio.listAssets(env, url.searchParams)); }
     if (method === "POST") { requireSession(actor); return json(await studio.createAsset(env, actor, req), 201); }
   }
+  if (path === "/api/studio/bg-presets") {
+    if (method === "GET") { requireScope(actor, "read"); return json(await studio.listPresets(env)); }
+    if (method === "POST") { requireSession(actor); return json(await studio.addPreset(env, actor, await readJson(req)), 201); }
+  }
+  m = path.match(/^\/api\/studio\/bg-presets\/(bgp_[a-z2-7]+)$/);
+  if (m && method === "DELETE") { requireSession(actor); return json(await studio.deletePreset(env, actor, m[1])); }
   m = path.match(/^\/api\/studio\/assets\/(sta_[a-z2-7]+)$/);
   if (m) {
     if (method === "GET") { requireScope(actor, "read"); return json(await studio.getAsset(env, m[1])); }

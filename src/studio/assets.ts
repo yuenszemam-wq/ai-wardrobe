@@ -91,4 +91,9 @@ export const patchStudioAsset = (id: string, body: Partial<Pick<StudioAsset, "na
 export const deleteStudioAsset = (id: string) => api<{ deleted: boolean; removed_from_library?: boolean; used_by?: { id: string; name: string }[] }>(`/api/studio/assets/${id}`, { method: "DELETE" });
 export const getStudioAsset = (id: string) => api<StudioAsset>(`/api/studio/assets/${id}`);
 export const versionToGarment = (versionId: string, body: { name: string; category: string; variant: "original" | "cutout" }) => api<{ garment_id: string }>(`/api/studio/versions/${versionId}/to-garment`, { method: "POST", json: body });
+/** Phase 3.9A.3：背景預設庫 */
+export interface BgPreset { id: string; name: string; spec: import("../../shared/studioScene").BackgroundSpec; created_at: string }
+export const listBgPresets = () => api<{ presets: BgPreset[] }>("/api/studio/bg-presets").then((r) => r.presets);
+export const addBgPreset = (name: string, spec: BgPreset["spec"]) => api<{ presets: BgPreset[] }>("/api/studio/bg-presets", { method: "POST", json: { name, spec } }).then((r) => r.presets);
+export const deleteBgPreset = (id: string) => api<{ presets: BgPreset[] }>(`/api/studio/bg-presets/${id}`, { method: "DELETE" }).then((r) => r.presets);
 export { ApiError };

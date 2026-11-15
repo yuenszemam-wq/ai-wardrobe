@@ -8,6 +8,7 @@
  * - 所有 R2 讀寫經 meteredBucket 計數（用途：studio_background／studio_asset）。
  */
 import { parseImage, storeImage } from "./images";
+import { BackgroundSpec, normalizeBackground } from "../shared/studioScene";
 import { createGarment } from "./garments";
 import { findOp, opStatements, validOpId } from "./ops";
 import { drainPurge, queueStatements } from "./purge";
@@ -52,9 +53,11 @@ export async function usage(env: Env, assetId: string) {
   const layers = (await env.DB.prepare("SELECT DISTINCT l.outfit_id AS id, o.name FROM outfit_layers l JOIN outfits o ON o.id = l.outfit_id WHERE l.asset_id = ?").bind(assetId).all<{ id: string; name: string }>()).results;
   const bgs = (await env.DB.prepare("SELECT id, name FROM outfits WHERE background LIKE ?").bind(`%"asset_id":"${assetId}"%`).all<{ id: string; name: string }>()).results;
   const looks = (await hasTable(env, "doll_looks")) ? (await env.DB.prepare("SELECT id, name FROM doll_looks WHERE state LIKE ?").bind(`%${assetId}%`).all<{ id: string; name: string }>()).results : [];
-  const map = new Map<string, { id: string; name: string; kind: "outfit" | "look" }>();
+  const map = new Map<string, { id: string; name: string; kind: "outfit" | "look" | "preset" }>();
   for (const x of [...layers, ...bgs]) map.set("o" + x.id, { ...x, kind: "outfit" });
   for (const x of looks) map.set("l" + x.id, { ...x, kind: "look" });
+  // Phase 3.9A.3：背景預設庫引用的圖片背景
+  for (const p of (await readPresets(env)).filter((p) => p.spec.image?.asset_id === assetId)) map.set("p" + p.id, { id: p.id, name: p.name, kind: "preset" });
   return [...map.values()];
 }
 
@@ -95,6 +98,7 @@ async function usageCounts(env: Env, ids: string[]): Promise<Map<string, number>
   const scan = (owner: string, text: string | null) => { for (const m of (text ?? "").matchAll(/sta_[a-z2-7]+/g)) sets.get(m[0])?.add(owner); };
   for (const r of (await env.DB.prepare("SELECT id, background FROM outfits WHERE background LIKE '%sta_%'").all<{ id: string; background: string | null }>()).results) scan("o" + r.id, r.background);
   if (await hasTable(env, "doll_looks")) for (const r of (await env.DB.prepare("SELECT id, state FROM doll_looks WHERE state LIKE '%sta_%'").all<{ id: string; state: string | null }>()).results) scan("l" + r.id, r.state);
+  for (const p of await readPresets(env)) if (p.spec.image) sets.get(p.spec.image.asset_id)?.add("p" + p.id);
   return new Map([...sets].map(([k, v]) => [k, v.size]));
 }
 
@@ -243,4 +247,40 @@ export async function versionToGarment(env: Env, actor: Actor, versionId: string
   await storeImage(env, { owner: "garment", ownerId: gid, imageType: cutout ? "processed" : "original", bytes, isPrimary: true, actor });
   await audit(env, actor, "studio.to_garment", gid, { version: versionId });
   return { garment_id: gid };
+}
+
+// ───── Phase 3.9A.3：背景預設庫（衣服配搭及角色換裝共用） ─────
+// 保存純色、漸層、條紋、波點、格紋及圖片背景的完整設定（app_settings，最多 40 個）；圖片背景引用素材版本，該素材因此不會被清理。
+const PRESET_KEY = "studio_bg_presets", MAX_PRESETS = 40;
+export interface BgPreset { id: string; name: string; spec: BackgroundSpec; created_at: string }
+async function readPresets(env: Env): Promise<BgPreset[]> {
+  const r = await env.DB.prepare("SELECT value FROM app_settings WHERE key = ?").bind(PRESET_KEY).first<{ value: string }>();
+  if (!r) return [];
+  try {
+    const arr = JSON.parse(r.value);
+    return Array.isArray(arr) ? arr.map((p) => ({ id: String(p?.id ?? ""), name: String(p?.name ?? "").slice(0, 30), spec: normalizeBackground(p?.spec), created_at: String(p?.created_at ?? "") })).filter((p): p is BgPreset => /^bgp_[\w]{4,40}$/.test(p.id) && !!p.spec) : [];
+  } catch { return []; }
+}
+const writePresets = (env: Env, list: BgPreset[]) => env.DB.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(PRESET_KEY, JSON.stringify(list), nowIso()).run();
+export async function listPresets(env: Env) { return { presets: await readPresets(env) }; }
+export async function addPreset(env: Env, actor: Actor, input: Record<string, unknown>) {
+  const spec = normalizeBackground(input.spec);
+  if (!spec) throw new HttpError(400, "bad_background", "背景設定不正確");
+  if (spec.image && !(await env.DB.prepare("SELECT id FROM studio_asset_versions WHERE id = ? AND asset_id = ?").bind(spec.image.version_id, spec.image.asset_id).first())) throw new HttpError(400, "background_not_found", "找不到背景圖片");
+  const list = await readPresets(env);
+  if (list.length >= MAX_PRESETS) throw new HttpError(400, "too_many_presets", `背景預設最多 ${MAX_PRESETS} 個，請先刪除部分`);
+  const p: BgPreset = { id: newId("bgp"), name: str(input.name, 30) || "我的背景", spec, created_at: nowIso() };
+  // 圖片背景：素材保留在「我的背景」（避免造型刪除後被清理）
+  if (spec.image) await env.DB.prepare("UPDATE studio_assets SET in_library = 1, updated_at = ? WHERE id = ?").bind(nowIso(), spec.image.asset_id).run();
+  await writePresets(env, [p, ...list]);
+  await audit(env, actor, "studio.bg_preset_add", p.id);
+  return { presets: [p, ...list] };
+}
+export async function deletePreset(env: Env, actor: Actor, id: string) {
+  const list = await readPresets(env);
+  if (!list.some((p) => p.id === id)) throw new HttpError(404, "preset_not_found", "找不到這個背景預設");
+  const next = list.filter((p) => p.id !== id);
+  await writePresets(env, next);
+  await audit(env, actor, "studio.bg_preset_delete", id);
+  return { presets: next };
 }

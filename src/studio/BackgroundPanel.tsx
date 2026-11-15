@@ -4,7 +4,14 @@
  */
 import { useEffect, useState } from "react";
 import { BACKGROUND_PRESETS, BACKGROUND_TYPES, BackgroundSpec, DEFAULT_BACKGROUND, normalizeBackground, withPreset } from "../../shared/studioScene";
-import { StudioAsset, listStudioAssets } from "./assets";
+import { BgPreset, StudioAsset, addBgPreset, deleteBgPreset, listBgPresets, listStudioAssets } from "./assets";
+import { paintBackground } from "./render";
+
+/** 背景預設的小預覽（與畫布同一套繪畫；圖片背景使用素材縮圖） */
+function PresetSwatch({ spec }: { spec: BackgroundSpec }) {
+  if (spec.type === "image" && spec.image) return <img src={`/api/studio/versions/${spec.image.version_id}/thumb`} alt="" className="h-full w-full object-cover" />;
+  return <canvas width={36} height={48} className="h-full w-full" ref={(c) => { if (!c) return; const x = c.getContext("2d"); if (!x) return; x.clearRect(0, 0, 36, 48); paintBackground(x, spec, 36, 48, null); }} />;
+}
 
 const hsl = (hex: string) => {
   const n = parseInt(hex.slice(1), 16), r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
@@ -63,6 +70,7 @@ export function BackgroundPanel({ value, onChange, onUpload, legacyLabel = "預�
       <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1" aria-label="內建風格">
         {BACKGROUND_PRESETS.map(([name, p]) => <button key={name} type="button" data-preset={name} onClick={() => onChange(withPreset(spec, p))} className="chip flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5"><span className="h-4 w-4 rounded-full border border-[color-mix(in_srgb,var(--aw-line)_50%,transparent)]" style={{ background: p.type === "gradient" ? `linear-gradient(${(p.stops ?? []).map((s) => s.color).join(",")})` : p.color }} />{name}</button>)}
       </div>
+      <PresetRow spec={spec} onApply={onChange} />
       {!spec && <p className="text-[11.5px] text-mauve">舊造型保持原本的顯示及匯出；選擇其他背景後才會保存背景設定。</p>}
       {spec?.type === "transparent" && <p className="text-[11.5px] text-mauve">棋盤格只在編輯時顯示，匯出時是真正透明。</p>}
       {spec?.type === "solid" && <ColorField label="顏色" value={cur.color} onChange={(color) => set({ color })} testid="bg-color" />}
@@ -103,6 +111,38 @@ export function BackgroundPanel({ value, onChange, onUpload, legacyLabel = "預�
         </>}
       </>}
       {spec && spec.type !== "transparent" && spec.type !== "image" && <Slider label="透明度" value={cur.opacity} min={0} max={1} step={0.05} onChange={(opacity) => set({ opacity })} />}
+    </div>
+  );
+}
+
+/** Phase 3.9A.3：我的背景預設（純色、漸層、圖案及圖片背景都可以保存，衣服配搭及角色換裝共用） */
+function PresetRow({ spec, onApply }: { spec: BackgroundSpec | null; onApply: (v: BackgroundSpec) => void }) {
+  const [list, setList] = useState<BgPreset[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { listBgPresets().then(setList).catch(() => setList([])); }, []);
+  const save = async () => {
+    if (!spec) return;
+    const input = prompt("背景預設名稱", "我的背景");
+    if (input === null) return; // 取消
+    const name = input.trim() || "我的背景";
+    try { setList(await addBgPreset(name, spec)); setErr(null); } catch (e) { setErr((e as Error).message); }
+  };
+  return (
+    <div data-testid="bg-presets">
+      <div className="mb-1 flex items-center justify-between"><span className="text-[11.5px] text-mauve">我的背景預設</span>
+        <button type="button" disabled={!spec} onClick={() => void save()} className="chip h-7 rounded-full px-2.5 text-[11.5px] disabled:opacity-40" data-testid="bg-preset-save">＋ 保存目前背景</button></div>
+      {err && <p role="alert" className="text-[11.5px] text-wine">{err}</p>}
+      {list && list.length > 0 ? (
+        <div className="scrollbar-none -mx-1 flex gap-1.5 overflow-x-auto px-1">
+          {list.map((p) => (
+            <div key={p.id} className="relative shrink-0 text-center text-[10px]" data-bg-preset={p.id}>
+              <button type="button" onClick={() => onApply(p.spec)} aria-label={`套用背景預設 ${p.name}`} className="checker block h-12 w-9 overflow-hidden rounded-lg border border-[color-mix(in_srgb,var(--aw-line)_45%,transparent)]"><PresetSwatch spec={p.spec} /></button>
+              <span className="block w-12 truncate">{p.name}</span>
+              <button type="button" aria-label={`刪除背景預設 ${p.name}`} data-bg-preset-del onClick={async () => { if (!confirm(`刪除背景預設「${p.name}」？已使用這個背景的造型不受影響。`)) return; try { setList(await deleteBgPreset(p.id)); } catch (e) { setErr((e as Error).message); } }} className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[var(--aw-sheet)] text-[10px]">✕</button>
+            </div>
+          ))}
+        </div>
+      ) : list ? <p className="text-[11px] text-mauve">調好背景後按「保存目前背景」，下次可直接套用。</p> : null}
     </div>
   );
 }

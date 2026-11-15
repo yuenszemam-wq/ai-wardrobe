@@ -32,6 +32,9 @@ import { MODE_LABEL, QuickScope, SCOPE_LABEL, armInfo, bodyBoneFor, buildPayload
 import { BatchResult, BatchSaveSheet } from "../doll/BatchSaveSheet";
 
 import { readDraft, writeDraft, clearDraft } from "../doll/drafts";
+import { PropLayer, propSrc } from "../../shared/lookProps";
+import { PropMoveLayer, PropsPanel } from "../doll/PropsPanel";
+import { draftIdFor, dropStudioDraft, newDraftId, putStudioDraft } from "../studioDrafts";
 
 type Tab = "clothes" | "layers" | "look" | "pose";
 const TABS: { id: Tab; label: string; Icon: typeof IconShirt }[] = [
@@ -48,7 +51,8 @@ const MAIN_SLOTS = new Set<Slot>(["top", "dress", "set", "outer"]);
 interface EditBuf { kind: "mask" | "parts"; key: string; w: number; h: number; data: Uint8ClampedArray; ready: boolean; committed: string | null; last: [number, number] | null; dirty: boolean; at: number; /** 這一筆開始前的內容（第二根手指落下時用來作廢這一筆） */ backup: Uint8ClampedArray | null }
 type PanelSize = "mini" | "mid" | "max";
 interface Recovery { model?: { id: string; rev: number }; snap: Snap; name: string; favorite: boolean; selected: string | null; hairSelected: string | null; draft: Draft | null; versions: [string, number][]; images: [string, string | null | undefined][] }
-interface Snap { worn: Worn[]; pose: Pose; front: FrontPart[]; look: Appearance }
+/** Phase 3.9A.3：背景及素材圖層亦納入撤銷／重做及本機草稿 */
+interface Snap { worn: Worn[]; pose: Pose; front: FrontPart[]; look: Appearance; bg?: BackgroundSpec | null; props?: PropLayer[] }
 
 /** 按檔名及形狀估計髮件分類（使用者之後可以更改） */
 function guessHairCat(name: string, ar: number, small?: boolean): HairCat {
@@ -82,6 +86,11 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const [look, setLook] = useState<Appearance>(DEFAULT_APPEARANCE);
   // Phase 3.9A.2：造型背景（與衣服配搭共用）；null＝原本預設背景
   const [bg, setBg] = useState<BackgroundSpec | null>(null);
+  const [props, setProps] = useState<PropLayer[]>([]);
+  const [propsOpen, setPropsOpen] = useState(false);
+  const [propSel, setPropSel] = useState<string | null>(null);
+  const [propMoving, setPropMoving] = useState<string | null>(null);
+  const propCutouts = useRef<Record<string, boolean>>({});
   const [bgOpen, setBgOpen] = useState(false);
   const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
   const bgSrc = bg?.type === "image" && bg.image ? `/api/studio/versions/${bg.image.version_id}${bg.image.variant === "cutout" ? "?cutout=1" : ""}` : null;
@@ -138,16 +147,23 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const [posePrompt, setPosePrompt] = useState<{ label: string; pose: Pose; front: FrontPart[] } | null>(null);
   const [ready, setReady] = useState(false);
 
-  const recoveryKey = "room:" + (setup ? "setup:" + setupKey : id ?? "new");
+  // Phase 3.9A.3：每份新造型有自己的草稿（網址 ?draft=）；既有造型沿用 room:<id>
+  const lookDraftId = useMemo(() => (setup ? null : id ? draftIdFor("look", id) : new URLSearchParams(location.search).get("draft") ?? newDraftId("look")), [id, setup]); // eslint-disable-line react-hooks/exhaustive-deps
+  const recoveryKey = "room:" + (setup ? "setup:" + setupKey : id ?? "new:" + lookDraftId);
   const [recoveryReady, setRecoveryReady] = useState(false);
   const touchedRig = useRef(new Set<string>());
   const recoveryVersions = useRef<Map<string, number> | null>(null);
   const recoveryLatest = useRef<Recovery | null>(null);
   const recoveryWrite = useRef<Promise<unknown>>(Promise.resolve());
   const queueDraft = (key: string, value: Recovery) => {
-    recoveryWrite.current = recoveryWrite.current.catch(() => undefined).then(() => writeDraft(key, value)).catch(() => { toast("本機草稿未能保存，請手動保存編輯", "err"); });
+    recoveryWrite.current = recoveryWrite.current.catch(() => undefined).then(() => writeDraft(key, value)).then(() => {
+      // 草稿列表（我的穿搭）：只記錄指向這份草稿的資料，內容仍在原本的草稿資料庫
+      if (!lookDraftId) return;
+      if (!id && new URLSearchParams(location.search).get("draft") !== lookDraftId) try { window.history.replaceState(window.history.state, "", `/dressing?draft=${encodeURIComponent(lookDraftId)}`); } catch { /* ignore */ }
+      return putStudioDraft({ id: lookDraftId, kind: "look", target: id ?? null, base: null, title: value.name.trim() || "新角色造型", at: Date.now(), data: { recoveryKey: key } });
+    }).catch(() => { toast("本機草稿未能保存，請手動保存編輯", "err"); });
   };
-  const discardRecovery = async () => { recoveryLatest.current = null; await recoveryWrite.current; await clearDraft(recoveryKey).catch(() => undefined); };
+  const discardRecovery = async () => { recoveryLatest.current = null; await recoveryWrite.current; await clearDraft(recoveryKey).catch(() => undefined); if (lookDraftId) await dropStudioDraft(lookDraftId); };
 
   const requested = useRef(new Set<string>());
   const generation = useRef(0);
@@ -169,7 +185,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   useEffect(() => {
     const ticket = ++generation.current;
     setRecoveryReady(false); recoveryVersions.current = null; recoveryLatest.current = null;
-    setLoaded(false); setSelected(null); setDraft(null); setHairSelected(null); setHairTool("place"); setDirty(false); setNotice(""); setMenu(false);
+    setLoaded(false); setSelected(null); setDraft(null); setPropSel(null); setPropMoving(null); setHairSelected(null); setHairTool("place"); setDirty(false); setNotice(""); setMenu(false);
     void (async () => {
       const [l, ml] = await Promise.all([id ? fetchLook(id) : null, listModels().catch(() => ({ models: [], default_model: "avatar_v2" })), loadAssets().catch(() => undefined)]);
       if (generation.current !== ticket) return;
@@ -187,10 +203,10 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       const latest = ref ? ml.models.find((x) => x.id === ref.id) : null;
       if (ref && latest && latest.revision > ref.rev) setNotice(`這個造型使用「${modelLabel(m)}」第 ${ref.rev} 版（最新第 ${latest.revision} 版），已按保存時的樣子顯示。可在「外貌 › 身體」更新到最新版本。`);
       if (l) {
-        setExtra(l.look.garments); setWorn(l.worn); setLook(l.appearance); setPoseState(l.pose); setFront(l.front); setName(l.look.name); setFavorite(l.look.is_favorite); setBg(l.look.state?.background ?? null);
+        setExtra(l.look.garments); setWorn(l.worn); setLook(l.appearance); setPoseState(l.pose); setFront(l.front); setName(l.look.name); setFavorite(l.look.is_favorite); setBg(l.look.state?.background ?? null); setProps(l.look.state?.props ?? []);
         if (l.converted) { setNotice("這個造型原本用舊角色保存，已自動換算到新角色。檢查位置後按「保存」即完成轉換。"); setDirty(true); }
       } else {
-        setExtra([]); setWorn([]); setLook(DEFAULT_APPEARANCE); setPoseState({}); setFront([]); setName(""); setFavorite(false); setBg(null);
+        setExtra([]); setWorn([]); setLook(DEFAULT_APPEARANCE); setPoseState({}); setFront([]); setName(""); setFavorite(false); setBg(null); setProps([]);
       }
       setLoaded(true);
     })().catch((e) => {
@@ -234,7 +250,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   useEffect(() => {
     if (!loaded || !garments || !tpls) return;
     let off = false;
-    void readDraft<Recovery>(recoveryKey).then(async (saved) => {
+    // 舊版的新造型草稿（room:new）：搬到這份草稿一次
+    const legacyNew = !id && !setup ? "room:new" : null;
+    void readDraft<Recovery>(recoveryKey).then(async (s0) => { const old = !s0 && legacyNew ? await readDraft<Recovery>(legacyNew).catch(() => null) : null; if (old && legacyNew) await clearDraft(legacyNew).catch(() => undefined); return s0 ?? old; }).then(async (saved) => {
       if (off) return;
       if (saved && confirm("發現未保存的編輯，是否繼續？取消會捨棄這份本機草稿。")) {
         if (saved.model && saved.model.id !== bodyModel.id) {
@@ -244,6 +262,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
         recoveryVersions.current = new Map(saved.versions);
         setWorn(saved.snap.worn); setPoseState(saved.snap.pose); setFront(saved.snap.front); setLook(saved.snap.look);
         setName(saved.name); setFavorite(saved.favorite); setSelected(saved.selected); setHairSelected(saved.hairSelected); setDraft(saved.draft); setDirty(true);
+        if (saved.snap.bg !== undefined) setBg(saved.snap.bg ?? null);
+        if (saved.snap.props) setProps(saved.snap.props);
         const changed = saved.images.some(([gid, img]) => garments.find(g => g.id === gid)?.transparent_image_id !== img);
         setNotice(changed ? "草稿引用的衣物圖片已更新，請檢查畫面；保存預設前需重新載入最新資料。" : "已恢復本機草稿，正式造型尚未被修改。");
       } else if (saved) await clearDraft(recoveryKey);
@@ -324,13 +344,13 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const rig = useMemo(() => rigFor(shownHair, bodyModel.rig), [shownHair, bodyModel]);
   useEffect(() => {
     if (!recoveryReady || (!dirty && !draft)) { recoveryLatest.current = null; return; }
-    const value: Recovery = { model: modelRef(bodyModel), snap: { worn: worn.map(w => { const r = resolved.find(r => r.key === itemKey(w)); return r ? frozenItem(r) : w; }), pose, front, look: {...look, ...(hair ? {hair_config: hair} : {})} }, name, favorite, selected, hairSelected, draft,
+    const value: Recovery = { model: modelRef(bodyModel), snap: { worn: worn.map(w => { const r = resolved.find(r => r.key === itemKey(w)); return r ? frozenItem(r) : w; }), pose, front, look: {...look, ...(hair ? {hair_config: hair} : {})}, bg, props }, name, favorite, selected, hairSelected, draft,
       versions: worn.map(w => [w.garment_id, recoveryVersions.current?.get(w.garment_id) ?? tpls?.v2.get(w.garment_id)?.version ?? 0]),
       images: worn.map(w => [w.garment_id, garments?.find(g => g.id === w.garment_id)?.transparent_image_id]) };
     recoveryLatest.current = value;
     const timer = window.setTimeout(() => queueDraft(recoveryKey, value), 700);
     return () => clearTimeout(timer);
-  }, [recoveryReady, dirty, worn, pose, front, look, name, favorite, selected, hairSelected, draft, tpls, resolved, hair, bodyModel]);
+  }, [recoveryReady, dirty, worn, pose, front, look, name, favorite, selected, hairSelected, draft, tpls, resolved, hair, bodyModel, bg, props]);
   const colors = useMemo(() => (draft?.kind === "hair" ? { main: null, accent: null, tip: null } : { ...resolveHairColors(look.hair_color, look.accent_color), tip: look.tip_color ? hexToRgb(look.tip_color) : null }), [look.hair_color, look.accent_color, look.tip_color, draft?.kind]);
   const advanced = !!sel && !draft;
   const autoParts = !!sel && SLOT_SKIN[sel.worn.slot] === "upper" && wearMode(sel.opts) === "auto";
@@ -360,7 +380,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     flat: view === "source" ? selId : null,
     wire: view === "mesh" && !compare ? selId : null,
     background: bg ? { spec: bg, img: bgImg } : null,
-  }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare, bg, bgImg]);
+    props: props.map((p) => ({ ...p, src: propSrc(p) })),
+  }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare, bg, bgImg, props]);
   const mats = useMemo(() => solve(rig, pose), [rig, pose]);
   // 「移到身後」的實際像素效果：停筆後量度一次（低解像度），讓使用者分辨「身後」與「隱藏」
   const [behindStats, setBehindStats] = useState<BehindStats | null>(null);
@@ -379,7 +400,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   }, [editing, selId, selMask, pose, renderer, scene]);
 
   // ───── 撤銷／重做（衣物、位置、遮罩、部件、姿勢、外貌） ─────
-  const snap: Snap = useMemo(() => ({ worn, pose, front, look }), [worn, pose, front, look]);
+  const snap: Snap = useMemo(() => ({ worn, pose, front, look, bg, props }), [worn, pose, front, look, bg, props]);
   const snapRef = useRef(snap);
   snapRef.current = snap;
   useEffect(() => {
@@ -402,7 +423,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     clearTimeout(h.timer);
     h.timer = window.setTimeout(() => { h.timer = 0; commitHist(snapRef.current); }, 380);
   }, [snap, loaded]);
-  const sameSnap = (a: Snap | null, b: Snap | null) => !!a && !!b && a.worn === b.worn && a.pose === b.pose && a.front === b.front && a.look === b.look;
+  const sameSnap = (a: Snap | null, b: Snap | null) => !!a && !!b && a.worn === b.worn && a.pose === b.pose && a.front === b.front && a.look === b.look && a.bg === b.bg && a.props === b.props;
   /** 把目前累積的改動記為一步 */
   function commitHist(next: Snap) {
     const h = hist.current;
@@ -420,7 +441,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     if (!target) return;
     to.push(snapRef.current);
     h.skip = true;
-    setWorn(target.worn); setPoseState(target.pose); setFront(target.front); setLook(target.look); setDirty(true);
+    setWorn(target.worn); setPoseState(target.pose); setFront(target.front); setLook(target.look); setBg(target.bg ?? null); setProps(target.props ?? []); setDirty(true);
+    if (propSel && !(target.props ?? []).some((p) => p.layer_id === propSel)) { setPropSel(null); setPropMoving(null); }
     if (selected && !target.worn.some((w) => itemKey(w) === selected)) setSelected(null);
   }
   const canUndo = hist.current.past.length > 0 || !!hist.current.timer, canRedo = hist.current.future.length > 0 && !hist.current.timer;
@@ -1183,6 +1205,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       v: 3, model: modelRef(bodyModel), head: look.head, head_config: head, hair: look.hair, ...(hair?{hair_config:hair}:{}), hair_color: look.hair_color, accent_color: look.accent_color, tip_color: look.tip_color, pose: clampPose(rig, pose), front,
       items: resolved.map(frozenItem),
       ...(bg ? { background: bg } : {}),
+      ...(props.length ? { props } : {}),
     };
     const target = asNew ? undefined : id;
     try {
@@ -1353,7 +1376,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
 
   const pct = Math.round(camera.z * 100);
   return (
-    <div className="doll-room fixed inset-0 z-40 flex flex-col bg-plum" data-testid="dressing-room" data-dirty={dirty ? "1" : "0"} data-worn={worn.map((w) => itemKey(w) + (w.hidden ? ":hidden" : "")).join(",")} data-resolved={resolved.length} data-pose={JSON.stringify(pose)} data-front={front.join(",")} data-hair={look.hair} data-head={look.head} data-hair-color={look.hair_color} data-model={bodyModel.id} data-model-rev={bodyModel.revision} data-selected={selected ?? ""} data-masked={worn.filter((w) => w.mask).length} data-parts={worn.filter((w) => w.parts).length} data-undo={hist.current.past.length} data-preview={preview ? "1" : "0"} data-gview={view} data-wear={sel ? wearMode(sel.opts) : ""} data-rig={(() => { try { return selItem && ready ? renderer.info(selItem).mode : ""; } catch { return ""; } })()} data-bind={sel?.opts.bind ? "1" : "0"} data-bone={sel?.opts.bone ?? ""} data-panel={panel}
+    <div className="doll-room fixed inset-0 z-40 flex flex-col bg-plum" data-testid="dressing-room" data-dirty={dirty ? "1" : "0"} data-props={props.map((p) => `${p.layer_id}:${p.bone}:${p.z}:${Math.round(p.cx)}:${Math.round(p.cy)}`).join(",")} data-bg-type={bg?.type ?? "legacy"} data-worn={worn.map((w) => itemKey(w) + (w.hidden ? ":hidden" : "")).join(",")} data-resolved={resolved.length} data-pose={JSON.stringify(pose)} data-front={front.join(",")} data-hair={look.hair} data-head={look.head} data-hair-color={look.hair_color} data-model={bodyModel.id} data-model-rev={bodyModel.revision} data-selected={selected ?? ""} data-masked={worn.filter((w) => w.mask).length} data-parts={worn.filter((w) => w.parts).length} data-undo={hist.current.past.length} data-preview={preview ? "1" : "0"} data-gview={view} data-wear={sel ? wearMode(sel.opts) : ""} data-rig={(() => { try { return selItem && ready ? renderer.info(selItem).mode : ""; } catch { return ""; } })()} data-bind={sel?.opts.bind ? "1" : "0"} data-bone={sel?.opts.bone ?? ""} data-panel={panel}
       data-fits={JSON.stringify(resolved.map((r) => [r.key, Math.round(r.fit.cx * 10) / 10, Math.round(r.fit.cy * 10) / 10, Math.round(r.fit.w * 10) / 10, Math.round(r.fit.rotation * 10) / 10]))}>
       {/* ───── 頂部 ───── */}
       <div className="safe-top shrink-0 bg-head">
@@ -1380,6 +1403,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
         </div>
         )}
         {bgOpen && <Sheet title="造型背景" onClose={() => setBgOpen(false)}><div data-testid="look-bg-panel"><BackgroundPanel value={bg} legacyLabel="原本背景" onChange={(b) => { setBg(b); setDirty(true); }} onUpload={async (f) => { try { const img = await prepareStudioImage(f); const a = await uploadStudioAsset(img, { kind: "background", name: f.name.replace(/\.[^.]+$/, "") || "背景", inLibrary: false }); return { asset_id: a.id, version_id: a.version!.id }; } catch (e) { toast((e as Error).message, "err"); return null; } }} /></div></Sheet>}
+        {propsOpen && <Sheet title="素材圖層" onClose={() => setPropsOpen(false)}><PropsPanel props={props} mats={mats} cutouts={propCutouts.current} selected={propSel} onSelect={setPropSel} onChange={(next) => { setProps(next); setDirty(true); }} onMove={(pid) => { setPropSel(pid); setPropMoving(pid); setPropsOpen(false); }} /></Sheet>}
         {menu && !setup && (
           <div className="absolute right-2.5 z-50 mt-1 w-44 overflow-hidden rounded-2xl border border-gold/50 bg-velvet text-[13px] shadow-xl" role="menu">
             <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); leave("/dressing"); }}>新造型</button>
@@ -1388,6 +1412,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
             <button type="button" role="menuitem" data-testid="menu-save-both" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); openBatch(true); }}>保存造型及全部衣物設定</button>
             <button type="button" role="menuitem" data-testid="menu-diary" className="block w-full px-4 py-2.5 text-left" onClick={async () => { setMenu(false); const lid = dirty || !id ? await save() : id; if (lid) navigate(`/diary/new?look=${lid}`); }}>加入穿搭日誌</button>
             <button type="button" role="menuitem" data-testid="menu-background" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); setBgOpen(true); }}>背景</button>
+            <button type="button" role="menuitem" data-testid="menu-props" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); setPropsOpen(true); }}>素材圖層{props.length ? `（${props.length}）` : ""}</button>
             <button type="button" role="menuitem" data-testid="export-png" className="block w-full px-4 py-2.5 text-left" onClick={() => void exportPng()}>匯出透明 PNG</button>
             {bg && bg.type !== "transparent" && <button type="button" role="menuitem" data-testid="export-png-bg" className="block w-full px-4 py-2.5 text-left" onClick={() => void exportPng(true)}>匯出 PNG（含背景）</button>}
             {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left text-wine" onClick={() => { setMenu(false); void removeLook(); }}>刪除造型</button>}
@@ -1488,6 +1513,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           )}
           {!preview && poseFix && !editing && <button data-stage-ui type="button" data-testid="pose-fix" onClick={() => setItem(poseFix.gid, { variant: poseFix.vid, snapshot: false, fit: null, v1fit: null, opts: null, mask: null, parts: null })} className="absolute bottom-14 left-2 max-w-[55%] truncate rounded-full bg-head/70 px-3 py-1.5 text-[11px] text-gold-soft ring-1 ring-gold/50">套用「{poseFix.name}」（{poseFix.garment}）</button>}
         </Stage>
+        {propMoving && (() => { const pm = props.find((p) => p.layer_id === propMoving); return pm ? <PropMoveLayer prop={pm} mats={mats} onChange={(q) => { if (Object.keys(q).length) { setProps((cur) => cur.map((p) => (p.layer_id === pm.layer_id ? { ...p, ...q } : p))); setDirty(true); } }} onDone={() => { setPropMoving(null); setPropsOpen(true); }} /> : null; })()}
       </div>
 
       {/* ───── 衣服設定：部件選擇及設定狀態 ───── */}
