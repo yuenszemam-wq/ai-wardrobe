@@ -39,6 +39,14 @@ npx wrangler d1 migrations apply DB --remote
 
 `0015_studio_stability.sql`、`0016_wardrobe_share.sql`（只新增欄位、資料表及索引）已於 2026-11-15 經 Cloudflare D1 API 套用到正式及預覽資料庫並記錄在 `d1_migrations`。之前未套用時，分享頁顯示「分享功能需要先套用資料庫遷移 0016」。
 
+`0017_cutout_edits.sql`（Cutout Studio 去背圖來源關聯）、`0018_ai_lab.sql`（AI Lab 使用記錄及配額）只新增資料表，已於 2026-11-16 經 Cloudflare D1 API 套用到**正式**資料庫並記錄在 `d1_migrations`（Preview 資料庫未套用）。回復：`DROP TABLE cutout_edits; DROP TABLE ai_usage_events; DROP TABLE ai_usage_daily; DROP TABLE ai_usage_monthly;`
+
+### AI Lab（Workers AI 衣物辨認）
+
+- 正式環境 `AI_LAB_ENABLED="true"`（伺服器允許）；實際使用要在 App「設定 › AI Lab／AI 實驗室」開啟，並先按「接受 Meta Llama 3.2 授權」。
+- 帳戶為 Workers Free：`AI_PAID_USAGE_ENABLED="false"`，每日 Neuron 預算 5,000（不超過免費 10,000），每日 50 次、每月 500 次、並行 1；設定頁只可再調低，另有 Kill Switch。
+- 結果只放入「AI 待整理」，確認後才寫入衣物資料。
+
 **D1 限制：每個查詢最多 100 個綁定參數**（超過會出現 `too many SQL variables` → 500）。`IN (...)` 清單一律分批（每批 ≤ 80）；`test/harness.mjs` 的模擬 D1 同樣限制 100 個，`test/d1-limits.mjs` 以 150 件衣物測試同步及 AI 狀態批次更新。
 
 ### Phase 3.8B：本機優先、離線及 R2 用量

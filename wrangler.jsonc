@@ -32,6 +32,9 @@
     { "binding": "IMAGES", "bucket_name": "ai-wardrobe-images" }
   ],
 
+  // AI Lab Phase 1：Workers AI（只在 AI_LAB_ENABLED=true 且設定頁開啟時才會呼叫；預設關閉）
+  "ai": { "binding": "AI" },
+
   // 非機密設定（機密資料一律存 D1 雜湊，不放這裡）。
   // R2 用量頁的官方數據需要 Worker Secret CF_API_TOKEN（Account Analytics: Read；不放在 repo）。CF_ACCOUNT_ID 不是機密，放在 vars。
   "vars": {
@@ -40,7 +43,17 @@
     "MAX_UPLOAD_MB": "25",
     "TOKEN_DAILY_CALL_LIMIT": "3000",
     "TOKEN_DAILY_UPLOAD_MB": "800",
-    "UPLOAD_LINK_MAX_MINUTES": "1440"
+    "UPLOAD_LINK_MAX_MINUTES": "1440",
+    // AI Lab：伺服器允許（2026-11-16 擁有者確認，Workers Free）；實際使用仍要在設定頁開啟。配額為第一輪保守測試值
+    "AI_LAB_ENABLED": "true",
+    "AI_PROVIDER": "workers-ai",
+    "AI_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
+    "AI_DAILY_REQUEST_LIMIT": "50",
+    "AI_MONTHLY_REQUEST_LIMIT": "500",
+    "AI_MAX_BATCH_SIZE": "10",
+    "AI_MAX_CONCURRENCY": "1",
+    "AI_DAILY_NEURON_BUDGET": "5000",
+    "AI_PAID_USAGE_ENABLED": "false"
   },
 
   // Preview 使用獨立測試資源，不接觸正式衣櫃資料或 Cron。
@@ -51,8 +64,19 @@
       "MAX_UPLOAD_MB": "25",
       "TOKEN_DAILY_CALL_LIMIT": "3000",
       "TOKEN_DAILY_UPLOAD_MB": "800",
-      "UPLOAD_LINK_MAX_MINUTES": "1440"
+      "UPLOAD_LINK_MAX_MINUTES": "1440",
+      // Preview 可獨立開啟 AI Lab（目前仍為關閉，等擁有者確認 Meta 授權後才改為 "true"）
+      "AI_LAB_ENABLED": "false",
+      "AI_PROVIDER": "workers-ai",
+      "AI_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
+      "AI_DAILY_REQUEST_LIMIT": "50",
+      "AI_MONTHLY_REQUEST_LIMIT": "500",
+      "AI_MAX_BATCH_SIZE": "10",
+      "AI_MAX_CONCURRENCY": "1",
+      "AI_DAILY_NEURON_BUDGET": "5000",
+      "AI_PAID_USAGE_ENABLED": "false"
     },
+    "ai": { "binding": "AI" },
     "d1_databases": [
       {
         "binding": "DB",

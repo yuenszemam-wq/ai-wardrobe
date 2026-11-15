@@ -2,6 +2,8 @@ import { WardrobeImage } from "../components/WardrobeImage";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Taxonomy } from "../../shared/taxonomy";
 import { AI_STATUS_LABEL, AiNormalized, AiStatus, api, BRAND_CONFIDENCE_LABEL, displayName, formatDate, imageUrl, ReviewItem } from "../api";
+import { AiBatchRecognize } from "../components/AiBatchRecognize";
+import { aiLabStatus } from "../aiLab";
 import { AiHandoffButton, Button, Empty, inputCls, Link, PickChips, Spinner, toast } from "../components/ui";
 import { usePath, navigate } from "../router";
 import { optionNames, useTaxonomy } from "../taxonomy";
@@ -55,6 +57,9 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [aiBatch, setAiBatch] = useState<string[] | null>(null);
+  const [labActive, setLabActive] = useState(false);
+  useEffect(() => { aiLabStatus().then((s) => setLabActive(s.active)).catch(() => setLabActive(false)); }, []);
 
   const load = useCallback(async () => {
     const r = await api<ReviewData>(`/api/ai/review?ai_status=${tab.statuses.join(",")}&sort=${sort}`);
@@ -160,9 +165,15 @@ export default function ReviewPanel({ onChanged }: { onChanged?: () => void }) {
       {counts && counts.pending_ai + counts.needs_rework > 0 && (
         <div className="mt-3 flex items-center justify-between gap-3">
           <span className="text-[13px] text-mauve">{counts.pending_ai + counts.needs_rework} 件等待辨認</span>
-          <AiHandoffButton compact count={counts.pending_ai + counts.needs_rework} />
+          <span className="flex gap-1">
+            {labActive && <button type="button" className="chip min-h-9 rounded-full px-3 text-[12.5px]" data-testid="ai-batch-open"
+              onClick={() => setAiBatch((selected.size ? [...selected] : items.filter((i) => i.ai_status === "pending_ai" || i.ai_status === "needs_rework").map((i) => i.id)))}>
+              AI 自動辨認{selected.size ? `（已選 ${selected.size}）` : ""}</button>}
+            <AiHandoffButton compact count={counts.pending_ai + counts.needs_rework} />
+          </span>
         </div>
       )}
+      {aiBatch && <AiBatchRecognize ids={aiBatch} onClose={() => setAiBatch(null)} onChanged={() => void load()} />}
 
       {items.length > 0 && (
         <div style={{ top: "calc(env(safe-area-inset-top) + 2.5rem)" }} className="sticky z-20 -mx-4 mt-3 flex flex-wrap items-center gap-2 bg-lace/95 px-4 py-2 backdrop-blur">

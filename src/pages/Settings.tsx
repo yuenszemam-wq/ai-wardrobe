@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { AiLabPanel } from "../components/AiLabPanel";
 import { api, AppSettings, formatDate } from "../api";
 import { Button, ColumnSwitch, copyText, Field, inputCls, Link, PageTitle, setSettingsCache, Spinner, toast, useColumns, useSettings } from "../components/ui";
 import { CopyBlock } from "./ImportCenter";
@@ -64,6 +65,7 @@ export default function Settings({ username, onLogout, section }: { username: st
     ]],
     ["AI 及帳戶", [
       { id: "ai", label: "AI 連接器", value: `${tokens.filter((t) => !t.revoked_at).length} 個`, Icon: IconSparkle },
+      { id: "ai-lab", label: "AI Lab／AI 實驗室", value: "Workers AI", Icon: IconSparkle },
       { id: "ai-command", label: "AI 整理指令", value: settings?.ai_command_is_default === false ? "已自訂" : "預設", Icon: IconPencil },
       { id: "account", label: "帳戶設定", value: username ?? "", Icon: IconPerson },
     ]],
@@ -92,6 +94,7 @@ export default function Settings({ username, onLogout, section }: { username: st
         {(section === "r2" || section === "storage") && <R2Usage advanced={<ThumbnailStatus />} />}
         {section === "ai" && <Connectors tokens={tokens} reload={() => api<{ tokens: TokenRow[] }>("/api/tokens").then((r) => setTokens(r.tokens))} />}
         {section === "ai-command" && <AiCommandEditor />}
+        {section === "ai-lab" && <AiLabPanel />}
         {section === "account" && (
           <section className="frame p-4">
             <Field label="登入身份"><p className="text-[15px]">{username}</p></Field>

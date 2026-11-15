@@ -4,9 +4,20 @@
 > 只記錄實際完成的動作；未部署、未測試的項目會明確標示。
 
 ## 1. 最後更新時間
-2026-11-16 06:09（香港時間）— 第 1 次執行結束
+2026-11-16 07:48（香港時間）— Sally 指示合併正式版
 
 ## 2. 整體進度
+
+### ⭐ 2026-11-16 07:48 Sally 指示（取代之前「等待 Sally 決定」）
+- 「不用 Preview，直接合併正式版本」「接受 Meta Llama 3.2 授權」「Cloudflare 帳戶是 Workers Free」「給我自己測試」
+- 已做：
+  - 合併前 main（7639503）備份為**分支** `backup-before-merge-20261116`（tag push 被 proxy 拒絕 403）。
+  - PR #25（規格 A）及 PR #26（規格 B）以 merge commit 合併到 main（衝突只在 CI workflow 及 test/harness.mjs，兩邊都保留）。合併後本機 build、typecheck、16 個非 UI 測試、10 個 UI 測試全部通過。
+  - 正式 D1 已套用 migration 0017、0018（只新增資料表，已記錄在 d1_migrations）。Preview D1 未套用。
+  - 正式 `AI_LAB_ENABLED="true"`；App 設定頁仍預設關閉，要 Sally 自己開啟。
+  - Meta 授權：本環境沒有 Cloudflare API Token，所以在設定頁加了「接受 Meta Llama 3.2 授權」按鈕（擁有者確認後 Worker 以 AI binding 送出官方 `{"prompt":"agree"}`）。**需要 Sally 自己按一次**。
+- 還原方法：把 main 重設到 `backup-before-merge-20261116`（7639503）；資料表可按 README 的 DROP 指令移除（不影響衣物資料）。
+- 未做：真實 Workers AI 呼叫（由 Sally 自己測試）、iPhone 實機。
 
 ### 第 2 步：main 合併狀態檢查
 - ✅ 已完成（2026-11-16）。結論：**main 不需要修正，沒有改動 main 的程式碼，也沒有另打備份 tag**。
@@ -52,16 +63,12 @@
 - ✅ 修正：使用記錄未保存 suggestion_id（commit `4ce6e9a`）；適用的進階屬性以文字附在建議 details（確認時不會寫入衣物 attributes）
 
 ## 3. 正在做甚麼
-- 本次執行已結束，沒有未提交的改動。
-- 規格 A：PR #25（`7ec4b9e`）CI 通過、Preview 成功，**等待 Sally 驗收（iPhone 實機）**。
-- 規格 B：PR #26（`4ce6e9a`）CI 通過、Preview 成功（AI Lab 關閉），**等待 Sally 決定授權及開啟 Preview**。
+- 兩份規格已合併到 main 並部署正式版，等 Sally 自己測試及回報問題。
 
 ## 4. 下一步
-1. 先查 PR #25、#26 有沒有 Sally 的留言或新 commit；兩個 PR 都不要合併。
-2. 若 Sally 未作決定：只做健康檢查（PR CI、兩個 Preview 首頁 200），更新本文件「最後更新時間」即可；可選做的小項目：
-   - 規格 B：30 張測試集評估腳本（讀 ground truth JSON，比對 ai_suggestions.normalized 計算主分類／子分類／主色準確率）。
-   - 規格 A：WebKit 測試結果（查 CI log 中 `cutout-studio-ui.mjs` WebKit 步驟）。
-3. 若 Sally 已接受 Meta 授權並開啟 Preview（`previews.vars.AI_LAB_ENABLED="true"`、Preview D1 套用 0018）：在 Preview 設定頁開啟 AI Lab → 少量真實請求 → 對照 Cloudflare Dashboard → 30–50 張測試報告。
+1. 查 main 的 Workers Builds（正式部署）是否成功，正式網站首頁 200。
+2. 查 Sally 在 GitHub／對話中的回報，修正問題（在新分支修，合併前問 Sally，除非她再指示直接合併）。
+3. 若 Sally 已在正式環境使用 AI Lab：從 `ai_usage_events` 讀取真實用量（只讀），整理成本及準確度報告；30 張 ground truth 測試等 Sally 提供答案。
 
 ## 5. 問題及已嘗試方法
 - `gh auth status` 顯示 GH_TOKEN 無效；改用 GitHub MCP 工具及 git（經 proxy）操作，git fetch／push 正常。
@@ -70,6 +77,7 @@
 - 筆畫進行中如觸發重新排版會令位置偏移 → 已改為筆畫中不重新 fit。
 
 ## 6. 等待 Sally 決定
+- （以下大部分已由 Sally 在對話中決定，見第 2 節 ⭐）尚餘：在 App 按「接受 Meta Llama 3.2 授權」及開啟 AI Lab、iPhone 實機測試、提供 30 張測試答案。
 - **規格 B：是否接受 Meta Llama 3.2 授權**（需要以 Cloudflare API 對 `@cf/meta/llama-3.2-11b-vision-instruct` 送出 `{"prompt":"agree"}`；本任務不會自動執行）。未接受前不能做真實連線及 30 張測試。
 - 規格 B：是否在 Preview 開啟 AI Lab（把 wrangler.jsonc `previews.vars.AI_LAB_ENABLED` 改為 "true"）及套用 migration 0018 到 Preview D1。
 - 規格 B：提供 30 張授權測試圖片及人工答案（ground truth）。
