@@ -6,6 +6,7 @@ import { AttributeChoices, BrandInput } from "../components/GarmentChoices";
 import { SplitSheet } from "../components/SplitSheet";
 import { CutoutSheet } from "../components/CutoutSheet";
 import { cutoutSource } from "../cutoutFlow";
+import { CutoutStudio } from "../cutoutStudio/CutoutStudio";
 import { useEffect, useState } from "react";
 import { attributesFor, attributeValues, isColumnAttribute, Taxonomy } from "../../shared/taxonomy";
 import { AI_STATUS_LABEL, api, ApiError, displayName, formatBytes, formatDate, Garment, GarmentImage, imageUrl, STATUS_LABEL, uploadImage } from "../api";
@@ -44,6 +45,7 @@ export default function GarmentDetail({ id }: { id: string }) {
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   // 手動去背：由上傳完成頁進入（?cutout=1）時自動打開
   const [cutout, setCutout] = useState(() => new URLSearchParams(location.search).get("cutout") === "1");
+  const [studioImg, setStudioImg] = useState<GarmentImage | null>(null);
   const tax = useTaxonomy();
 
   async function load() {
@@ -229,6 +231,7 @@ export default function GarmentDetail({ id }: { id: string }) {
           )}
           <div className="mt-3 flex flex-wrap justify-center gap-2">
             {shown && shown.image_type !== "processed" && !shown.has_alpha && <button type="button" data-testid="cutout-start" onClick={() => setCutout(true)} className="btn-jewel min-h-9 rounded-full px-4 text-[13px]">去背</button>}
+            {shown && <button type="button" data-testid="studio-start" onClick={() => setStudioImg(shown)} className="chip min-h-9 rounded-full px-3.5 text-[13px]">編輯圖片／手動去背</button>}
             <FileButton label="＋ 去背圖" onFile={(f) => addImage(f, "processed")} disabled={uploadPct !== null} />
             <FileButton label="＋ 原相" onFile={(f) => addImage(f, "original")} disabled={uploadPct !== null} />
             <button type="button" onClick={() => setMerging(true)} className="chip inline-flex min-h-9 items-center gap-1 rounded-full px-3.5 text-[13px]">
@@ -378,6 +381,7 @@ export default function GarmentDetail({ id }: { id: string }) {
         </div>
       </div>
 
+      {studioImg && g && <CutoutStudio target={{ kind: "garment", garment: g, image: studioImg }} onClose={() => setStudioImg(null)} onSaved={(i) => { if (!i.newGarment) void load(); }} />}
       {cutout && g && (() => { const src = cutoutSource(g, shown?.image_type === "original" ? shown : null); return src ? <CutoutSheet g={g} image={src} onClose={() => setCutout(false)} onSaved={() => { void load(); }} /> : null; })()}
       {splitting && <SplitSheet id={id} onClose={() => setSplitting(false)} onSplit={(r) => { setSplitting(false); setG(r.source); setViewId(null); }} />}
       {merging && (

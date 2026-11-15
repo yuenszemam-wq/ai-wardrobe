@@ -117,10 +117,23 @@ export class BrushStroke {
   private lastX = NaN;
   private lastY = NaN;
   private carry = 0;
-  constructor(mask: Uint8Array, w: number, h: number, opts: BrushOptions) {
+  /** buffers：可重用的 base／coverage 緩衝（長度 w×h），避免每筆重新配置大量記憶體 */
+  constructor(mask: Uint8Array, w: number, h: number, opts: BrushOptions, buffers?: { base: Uint8Array; cov: Uint8Array }) {
     this.mask = mask; this.w = w; this.h = h; this.opts = { ...opts, radius: Math.max(0.5, opts.radius) };
-    this.base = mask.slice();
-    this.cov = new Uint8Array(w * h);
+    if (buffers && buffers.base.length === w * h && buffers.cov.length === w * h) {
+      buffers.base.set(mask); buffers.cov.fill(0);
+      this.base = buffers.base; this.cov = buffers.cov;
+    } else {
+      this.base = mask.slice();
+      this.cov = new Uint8Array(w * h);
+    }
+  }
+  /** 取消這一筆：把改動範圍還原為筆畫開始前的遮罩 */
+  revert(): Rect {
+    const r = this.dirty;
+    if (rectEmpty(r)) return r;
+    for (let y = r.y0; y < r.y1; y++) this.mask.set(this.base.subarray(y * this.w + r.x0, y * this.w + r.x1), y * this.w + r.x0);
+    return r;
   }
   /** 加入一點；與上一點之間按間距插值，拖動多快都不會斷開。回傳這次改動的範圍。 */
   to(x: number, y: number): Rect {
