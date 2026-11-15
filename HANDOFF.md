@@ -4,12 +4,17 @@
 > 只記錄實際完成的動作；未部署、未測試的項目會明確標示。
 
 ## 1. 最後更新時間
-2026-11-16 05:06（香港時間）— 第 1 次執行，剛建立本文件
+2026-11-16 05:20（香港時間）— 第 1 次執行
 
 ## 2. 整體進度
 
 ### 第 2 步：main 合併狀態檢查
-- 🔄 檢查 6 條分支是否全部進入 main
+- ✅ 已完成（2026-11-16）。結論：**main 不需要修正，沒有改動 main 的程式碼，也沒有另打備份 tag**。
+  - 6 條分支的 commit 全部在 main（`git log origin/main..branch` 及 `git cherry` 皆為空）。
+  - 6 條分支是線性堆疊（3.9A.2.1 → 3.9A.3 → 3.8C → 3.9B.1 → 3.9B.2 → 3.7）。合併 commit `5a1fd06` 的檔案樹與堆疊頂端 `feature/phase3.7-skinning`（42163cb）**完全相同**（`git diff` 為空），即沒有衝突時保留錯版本或遺失改動。
+  - 其後 main 另有 2 個修正 commit：`5cb942e`（typecheck）、`3413d8e`（D1 100 綁定參數上限）。
+  - 在 main（c0dc55c）實際執行：`npm run build` ✅、`npm run typecheck` ✅、CI 列出的 22 個非 UI 測試＋`test/cutout.mjs` 全部 ✅、UI 測試 phase39a2-ui／39a21-ui／39a3-ui／38c-ui／39b1-ui／39b2-ui（Chromium）✅。其餘 UI 測試未執行。專案沒有 lint 指令。
+  - remote 已有一條 `backup-before-remerge` 分支（指向 05542be，非本任務建立），未改動。
 
 ### 規格 A：Cutout Studio 手動去背
 - ⬜ 開發前檢查（現有 cutout.ts／CutoutSheet 等）
@@ -29,7 +34,7 @@
 - ⬜ 尚未開始
 
 ## 3. 正在做甚麼
-- 第 2 步：檢查 main 合併狀態
+- 規格 A 開發前檢查
 
 ## 4. 下一步
 - 完成第 2 步檢查後，開分支開發規格 A
