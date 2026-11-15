@@ -4,7 +4,7 @@
 > 只記錄實際完成的動作；未部署、未測試的項目會明確標示。
 
 ## 1. 最後更新時間
-2026-11-16 05:55（香港時間）— 第 1 次執行
+2026-11-16 06:09（香港時間）— 第 1 次執行結束
 
 ## 2. 整體進度
 
@@ -36,7 +36,7 @@
 - ✅ Preview 部署成功（commit 0c84ec6）：首頁 200、`/api/cutout-edits` 未登入 401（只做了這兩個 HTTP 檢查；**未在 Preview 登入實際操作，未做 iPhone 實機**）
 - ✅ PR #25 GitHub Actions CI（validate）通過（包括 cutout-studio.mjs、cutout-studio-ui.mjs；WebKit 步驟為 continue-on-error，個別結果未細查）
 
-### 規格 B：AI Lab Phase 1（分支 `feature/ai-lab-workers-vision`，最後 commit `ef57507`，PR #26 draft）
+### 規格 B：AI Lab Phase 1（分支 `feature/ai-lab-workers-vision`，最後 commit `4ce6e9a`，PR #26 draft）
 - ✅ 開發前檢查：沿用現有 `ai_suggestions`／`submitSuggestion`（名稱欄位）、`decide`（locked_fields、version）；app 只有單一擁有者 session（以 requireSession 作「管理員」限制）
 - ✅ 官方文件查證（2026-11-16）：輸入 `messages`＋`image`（base64 data URL）＋`max_tokens`；價格 4,410 neurons/M 輸入、61,493 neurons/M 輸出、US$0.011/1,000 neurons；免費每日 10,000 neurons（UTC 00:00 重設）；首次使用需送出 `{"prompt":"agree"}`（未接受時錯誤 5016）
 - ✅ migration `0018_ai_lab.sql`（只新增 ai_usage_events／daily／monthly；**未套用到任何遠端 D1**）
@@ -48,21 +48,26 @@
 - ⬜ 進階屬性（袖長等）目前只保存在建議 payload（`ai_lab.attributes`），確認時不會寫入衣物 attributes（現有 decide 只處理固定欄位）
 - ⬜ 真實 Workers AI 連線測試、30 張 ground truth 測試（**需要 Sally 先決定是否接受 Meta 授權**）
 - ✅ PR #26（draft）Workers Builds Preview 成功（commit ef57507）：首頁 200、`/api/ai-lab/status` 未登入 401；AI Lab 在 Preview 仍為關閉
-- 🔄 PR #26 GitHub Actions CI 執行中，結果待查
+- ✅ PR #26 GitHub Actions CI（validate，2026-11-15 22:05 UTC 完成）通過；Workers Builds Preview 成功
+- ✅ 修正：使用記錄未保存 suggestion_id（commit `4ce6e9a`）；適用的進階屬性以文字附在建議 details（確認時不會寫入衣物 attributes）
 
 ## 3. 正在做甚麼
-- 規格 A：PR #25 新 commit `7ec4b9e`（素材上傳入口）已 push，CI／Preview 會重新執行；之前 commit 0c84ec6 的 CI 通過。
-- 規格 B：PR #26 已開，等 Workers Builds／CI 結果；真實 AI 測試等 Sally 決定授權。
+- 本次執行已結束，沒有未提交的改動。
+- 規格 A：PR #25（`7ec4b9e`）CI 通過、Preview 成功，**等待 Sally 驗收（iPhone 實機）**。
+- 規格 B：PR #26（`4ce6e9a`）CI 通過、Preview 成功（AI Lab 關閉），**等待 Sally 決定授權及開啟 Preview**。
 
 ## 4. 下一步
-1. 查 PR #26 的 Workers Builds 及 CI（validate）結果；失敗就在 `feature/ai-lab-workers-vision` 修正。
-2. 查 PR #25 新 commit `7ec4b9e` 的 CI。
-3. 規格 B 餘項（不需要 Sally 決定的部分）：AI 建議的進階屬性在 AI 待整理畫面顯示；30 張測試集的評估腳本（讀 ground truth JSON，計算主分類／子分類／主色準確率），等 Sally 提供圖片。
-4. Sally 接受授權並開啟 Preview 後：少量真實請求 → 對照 Cloudflare Dashboard 用量 → 30–50 張測試報告。
-5. 若兩份規格都只剩等待 Sally 驗收：只做健康檢查。
+1. 先查 PR #25、#26 有沒有 Sally 的留言或新 commit；兩個 PR 都不要合併。
+2. 若 Sally 未作決定：只做健康檢查（PR CI、兩個 Preview 首頁 200），更新本文件「最後更新時間」即可；可選做的小項目：
+   - 規格 B：30 張測試集評估腳本（讀 ground truth JSON，比對 ai_suggestions.normalized 計算主分類／子分類／主色準確率）。
+   - 規格 A：WebKit 測試結果（查 CI log 中 `cutout-studio-ui.mjs` WebKit 步驟）。
+3. 若 Sally 已接受 Meta 授權並開啟 Preview（`previews.vars.AI_LAB_ENABLED="true"`、Preview D1 套用 0018）：在 Preview 設定頁開啟 AI Lab → 少量真實請求 → 對照 Cloudflare Dashboard → 30–50 張測試報告。
 
 ## 5. 問題及已嘗試方法
-- `gh auth status` 顯示 GH_TOKEN 無效；改用 GitHub MCP 工具及 git（經 proxy）操作，git fetch 正常。
+- `gh auth status` 顯示 GH_TOKEN 無效；改用 GitHub MCP 工具及 git（經 proxy）操作，git fetch／push 正常。
+- 本機沒有安裝 Playwright WebKit（不可自行安裝），WebKit 只在 CI 以 continue-on-error 執行。
+- Playwright 合成合併事件（getCoalescedEvents）座標不可靠 → 工作室只在最後一個合併事件與本事件位置一致時才使用。
+- 筆畫進行中如觸發重新排版會令位置偏移 → 已改為筆畫中不重新 fit。
 
 ## 6. 等待 Sally 決定
 - **規格 B：是否接受 Meta Llama 3.2 授權**（需要以 Cloudflare API 對 `@cf/meta/llama-3.2-11b-vision-instruct` 送出 `{"prompt":"agree"}`；本任務不會自動執行）。未接受前不能做真實連線及 30 張測試。
