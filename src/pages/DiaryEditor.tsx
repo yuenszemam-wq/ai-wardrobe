@@ -44,6 +44,13 @@ export default function DiaryEditor({ id }: { id?: string }) {
   const loaded = useRef(false);
   /** 使用者已修改（或已恢復草稿）：之後才寫入草稿，避免打開空白頁就產生草稿 */
   const dirty = useRef(false);
+  /** 草稿寫入次序：成功後先等候所有寫入完成才刪除草稿；finished 之後不再寫入 */
+  const writes = useRef<Promise<unknown>>(Promise.resolve());
+  const finished = useRef(false);
+  /** 新增紀錄已在伺服器建立：之後不可再寫入「new」草稿（避免下次重複建立同一筆紀錄） */
+  const moved = useRef(false);
+  const queueDraft = (key: string, d: Parameters<typeof putDraft>[1]) => { if (finished.current || (moved.current && key === "new")) return writes.current; writes.current = writes.current.then(() => (finished.current ? undefined : putDraft(key, d))).catch(() => undefined); return writes.current; };
+  const clearAll = async (...keys: string[]) => { finished.current = true; await writes.current; for (const k of keys) await dropDraft(k); };
 
   // 初始化：修改＝讀取紀錄；新增＝草稿或空白（可由工作室帶入造型）
   useEffect(() => {
@@ -113,7 +120,7 @@ export default function DiaryEditor({ id }: { id?: string }) {
   useEffect(() => {
     if (!form || !loaded.current || (!dirty.current && !photos.length)) return;
     const n = ++persist.current;
-    const t = window.setTimeout(() => { void putDraft(draftKey, draftOf()).then((r) => { if (n === persist.current) setDraftWarn(r === "text" && photos.length > 0); }); }, 250);
+    const t = window.setTimeout(() => { void queueDraft(draftKey, draftOf()).then((r) => { if (n === persist.current && r) setDraftWarn(r === "text" && photos.length > 0); }); }, 250);
     return () => clearTimeout(t);
   }, [form, photos, cover, pendingCover, order, draftKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => photos.forEach((p) => URL.revokeObjectURL(p.preview)), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -143,7 +150,7 @@ export default function DiaryEditor({ id }: { id?: string }) {
         patchPhoto(p.key, { state: "done", progress: 1, uploadedId: r.photo.id });
       } catch (e) { p.state = "failed"; p.error = (e as Error).message; patchPhoto(p.key, { state: "failed", error: p.error }); }
       // 每張照片完成後即時更新草稿：重新打開時已成功的照片不會再上傳
-      void putDraft(entryId, draftOf({ photos: cur, entryId }));
+      void queueDraft(entryId, draftOf({ photos: cur, entryId }));
     }
     return cur;
   }
@@ -158,7 +165,7 @@ export default function DiaryEditor({ id }: { id?: string }) {
       else {
         saved = await diaryApi.create({ ...body, outfit_id: form.outfit_id, look_id: form.look_id, import_items: false });
         // 紀錄已在伺服器建立：草稿改以紀錄 ID 保存（之後重試只上傳照片，不會建立第二筆紀錄）
-        await moveDraft(draftKey, saved.id, draftOf({ entryId: saved.id }));
+        moved.current = true; await writes.current; await moveDraft(draftKey, saved.id, draftOf({ entryId: saved.id }));
       }
       setEntry(saved);
       const result = await uploadAll(saved.id, photos);
@@ -172,7 +179,7 @@ export default function DiaryEditor({ id }: { id?: string }) {
         if (!id) navigate(`/diary/${saved.id}/edit`, true, false);
         return;
       }
-      await dropDraft(saved.id); await dropDraft(draftKey);
+      await clearAll(saved.id, draftKey);
       dirty.current = false; setState("server");
       toast(entry ? "已保存" : "已新增穿搭紀錄");
       navigate(`/diary?m=${monthOf(saved.worn_date)}&d=${saved.worn_date}`, true);
@@ -186,7 +193,7 @@ export default function DiaryEditor({ id }: { id?: string }) {
     setBusy(true);
     const result = await uploadAll(entry.id, photos);
     setBusy(false);
-    if (result.every((p) => p.state === "done")) { await dropDraft(entry.id); setState("server"); toast("照片已全部上傳"); navigate(`/diary?m=${monthOf(entry.worn_date)}&d=${entry.worn_date}`, true); }
+    if (result.every((p) => p.state === "done")) { await clearAll(entry.id); setState("server"); toast("照片已全部上傳"); navigate(`/diary?m=${monthOf(entry.worn_date)}&d=${entry.worn_date}`, true); }
     else toast("仍有照片未能上傳，可以稍後再試", "err");
   }
   const existing = entry ? order.map((pid) => entry.photos.find((p) => p.id === pid)).filter((p): p is NonNullable<typeof p> => !!p) : [];
@@ -300,7 +307,7 @@ export default function DiaryEditor({ id }: { id?: string }) {
 
       {/* ⑤ 保存欄：固定在底部選單之上（鍵盤開啟時移到鍵盤之上）；下方預留空間，最後一項內容不會被遮住 */}
       <div className="action-bar -mx-4 flex gap-2 px-4 py-2" data-testid="diary-action-bar">
-        <Button variant="ghost" disabled={busy} onClick={async () => { if (confirm(waiting ? "放棄未保存的修改？未上傳的照片亦會從這部手機刪除。" : "放棄未保存的修改？")) { await dropDraft(draftKey); if (entry) await dropDraft(entry.id); navigate("/diary"); } }} data-testid="diary-cancel">取消</Button>
+        <Button variant="ghost" disabled={busy} onClick={async () => { if (confirm(waiting ? "放棄未保存的修改？未上傳的照片亦會從這部手機刪除。" : "放棄未保存的修改？")) { await clearAll(draftKey, ...(entry ? [entry.id] : [])); navigate("/diary"); } }} data-testid="diary-cancel">取消</Button>
         <Button className="flex-1" disabled={busy || !form.worn_date} onClick={() => void save()} data-testid="diary-save">{busy ? "保存中…" : state === "photos_pending" ? "保存並重試上傳" : "保存"}</Button>
       </div>
       {picker === "garments" && <GarmentPicker chosen={form.items} onClose={() => setPicker(null)} onDone={(items) => { up({ items }); setPicker(null); }} />}
