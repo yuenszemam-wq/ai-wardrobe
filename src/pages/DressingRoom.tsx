@@ -35,6 +35,7 @@ import { readDraft, writeDraft, clearDraft } from "../doll/drafts";
 import { PropLayer, propSrc } from "../../shared/lookProps";
 import { PropMoveLayer, PropsPanel } from "../doll/PropsPanel";
 import { draftIdFor, dropStudioDraft, newDraftId, putStudioDraft } from "../studioDrafts";
+import { enqueue, localAssetSrc, localDeps } from "../outbox";
 
 type Tab = "clothes" | "layers" | "look" | "pose";
 const TABS: { id: Tab; label: string; Icon: typeof IconShirt }[] = [
@@ -91,6 +92,22 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const [propSel, setPropSel] = useState<string | null>(null);
   const [propMoving, setPropMoving] = useState<string | null>(null);
   const propCutouts = useRef<Record<string, boolean>>({});
+  /** Phase 3.8C：載入時的伺服器版本（保存時作衝突偵測） */
+  const lookUpdated = useRef<string | null>(null);
+  // Phase 3.8C：離線上傳的素材（local:<op>）以 Outbox 內的檔案顯示；已同步的換成伺服器 ID
+  const [localSrc, setLocalSrc] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const need = props.filter((p) => p.version_id.startsWith("local:") && !localSrc[p.version_id]);
+    if (!need.length) return;
+    let live = true;
+    void Promise.all(need.map(async (p) => [p.version_id, await localAssetSrc(p.version_id)] as const)).then((rows) => {
+      if (!live) return;
+      setLocalSrc((m) => { const n = { ...m }; for (const [v, r] of rows) if (r.src) n[v] = r.src; return n; });
+      const real = rows.filter(([, r]) => r.real);
+      if (real.length) setProps((cur) => cur.map((p) => { const hit = real.find(([v]) => v === p.version_id); return hit ? { ...p, asset_id: hit[1].real!.asset, version_id: hit[1].real!.version } : p; }));
+    });
+    return () => { live = false; };
+  }, [props]); // eslint-disable-line react-hooks/exhaustive-deps
   const [bgOpen, setBgOpen] = useState(false);
   const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
   const bgSrc = bg?.type === "image" && bg.image ? `/api/studio/versions/${bg.image.version_id}${bg.image.variant === "cutout" ? "?cutout=1" : ""}` : null;
@@ -203,7 +220,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       const latest = ref ? ml.models.find((x) => x.id === ref.id) : null;
       if (ref && latest && latest.revision > ref.rev) setNotice(`這個造型使用「${modelLabel(m)}」第 ${ref.rev} 版（最新第 ${latest.revision} 版），已按保存時的樣子顯示。可在「外貌 › 身體」更新到最新版本。`);
       if (l) {
-        setExtra(l.look.garments); setWorn(l.worn); setLook(l.appearance); setPoseState(l.pose); setFront(l.front); setName(l.look.name); setFavorite(l.look.is_favorite); setBg(l.look.state?.background ?? null); setProps(l.look.state?.props ?? []);
+        setExtra(l.look.garments); setWorn(l.worn); setLook(l.appearance); setPoseState(l.pose); setFront(l.front); setName(l.look.name); setFavorite(l.look.is_favorite); setBg(l.look.state?.background ?? null); setProps(l.look.state?.props ?? []); lookUpdated.current = l.look.updated_at ?? null;
         if (l.converted) { setNotice("這個造型原本用舊角色保存，已自動換算到新角色。檢查位置後按「保存」即完成轉換。"); setDirty(true); }
       } else {
         setExtra([]); setWorn([]); setLook(DEFAULT_APPEARANCE); setPoseState({}); setFront([]); setName(""); setFavorite(false); setBg(null); setProps([]);
@@ -380,8 +397,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     flat: view === "source" ? selId : null,
     wire: view === "mesh" && !compare ? selId : null,
     background: bg ? { spec: bg, img: bgImg } : null,
-    props: props.map((p) => ({ ...p, src: propSrc(p) })),
-  }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare, bg, bgImg, props]);
+    props: props.map((p) => ({ ...p, src: localSrc[p.version_id] ?? propSrc(p) })),
+  }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare, bg, bgImg, props, localSrc]);
   const mats = useMemo(() => solve(rig, pose), [rig, pose]);
   // 「移到身後」的實際像素效果：停筆後量度一次（低解像度），讓使用者分辨「身後」與「隱藏」
   const [behindStats, setBehindStats] = useState<BehindStats | null>(null);
@@ -1208,8 +1225,19 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       ...(props.length ? { props } : {}),
     };
     const target = asNew ? undefined : id;
+    const body = { name: (asNew ? name.trim() + " 副本" : name.trim()) || "新造型", is_favorite: favorite, state, ...(target && lookUpdated.current ? { base_updated_at: lookUpdated.current } : {}) };
+    // Phase 3.8C：離線或引用離線素材：放入 Outbox（先上傳素材再保存造型）；畫面當作已保存，縮圖於下次在線保存時更新
+    const queueLook = async () => {
+      await enqueue({ kind: "look.save", label: `${target ? "保存" : "新增"}角色造型「${body.name}」`, after: localDeps(state), payload: { id: target ?? null, body } });
+      toast(navigator.onLine ? "已排隊保存（等待素材上傳）" : "離線：角色造型已保存在這部手機，連線後自動同步");
+      setDirty(false); setNotice(""); await discardRecovery();
+      return target;
+    };
+    if (!navigator.onLine || localDeps(state).length) { try { return await queueLook(); } finally { setBusy(false); } }
     try {
-      const res = await api<{ id: string }>(target ? `/api/doll/looks/${target}` : "/api/doll/looks", { method: target ? "PATCH" : "POST", json: { name: (asNew ? name.trim() + " 副本" : name.trim()) || "新造型", is_favorite: favorite, state } });
+      let res: { id: string };
+      try { res = await api<{ id: string; updated_at?: string }>(target ? `/api/doll/looks/${target}` : "/api/doll/looks", { method: target ? "PATCH" : "POST", json: body }); lookUpdated.current = (res as { updated_at?: string }).updated_at ?? lookUpdated.current; }
+      catch (e) { if (!(e instanceof ApiError)) return await queueLook(); throw e; }
       try {
         const blob = await renderer.thumbnail({ ...scene, overlay: null });
         if (blob) await api(`/api/doll/looks/${res.id}/thumb`, { method: "PUT", body: blob, headers: { "content-type": "image/jpeg" } });

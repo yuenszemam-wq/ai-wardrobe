@@ -30,6 +30,8 @@ import Wardrobe from "./pages/Wardrobe";
 import { setLocalAccount } from "./localWardrobe";
 import { ApiError } from "./api";
 import { OfflineBanner } from "./components/OfflineBanner";
+import { OutboxBar } from "./components/OutboxPanel";
+import { startOutbox } from "./outbox";
 
 const AUTH_KEY = "aw:last-auth";
 const OFFLINE_DAYS = 30;
@@ -73,6 +75,8 @@ export default function App() {
       });
   }, []);
 
+  // Phase 3.8C：離線操作佇列（讀取、連線恢復時自動同步）
+  useEffect(() => { startOutbox(); }, []);
   useEffect(() => {
     refresh();
     const on = () => {void setLocalAccount(null);forgetAuth();clearImageMemory();navigator.serviceWorker?.controller?.postMessage({type:"CLEAR_PRIVATE"});setAuth((a) => (a ? { ...a, logged_in: false } : a));};
@@ -139,7 +143,7 @@ export default function App() {
           ) : null}
         </div>
       </AppHeader>}
-      <main className={`px-4 pb-32 ${ownHeader ? "" : "pt-2"}`}>{offline&&<OfflineBanner />}{page}</main>
+      <main className={`px-4 pb-32 ${ownHeader ? "" : "pt-2"}`}>{offline&&<OfflineBanner />}<OutboxBar />{page}</main>
       <TabBar path={path} />
       <Toast />
     </div>

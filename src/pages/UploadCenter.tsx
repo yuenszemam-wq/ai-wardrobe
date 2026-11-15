@@ -4,6 +4,7 @@ import { api, AiStatus, AI_STATUS_LABEL, Garment, ApiError, formatBytes, intakeU
 import { AiHandoffButton, Button, Link, ProgressBar, toast } from "../components/ui";
 import { fillQueue } from "../fillQueue";
 import { fileKey, prepareIntake } from "../imageProcessing";
+import { enqueue, fileOf } from "../outbox";
 import { navigate } from "../router";
 
 /**
@@ -19,7 +20,7 @@ const MAX_FILES = 30;
 const CONCURRENCY = 3;
 const ACCEPT = "image/*,.heic,.heif,image/heic,image/heif";
 
-type ItemState = "waiting" | "preparing" | "uploading" | "done" | "duplicate" | "failed";
+type ItemState = "waiting" | "preparing" | "uploading" | "done" | "duplicate" | "failed" | "queued";
 interface Item {
   file: File;
   key: string;
@@ -35,6 +36,7 @@ interface Item {
 
 const STATE_TEXT: Record<ItemState, string> = {
   waiting: "排隊中",
+  queued: "等待連線（已保存在手機）",
   preparing: "準備中（校驗碼、自動去背）",
   uploading: "上傳中",
   done: "已保存",
@@ -147,7 +149,13 @@ export default function UploadCenter() {
     setItems((cur) => [...cur, ...added]);
   }
 
+  /** Phase 3.8C：離線或網絡中斷：原相保存在這部手機的 Outbox，連線後自動上傳（伺服器以 SHA-256 去重） */
+  async function queueOffline(item: Item) {
+    await enqueue({ kind: "garment.intake", label: `新增衣物相片（${item.file.name || "相片"}）`, payload: {}, files: { file: await fileOf(item.file, item.file.name || "photo.jpg") } });
+    update(item.key, { state: "queued", progress: 1, message: "離線：已保存在這部手機，連線後自動上傳並建立衣物" });
+  }
   async function uploadOne(item: Item) {
+    if (!navigator.onLine) { await queueOffline(item).catch((e) => update(item.key, { state: "failed", message: (e as Error).message })); return; }
     update(item.key, { state: "preparing", progress: 0, message: undefined });
     try {
       const p = await prepareIntake(item.file);
@@ -180,6 +188,8 @@ export default function UploadCenter() {
       }
       throw lastErr;
     } catch (e) {
+      // 網絡中斷（不是伺服器回覆的錯誤）：改為保存到離線佇列
+      if (!(e instanceof ApiError) || e.status === 0) { try { await queueOffline(item); return; } catch { /* 佇列不可用：照舊顯示失敗 */ } }
       update(item.key, { state: "failed", progress: 0, message: (e as Error).message });
     }
   }
@@ -234,9 +244,9 @@ export default function UploadCenter() {
   }, []);
   const garmentCount = groups.filter((group) => group[0].garmentId).length;
   const total = items.length;
-  const finished = items.filter((i) => i.state === "done" || i.state === "duplicate").length;
+  const finished = items.filter((i) => i.state === "done" || i.state === "duplicate" || i.state === "queued").length;
   const failed = items.filter((i) => i.state === "failed").length;
-  const batchProgress = total ? items.reduce((s, i) => s + (i.state === "done" || i.state === "duplicate" ? 1 : i.progress), 0) / total : 0;
+  const batchProgress = total ? items.reduce((s, i) => s + (i.state === "done" || i.state === "duplicate" || i.state === "queued" ? 1 : i.progress), 0) / total : 0;
 
   return (
     <section className="paper px-4 pb-4 pt-7">

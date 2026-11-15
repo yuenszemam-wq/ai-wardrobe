@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { clearImageCaches, imageCacheUsage } from "../imageCache";
 import { localDataBytes, localGarments, storageEstimate, syncWardrobe } from "../localWardrobe";
-import { JobState, Plan, cancelJob, currentJob, onJob, pauseJob, planAssets, planHd, planThumbs, retryFailed, startJob } from "../offlineDownloads";
+import { JobState, Plan, cancelJob, currentJob, onJob, pauseJob, planAssets, planHd, planModels, planThumbs, retryFailed, startJob } from "../offlineDownloads";
 import { useTaxonomy } from "../taxonomy";
 import { timeAgo, useLocalStatus } from "./OfflineBanner";
 import { Button, Sheet, toast } from "./ui";
@@ -16,17 +16,17 @@ export function OfflineWardrobe() {
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof imageCacheUsage>> | null>(null);
   const [est, setEst] = useState<Awaited<ReturnType<typeof storageEstimate>> | null>(null);
   const [job, setJob] = useState<JobState | null>(currentJob);
-  const [plan, setPlan] = useState<{ title: string; kind: "thumbs" | "hd" | "assets"; plan: Plan; guard?: string } | null>(null);
+  const [plan, setPlan] = useState<{ title: string; kind: "thumbs" | "hd" | "assets" | "models"; plan: Plan; guard?: string } | null>(null);
   const [cat, setCat] = useState("");
   const [busy, setBusy] = useState(false);
   const reload = () => { void imageCacheUsage().then(setUsage); void storageEstimate().then(setEst); };
   useEffect(() => { reload(); return onJob((j) => { setJob(j); if (j?.finished) reload(); }); }, []);
   const garments = localGarments() ?? [];
-  async function prepare(kind: "thumbs" | "hd" | "assets", title: string, filter?: (g: (typeof garments)[number]) => boolean) {
+  async function prepare(kind: "thumbs" | "hd" | "assets" | "models", title: string, filter?: (g: (typeof garments)[number]) => boolean) {
     if (!navigator.onLine) { toast("目前離線：連線後才可以下載", "err"); return; }
     setBusy(true);
     try {
-      const p = kind === "thumbs" ? planThumbs() : kind === "assets" ? await planAssets() : await planHd(filter ?? (() => true));
+      const p = kind === "thumbs" ? planThumbs() : kind === "assets" ? await planAssets() : kind === "models" ? await planModels() : await planHd(filter ?? (() => true));
       // 非必要批量下載保護：接近免費額度軟上限時提示（不是官方硬上限）
       const guard = kind === "thumbs" ? undefined : await api<{ background: { allowed: boolean; reason?: string } }>("/api/r2/usage").then((u) => (u.background.allowed ? undefined : u.background.reason)).catch(() => undefined);
       setPlan({ title, kind, plan: p, guard });
@@ -71,6 +71,7 @@ export function OfflineWardrobe() {
           </div>
           <Button variant="ghost" disabled={busy || !!running || !garments.length} data-dl="all" onClick={() => void prepare("hd", "下載全部衣物高清圖")}>下載全部衣物高清圖</Button>
           <Button variant="ghost" disabled={busy || !!running} data-dl="assets" onClick={() => void prepare("assets", "下載角色頭部及髮件素材")}>下載角色及髮件素材</Button>
+          <Button variant="ghost" disabled={busy || !!running} data-dl="models" onClick={() => void prepare("models", "下載角色換裝離線包（身體模型、衣服設定、透明衣物圖、素材庫）")}>下載角色換裝離線包</Button>
           <Button variant="ghost" disabled={busy || !!running} data-dl="clean" onClick={async () => { if (!confirm("清理未指定保留的高清圖片？已指定保留的離線圖片及縮圖不受影響。")) return; const r = await clearImageCaches({ thumbs: false, hd: true, includePinned: false }); toast(`已清理 ${r.hd.count} 張（${mb(r.hd.bytes)}）；保留 ${r.keptPinned} 張`); reload(); }}>清理未指定保留的快取</Button>
         </div>
         {job && <JobView job={job} />}

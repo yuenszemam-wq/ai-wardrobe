@@ -24,7 +24,8 @@ export function OfflineBanner() {
       {open && (
         <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11.5px] text-cream" data-testid="offline-details">
           <li>可以查看已同步的衣物、主頁、主題及已下載的圖片{imgs ? `（縮圖 ${imgs.thumbs} 張、高清 ${imgs.hd} 張）` : ""}。</li>
-          <li>需要網絡：上傳、修改及保存衣物、保存造型、AI 整理、未下載的高清圖片。</li>
+          <li>離線時可以修改衣物資料、加入相片、保存衣服配搭及角色造型：會保存在這部手機的「等待同步」，連線後按次序自動上傳；如另一處已修改，會讓你選擇覆寫、另存副本或捨棄。</li>
+          <li>仍需要網絡：AI 整理、合併衣物、刪除、未下載的高清圖片（可在設定預先下載「角色換裝離線包」）。</li>
           <li>重新連線後會自動在背景同步，只下載有改動的資料。</li>
         </ul>
       )}

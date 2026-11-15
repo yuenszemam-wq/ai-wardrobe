@@ -1,4 +1,5 @@
-import { localGarments } from "../localWardrobe";
+import { localGarments, patchLocalGarment } from "../localWardrobe";
+import { enqueue, fileOf } from "../outbox";
 import { dropCachedGarment, patchCachedGarment } from "../wardrobeList";
 import { WardrobeImage } from "../components/WardrobeImage";
 import { AttributeChoices, BrandInput } from "../components/GarmentChoices";
@@ -81,13 +82,23 @@ export default function GarmentDetail({ id }: { id: string }) {
   const fullImages = (g.images || []).filter((i) => i.image_type !== "thumbnail" && !/heic|heif/.test(i.mime_type));
   const shown = fullImages.find((i) => i.id === viewId) || fullImages.find((i) => i.is_primary) || fullImages[0];
 
+  /** Phase 3.8C：離線或網絡中斷時，修改保存在這部手機（Outbox），連線後以原本版本號同步；另一處已修改＝衝突，由使用者選擇 */
+  async function queuePatch(body: Record<string, unknown>) {
+    if (!g) return;
+    await enqueue({ kind: "garment.patch", label: `修改「${displayName(g)}」`, payload: { id, body, ...(g.version !== undefined ? { expected_version: g.version } : {}) } });
+    const local = { ...g, ...body } as Garment;
+    setG(local); patchCachedGarment(local); await patchLocalGarment(local).catch(() => undefined);
+    toast("離線：修改已保存在這部手機，連線後自動同步");
+  }
   async function patch(body: Record<string, unknown>, msg = "已儲存") {
+    if (!navigator.onLine) return queuePatch(body).catch((e) => toast((e as Error).message, "err"));
     try {
       const updated = await api<Garment>(`/api/garments/${id}`, { method: "PATCH", json: body });
       setG(updated);
       patchCachedGarment(updated);
       toast(msg);
     } catch (e) {
+      if (!(e instanceof ApiError)) { await queuePatch(body).catch((x) => toast((x as Error).message, "err")); return; } // 網絡中斷
       toast((e as Error).message, "err");
     }
   }
@@ -96,6 +107,12 @@ export default function GarmentDetail({ id }: { id: string }) {
     setUploadPct(0);
     try {
       const prepared = await prepareForUpload(file);
+      if (!navigator.onLine) {
+        // 離線：相片保存在這部手機，連線後上傳（以 sha256 去重，重送不會重複）
+        await enqueue({ kind: "garment.image", label: `「${g ? displayName(g) : "衣物"}」的相片`, payload: { garment_id: id, image_type: type }, files: { file: await fileOf(prepared.blob, prepared.filename) } });
+        toast("離線：相片已保存在這部手機，連線後自動上傳");
+        return;
+      }
       const res = await uploadImage("/api/images/upload", { garment_id: id, image_type: type }, prepared.blob, prepared.filename, setUploadPct);
       try {
         const thumb = await makeThumbnail(prepared.blob);

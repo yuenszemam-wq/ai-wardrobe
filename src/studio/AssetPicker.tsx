@@ -63,9 +63,12 @@ export function AssetUploadSheet({ file, onClose, onDone, defaultKind = "decorat
     if (!img) return;
     setBusy(true);
     try {
-      let a = uploaded.current ?? (uploaded.current = await uploadStudioAsset(img, { kind, name, inLibrary: keep === "library", opId: op.current }));
+      // 離線：已去背時直接以去背圖作為素材（透明 PNG），連線後上傳
+      const offlineCut = !navigator.onLine && show === "cutout" && cut.blob ? { ...img, blob: cut.blob, hasAlpha: true } : null;
+      let a = uploaded.current ?? (uploaded.current = await uploadStudioAsset(offlineCut ?? img, { kind, name, inLibrary: keep === "library", opId: op.current, allowOffline: true }));
       let variant: "original" | "cutout" = "original";
-      if (show === "cutout" && cut.blob) { a = cutSaved.current ?? (cutSaved.current = await saveCutout(a.version!.id, cut.blob)); variant = "cutout"; }
+      if (!offlineCut && show === "cutout" && cut.blob) { a = cutSaved.current ?? (cutSaved.current = await saveCutout(a.version!.id, cut.blob)); variant = "cutout"; }
+      if (a.id.startsWith("local:")) toast("離線：素材已保存在這部手機，保存造型後連線會自動上傳");
       onDone(a, variant);
     } catch (e) { toast(`${(e as Error).message}${uploaded.current ? "（原圖已上傳，重試只會補上未完成的部分）" : ""}`, "err"); } finally { setBusy(false); }
   }

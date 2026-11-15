@@ -60,8 +60,15 @@ async function thumbOf(src: HTMLCanvasElement | ImageBitmap) {
   return b;
 }
 
-export async function uploadStudioAsset(img: PreparedImage, opts: { kind: AssetKind; name: string; inLibrary: boolean; opId?: string }): Promise<StudioAsset> {
-  if (!navigator.onLine) throw new Error("目前離線：素材需要連線才可以上傳");
+export async function uploadStudioAsset(img: PreparedImage, opts: { kind: AssetKind; name: string; inLibrary: boolean; opId?: string; allowOffline?: boolean }): Promise<StudioAsset> {
+  if (!navigator.onLine) {
+    if (!opts.allowOffline) throw new Error("目前離線：素材需要連線才可以上傳");
+    // Phase 3.8C：離線素材保存在 Outbox，畫面先使用本機圖片；造型保存時以 local:<op> 引用，連線後按次序上傳再保存造型
+    const { enqueue, fileOf } = await import("../outbox");
+    const op = await enqueue({ id: opts.opId, kind: "studio.asset", label: `素材「${opts.name}」`, payload: { kind: opts.kind, name: opts.name, in_library: opts.inLibrary }, files: { file: await fileOf(img.blob, img.hasAlpha ? "asset.png" : "asset.jpg"), thumb: await fileOf(img.thumb, "thumb") } });
+    const url = URL.createObjectURL(img.blob), now = new Date().toISOString();
+    return { id: `local:${op}:asset`, kind: opts.kind, name: opts.name, is_favorite: false, in_library: opts.inLibrary, created_at: now, updated_at: now, version: { id: `local:${op}:version`, width: img.width, height: img.height, has_alpha: img.hasAlpha, has_cutout: false, url, cutout_url: null, thumb_url: url } };
+  }
   const fd = new FormData();
   fd.set("file", img.blob, img.hasAlpha ? "asset.png" : "asset.jpg");
   fd.set("thumb", img.thumb, "thumb");

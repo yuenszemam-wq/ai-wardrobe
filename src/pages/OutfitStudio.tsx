@@ -21,6 +21,8 @@ import { useTaxonomy } from "../taxonomy";
 import { loadFullList } from "../wardrobeList";
 import { BackgroundSpec, CANVAS_H, CANVAS_W, Layer, LayerMask, MAX_LAYERS, duplicateLayer, garmentIdsOf, moveLayer, reorderByTopFirstIds, sameScene, slotFor, toLayerLocal, toTopFirst } from "../../shared/studioScene";
 import { AlphaGrid, alphaAt, alphaGrid, drawLayer, exportScene, loadImage, maskedCanvas, paintBackground, releaseImageCache, sceneThumb } from "../studio/render";
+import { enqueue, localAssetSrc, localDeps } from "../outbox";
+import { ApiError } from "../api";
 import { StudioDraft, draftIdFor, dropStudioDraft, getStudioDraft, newDraftId, putStudioDraft, takeLegacyOutfitDraft } from "../studioDrafts";
 import { BackgroundPanel } from "../studio/BackgroundPanel";
 import { patchStudioAsset, prepareImage, uploadStudioAsset, versionToGarment } from "../studio/assets";
@@ -368,16 +370,57 @@ export default function OutfitStudio({ id }: { id?: string }) {
     return sc.layers.every((l) => l.hidden || !srcs[l.layer_id] || !!rendered(l));
   };
   const makeThumb = async (sc: Scene) => { if (!sceneReady(sc)) return undefined; try { return await sceneThumb(sc.layers, sc.background, { layer: (l) => rendered(l)?.canvas ?? null, background: bgImg }); } catch { return undefined; } };
+  /**
+   * Phase 3.8C：離線保存。造型放入 Outbox（按次序：先上傳離線素材，再保存造型；以 base_updated_at 偵測衝突）。
+   * 畫面當作已保存；草稿刪除（內容已在 Outbox）。新造型同步完成後自動轉到正式網址。
+   */
+  const pendingOp = useRef<string | null>(null);
+  async function queueSave(body: Record<string, unknown>) {
+    const deps = localDeps(scene);
+    const op = await enqueue({ kind: "outfit.save", label: `${id ? "保存" : "新增"}造型「${String(body.name)}」`, after: deps, payload: { id: id ?? null, body }, id: !id && createOp.current ? createOp.current : undefined });
+    pendingOp.current = op;
+    setSavedKey(keyOf(scene, String(body.name), notes, favorite)); setName(String(body.name));
+    await dropStudioDraft(draftId.current); setDraftState("idle");
+    toast(navigator.onLine ? "已排隊保存（等待素材上傳）" : "離線：造型已保存在這部手機，連線後自動同步");
+    return id ?? null;
+  }
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; kind: string; result: { id: string; updated_at?: string } }>).detail;
+      if (d.id !== pendingOp.current) return;
+      pendingOp.current = null;
+      if (d.result.updated_at) updatedAt.current = d.result.updated_at;
+      if (!id) navigate(`/outfits/${d.result.id}`, true); else toast("離線保存的造型已同步");
+    };
+    window.addEventListener("aw:outbox-done", on);
+    return () => window.removeEventListener("aw:outbox-done", on);
+  }, [id]);
+  // 草稿內的離線素材：重新打開時以 Outbox 的檔案顯示；已同步的換成伺服器 ID
+  useEffect(() => {
+    const locals = scene.layers.filter((l) => l.asset_version_id?.startsWith("local:") && !srcs[l.layer_id]?.startsWith("blob:"));
+    if (!locals.length) return;
+    let live = true;
+    void Promise.all(locals.map(async (l) => [l, await localAssetSrc(l.asset_version_id!)] as const)).then((rows) => {
+      if (!live) return;
+      setSrcs((m) => { const n = { ...m }; for (const [l, r] of rows) if (r.src) n[l.layer_id] = r.src; return n; });
+      const real = rows.filter(([, r]) => r.real);
+      if (real.length) setScene((sc) => ({ ...sc, layers: sc.layers.map((l) => { const hit = real.find(([x]) => x.layer_id === l.layer_id); return hit ? { ...l, asset_id: hit[1].real!.asset, asset_version_id: hit[1].real!.version } : l; }) }));
+    });
+    return () => { live = false; };
+  }, [scene.layers]); // eslint-disable-line react-hooks/exhaustive-deps
   async function save(): Promise<string | null> {
     if (!scene.layers.length && !id) { toast("請先加入衣物或素材", "err"); return null; }
-    if (!navigator.onLine) { toast("目前離線：修改已保存為這部手機的草稿，連線後再保存", "err"); return null; }
     setSaving(true);
     try {
       const thumb = await makeThumb(scene);
       // 建立新造型：同一個 op_id 重試（網絡中斷後）不會建立兩套
       if (!id && !createOp.current) createOp.current = newOp();
       const body = { name: name.trim() || "新穿搭", notes, is_favorite: favorite, layers: scene.layers, background: scene.background, ...(thumb ? { thumb } : {}), ...(id && updatedAt.current ? { base_updated_at: updatedAt.current } : {}), ...(id && loaded?.status === "review" && scene.layers.length ? { status: "active" } : {}), ...(!id ? { op_id: createOp.current } : {}) };
-      const res = await api<Loaded>(id ? `/api/outfits/${id}` : "/api/outfits", { method: id ? "PATCH" : "POST", json: body });
+      // 離線，或場景引用仍未上傳的離線素材：經 Outbox 按次序保存
+      if (!navigator.onLine || localDeps(scene).length) return await queueSave(body);
+      let res: Loaded;
+      try { res = await api<Loaded>(id ? `/api/outfits/${id}` : "/api/outfits", { method: id ? "PATCH" : "POST", json: body }); }
+      catch (e) { if (!(e instanceof ApiError)) return await queueSave(body); throw e; } // 網絡中斷：改為離線保存
       updatedAt.current = res.updated_at;
       // 伺服器記錄的圖片版本（新加入的衣物）寫回圖層，畫面與保存一致
       const pinned = new Map(res.layers.map((l) => [l.layer_id, l.image_id ?? null]));
