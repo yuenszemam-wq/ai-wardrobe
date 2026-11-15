@@ -44,8 +44,8 @@
     "TOKEN_DAILY_CALL_LIMIT": "3000",
     "TOKEN_DAILY_UPLOAD_MB": "800",
     "UPLOAD_LINK_MAX_MINUTES": "1440",
-    // AI Lab：預設關閉；配額為第一輪保守測試值（伺服器上限，設定頁只可再調低）
-    "AI_LAB_ENABLED": "false",
+    // AI Lab：伺服器允許（2026-11-16 擁有者確認，Workers Free）；實際使用仍要在設定頁開啟。配額為第一輪保守測試值
+    "AI_LAB_ENABLED": "true",
     "AI_PROVIDER": "workers-ai",
     "AI_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
     "AI_DAILY_REQUEST_LIMIT": "50",

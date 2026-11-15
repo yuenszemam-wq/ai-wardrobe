@@ -4,7 +4,7 @@
  * 不展示任何 API Key、Cloudflare Token 或私人圖片網址。
  */
 import { useEffect, useState } from "react";
-import { AiLabEvent, AiLabStatus, aiLabEvents, aiLabSettings, aiLabStatus, aiLabTest } from "../aiLab";
+import { AiLabEvent, AiLabStatus, aiLabAcceptLicense, aiLabEvents, aiLabSettings, aiLabStatus, aiLabTest } from "../aiLab";
 import { Button, Spinner, toast } from "./ui";
 
 const STATUS_TEXT: Record<string, string> = { success: "成功", invalid_output: "輸出不合格", failed: "失敗", timeout: "逾時", uncertain: "不確定（保留預算）", blocked: "被配額阻擋", reserved: "處理中" };
@@ -37,7 +37,18 @@ export function AiLabPanel() {
           {row("Prompt 版本", st.prompt_version)}
           {row("AI Binding", st.binding ? "可用" : "不可用", "binding")}
           {row("環境", st.environment ?? "—")}
+          {row("Meta Llama 3.2 授權", st.license ? `已接受（${new Date(st.license.accepted_at).toLocaleString("zh-HK")}）` : "未在此 App 記錄", "license")}
         </div>
+        {!st.license && st.server_enabled && st.binding && (
+          <div className="mt-2 rounded-2xl bg-[color-mix(in_srgb,var(--aw-line)_10%,transparent)] p-3 text-[12px]">
+            <p>首次使用模型前須接受 Meta 的 <a className="underline" href="https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/LICENSE" target="_blank" rel="noreferrer">Llama 3.2 License</a> 及 <a className="underline" href="https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/USE_POLICY.md" target="_blank" rel="noreferrer">Acceptable Use Policy</a>。按下後會向模型送出官方的 "agree" 請求。</p>
+            <Button className="mt-2" disabled={busy} data-testid="ai-lab-license" onClick={async () => {
+              if (!confirm("確認接受 Meta Llama 3.2 License 及 Acceptable Use Policy？")) return;
+              setBusy(true);
+              try { await aiLabAcceptLicense(); toast("已接受授權"); await load(); } catch (e) { toast((e as Error).message, "err"); } finally { setBusy(false); }
+            }}>接受 Meta Llama 3.2 授權</Button>
+          </div>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button disabled={busy || !st.server_enabled} onClick={() => void save({ enabled: !st.settings.enabled }, st.settings.enabled ? "已關閉 AI Lab" : "已開啟 AI Lab")} data-testid="ai-lab-toggle">{st.settings.enabled ? "關閉 AI Lab" : "開啟 AI Lab"}</Button>
           <Button variant="ghost" disabled={busy} onClick={() => void save({ killed: !st.settings.killed }, st.settings.killed ? "已解除緊急停止" : "已緊急停止所有新 AI 請求")} data-testid="ai-lab-kill">{st.settings.killed ? "解除緊急停止" : "緊急停止（Kill Switch）"}</Button>

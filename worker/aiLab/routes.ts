@@ -27,6 +27,7 @@ export async function handleAiLab(req: Request, env: AiLabEnv, actor: Actor, pat
         limits: { daily_requests: cfg.dailyLimit, monthly_requests: cfg.monthlyLimit, daily_neurons: cfg.neuronBudget, max_batch: cfg.maxBatch, max_concurrency: cfg.maxConcurrency, paid_usage: cfg.paidUsage },
         pricing: cfg.pricing ? { input_neurons_per_m: cfg.pricing.inNeuronsPerM, output_neurons_per_m: cfg.pricing.outNeuronsPerM, usd_per_1k_neurons: cfg.pricing.usdPer1kNeurons, version: cfg.pricing.version, source: cfg.pricing.source } : null,
         usage: await usageSummary(env, cfg),
+        license: await env.DB.prepare("SELECT value FROM app_settings WHERE key = 'ai_lab_license'").first<{ value: string }>().then((r) => (r ? JSON.parse(r.value) : null)).catch(() => null),
         notes: ["Cloudflare 免費額度（每日 10,000 Neurons）屬整個帳戶，其他 Worker 亦可能使用；本地計數不能絕對保證整個帳戶不產生費用。", "Cloudflare Dashboard 用量有延遲，不能當作即時上限。"],
       });
     }
@@ -46,6 +47,30 @@ export async function handleAiLab(req: Request, env: AiLabEnv, actor: Actor, pat
       return json({ settings: next, active: cfg.active, reason: cfg.reason, limits: { daily_requests: cfg.dailyLimit, monthly_requests: cfg.monthlyLimit, daily_neurons: cfg.neuronBudget } });
     }
     if (path === "/api/ai-lab/test" && method === "POST") return json(await testConnection(env, actor));
+    if (path === "/api/ai-lab/accept-license" && method === "POST") {
+      // 擁有者在設定頁明確按下才執行：依官方文件向模型送出 {"prompt":"agree"}（接受 Meta License 及 Acceptable Use Policy）
+      const cfg = await effectiveConfig(env);
+      if (!cfg.serverEnabled) throw new HttpError(503, "ai_lab_disabled", "伺服器未開啟 AI Lab");
+      if (!cfg.bindingPresent) throw new HttpError(503, "no_binding", "Workers AI Binding 不可用");
+      const body = await readJson<{ confirm?: unknown }>(req);
+      if (body.confirm !== true) throw new HttpError(400, "confirm_required", "需要明確確認接受授權");
+      let ok = false, note = "";
+      try { await env.AI!.run(cfg.model, { prompt: "agree" }); ok = true; }
+      catch (e) {
+        const msg = String((e as Error)?.message ?? e);
+        // 已接受過時，部分情況會回傳一般錯誤訊息；只要不是 5016（未同意）就視為已接受
+        if (!/5016|not agreed/i.test(msg)) { ok = true; note = "模型回應非預期內容，但沒有回報未同意授權"; } else note = msg.slice(0, 200);
+      }
+      const day = new Date().toISOString().slice(0, 10), now = nowIso();
+      await env.DB.prepare(
+        `INSERT INTO ai_usage_events (request_id, user_id, provider, model_id, prompt_version, operation_type, request_status, reserved_neurons, estimated_neurons, usage_source, day, created_at, settled_at)
+         VALUES (?,?,?,?,?,'license',?,0,1,'estimate',?,?,?)`,
+      ).bind(`license-${crypto.randomUUID()}`, actor.id, cfg.provider, cfg.model, PROMPT_VERSION, ok ? "success" : "failed", day, now, now).run().catch(() => {});
+      if (!ok) throw new HttpError(502, "license_failed", `未能接受授權：${note}`);
+      await env.DB.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('ai_lab_license', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+        .bind(JSON.stringify({ model: cfg.model, accepted_at: now, by: actor.id }), now).run();
+      return json({ accepted: true, accepted_at: now, note: note || null });
+    }
     if (path === "/api/ai-lab/recognize" && method === "POST") {
       const { bytes, fields } = await readUploadBody(req, env);
       return json(await recognize(env, actor, {

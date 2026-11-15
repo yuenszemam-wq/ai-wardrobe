@@ -288,6 +288,18 @@ console.log("Kill Switch、測試連線、價格");
   check("使用記錄 API", evs.status === 200 && evs.body.events.length > 0 && !JSON.stringify(evs.body).includes("base64"));
 }
 
+console.log("接受授權");
+{
+  const no = await call("POST", "/api/ai-lab/accept-license", { body: {} });
+  check("沒有明確確認 → 400，不送出 agree", no.status === 400 && lastInput?.input?.prompt !== "agree");
+  nextReply = { response: "Thank you for agreeing" };
+  const ok = await call("POST", "/api/ai-lab/accept-license", { body: { confirm: true } });
+  check("擁有者確認後送出官方 agree 請求", ok.status === 200 && lastInput.input.prompt === "agree" && Object.keys(lastInput.input).length === 1, lastInput.input);
+  check("狀態顯示已接受授權", (await call("GET", "/api/ai-lab/status")).body.license?.accepted_at);
+  const anon = await call("POST", "/api/ai-lab/accept-license", { body: { confirm: true }, noAuth: true });
+  check("未登入不能接受授權", anon.status === 401 || anon.status === 403, anon.status);
+}
+
 console.log("人工確認：不覆寫鎖定欄位");
 {
   await resetUsage();

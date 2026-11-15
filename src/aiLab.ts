@@ -20,11 +20,13 @@ export interface AiLabStatus {
     avg_latency_ms: number | null; last_used_at: string | null; month_neurons: number; month_cost_usd_if_billed: number;
   };
   notes: string[];
+  license: { model: string; accepted_at: string } | null;
 }
 export interface AiLabEvent { request_id: string; garment_id: string | null; operation_type: string; request_status: string; actual_neurons: number | null; estimated_neurons: number | null; usage_source: string; latency_ms: number | null; error_code: string | null; created_at: string }
 
 export const aiLabStatus = () => api<AiLabStatus>("/api/ai-lab/status");
 export const aiLabSettings = (body: Partial<AiLabStatus["settings"]>) => api<{ settings: AiLabStatus["settings"]; active: boolean; reason: string | null }>("/api/ai-lab/settings", { method: "POST", json: body });
+export const aiLabAcceptLicense = () => api<{ accepted: boolean; accepted_at: string; note: string | null }>("/api/ai-lab/accept-license", { method: "POST", json: { confirm: true } });
 export const aiLabTest = () => api<{ ok: boolean; latency_ms: number; reply: string }>("/api/ai-lab/test", { method: "POST" });
 export const aiLabEvents = () => api<{ events: AiLabEvent[] }>("/api/ai-lab/events").then((r) => r.events);
 
