@@ -4,7 +4,7 @@
 > 只記錄實際完成的動作；未部署、未測試的項目會明確標示。
 
 ## 1. 最後更新時間
-2026-11-16 05:52（香港時間）— 第 1 次執行
+2026-11-16 05:55（香港時間）— 第 1 次執行
 
 ## 2. 整體進度
 
@@ -30,7 +30,8 @@
 - 🔄 migration `0017_cutout_edits.sql`（只新增表）：**未套用到任何遠端 D1**；未套用時去背圖照常保存，只是沒有跨衣物來源記錄
 - ✅ 另存為新衣物（不重複存原圖、返回同一原圖繼續；Chromium 測試通過）
 - ✅ 入口：衣物詳情「編輯圖片／手動去背」、CutoutSheet「手動去背／以此結果手動修正」（上傳完成頁→?cutout=1 亦經此）
-- ⬜ 入口：創作工作室素材上傳（AssetUploadSheet，CutoutStudio 已支援 blob 模式，未接上）
+- ✅ 入口：創作工作室素材上傳「手動去背／選取」（commit `7ec4b9e`；素材沿用現有 prepareImage，長邊上限 3000px）
+- ✅ 測試 id 改用 `cs-` 前綴（原本 `studio-canvas`／`studio-panel` 與衣服配搭工作室重複）
 - ✅ Segmentation Provider Interface（`src/cutoutStudio/segmentation.ts`，只有 ManualFloodProvider）
 - ✅ Preview 部署成功（commit 0c84ec6）：首頁 200、`/api/cutout-edits` 未登入 401（只做了這兩個 HTTP 檢查；**未在 Preview 登入實際操作，未做 iPhone 實機**）
 - ✅ PR #25 GitHub Actions CI（validate）通過（包括 cutout-studio.mjs、cutout-studio-ui.mjs；WebKit 步驟為 continue-on-error，個別結果未細查）
@@ -46,15 +47,16 @@
 - ✅ 批量辨認（`AiBatchRecognize.tsx`，在 AI 待整理「待 AI 辨認」分頁）
 - ⬜ 進階屬性（袖長等）目前只保存在建議 payload（`ai_lab.attributes`），確認時不會寫入衣物 attributes（現有 decide 只處理固定欄位）
 - ⬜ 真實 Workers AI 連線測試、30 張 ground truth 測試（**需要 Sally 先決定是否接受 Meta 授權**）
-- 🔄 PR #26（draft）已開：https://github.com/yuenszemam-wq/ai-wardrobe/pull/26 ；Preview 建置結果待查
+- ✅ PR #26（draft）Workers Builds Preview 成功（commit ef57507）：首頁 200、`/api/ai-lab/status` 未登入 401；AI Lab 在 Preview 仍為關閉
+- 🔄 PR #26 GitHub Actions CI 執行中，結果待查
 
 ## 3. 正在做甚麼
-- 規格 A：PR #25 CI 通過、Preview 已部署，等 Sally 驗收。
+- 規格 A：PR #25 新 commit `7ec4b9e`（素材上傳入口）已 push，CI／Preview 會重新執行；之前 commit 0c84ec6 的 CI 通過。
 - 規格 B：PR #26 已開，等 Workers Builds／CI 結果；真實 AI 測試等 Sally 決定授權。
 
 ## 4. 下一步
 1. 查 PR #26 的 Workers Builds 及 CI（validate）結果；失敗就在 `feature/ai-lab-workers-vision` 修正。
-2. 規格 A 餘項：創作工作室素材上傳 `src/studio/AssetPicker.tsx` 的 AssetUploadSheet 接上 `CutoutStudio`（`target={{kind:"blob", blob, name}}`、`onExport`）。
+2. 查 PR #25 新 commit `7ec4b9e` 的 CI。
 3. 規格 B 餘項（不需要 Sally 決定的部分）：AI 建議的進階屬性在 AI 待整理畫面顯示；30 張測試集的評估腳本（讀 ground truth JSON，計算主分類／子分類／主色準確率），等 Sally 提供圖片。
 4. Sally 接受授權並開啟 Preview 後：少量真實請求 → 對照 Cloudflare Dashboard 用量 → 30–50 張測試報告。
 5. 若兩份規格都只剩等待 Sally 驗收：只做健康檢查。
@@ -75,11 +77,11 @@
 - 分支 `claude/ai-wardrobe-cutout-ai-lab-nh3w0e`（規格 A，系統指定的開發分支名稱）
 - PR #25（draft）：https://github.com/yuenszemam-wq/ai-wardrobe/pull/25
 - 規格 A Preview：https://claude-ai-wardrobe-cutout-ai-lab-nh3w0e-ai-wardrobe.yuenszemam.workers.dev （使用 Preview D1／R2）
-- 規格 B：分支 `feature/ai-lab-workers-vision`、PR #26（draft）https://github.com/yuenszemam-wq/ai-wardrobe/pull/26 、Preview 待確認
+- 規格 B：分支 `feature/ai-lab-workers-vision`、PR #26（draft）https://github.com/yuenszemam-wq/ai-wardrobe/pull/26 、Preview https://feature-ai-lab-workers-vision-ai-wardrobe.yuenszemam.workers.dev （AI Lab 關閉）
 
 ## 8. 測試結果
 - `node test/cutout-studio.mjs`：52 項通過（Node，非瀏覽器；2000×3000 魔術棒約 120 ms、柔化約 880 ms）
-- `node test/cutout-studio-ui.mjs`（Chromium，模擬 iPhone）：55 項通過
+- `node test/cutout-studio-ui.mjs`（Chromium，模擬 iPhone）：57 項通過（含素材上傳手動去背）
 - build、typecheck 通過；回歸 cutout、e2e、doll-api、phase39a2、39a21、39a3、38c、d1-limits、phase39a2-ui、39a21-ui、39a3-ui、38-wardrobe 通過
 - 未測試：WebKit（本機未安裝，CI continue-on-error）、iPhone 實機、Preview 內實際操作
 - 規格 B：`node test/ai-lab.mjs` 67 項通過（Mock env.AI）；回歸 ai-intake、organize、e2e、taxonomy、d1-limits、doll-api、phase39b1、39b2、38c 通過；build、typecheck、`wrangler deploy --dry-run`（只驗證設定）通過。`node test/ai-lab-ui.mjs`（Chromium）14 項通過；回歸 phase38-ui、38b-ui、39a11-ui、38a1-home、38-wardrobe 通過。真實 Workers AI：未測試
