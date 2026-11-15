@@ -143,8 +143,8 @@ export function syncWardrobe(opts: { throttleMs?: number; full?: boolean } = {})
       const gone = [...fps.keys()].filter((id) => !next.has(id));
       if (!opts.full && memory) for (const g2 of memory) if (!next.has(g2.id) && !gone.includes(g2.id)) gone.push(g2.id);
       const rows: (Garment & { _fp?: string })[] = [];
-      for (let i = 0; i < need.length; i += 200) {
-        const r = await api<{ garments: (Garment & { _fp?: string })[] }>("/api/sync/garments", { method: "POST", json: { ids: need.slice(i, i + 200) } });
+      for (let i = 0; i < need.length; i += 80) {
+        const r = await api<{ garments: (Garment & { _fp?: string })[] }>("/api/sync/garments", { method: "POST", json: { ids: need.slice(i, i + 80) } });
         if (g !== gen) throw new Error("帳戶已切換");
         rows.push(...r.garments);
       }

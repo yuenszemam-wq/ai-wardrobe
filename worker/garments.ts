@@ -718,6 +718,11 @@ export async function syncManifest(env: Env, since?: string | null) {
 export async function syncRows(env: Env, ids: unknown) {
   const list = (Array.isArray(ids) ? ids : []).filter((x): x is string => typeof x === "string" && /^[\w-]{1,60}$/.test(x)).slice(0, 200);
   if (!list.length) return { garments: [] };
-  const { results } = await env.DB.prepare(`${SYNC_SELECT} WHERE g.status != 'archived' AND g.id IN (${list.map(() => "?").join(",")})`).bind(...list).all<Record<string, unknown>>();
+  // D1 每個查詢最多 100 個綁定參數（超過會出現「too many SQL variables」→ 500）：每批 80 件
+  const results: Record<string, unknown>[] = [];
+  for (let i = 0; i < list.length; i += 80) {
+    const part = list.slice(i, i + 80);
+    results.push(...(await env.DB.prepare(`${SYNC_SELECT} WHERE g.status != 'archived' AND g.id IN (${part.map(() => "?").join(",")})`).bind(...part).all<Record<string, unknown>>()).results);
+  }
   return { garments: results.map((r) => { const g = garmentToJson(r); return { ...g, _fp: fnv(stableJson(garmentToJson(r))) }; }) };
 }

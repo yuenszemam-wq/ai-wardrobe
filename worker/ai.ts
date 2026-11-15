@@ -973,14 +973,19 @@ export async function setAiStatus(env: Env, actor: Actor, ids: string[], status:
   if (!["pending_ai", "needs_rework", "done", "failed"].includes(status)) throw new HttpError(400, "bad_status", "不支援的狀態");
   const list = (ids || []).map(String).slice(0, 200);
   if (!list.length) throw new HttpError(400, "missing_ids", "需要 garment_ids");
-  const res = await env.DB.prepare(
-    `UPDATE garments SET ai_status = ?, ai_claimed_at = NULL, ai_claimed_by = NULL, updated_at = ?, version = version + 1
-     WHERE id IN (${list.map(() => "?").join(",")}) AND ai_status IS NOT NULL`,
-  )
-    .bind(status, nowIso(), ...list)
-    .run();
-  await audit(env, actor, "ai.set_status", undefined, { status, count: res.meta.changes });
-  return { updated: res.meta.changes };
+  // D1 每個查詢最多 100 個綁定參數：分批（每批 80 件＋2 個參數）
+  const now = nowIso();
+  const stmts = [];
+  for (let i = 0; i < list.length; i += 80) {
+    const part = list.slice(i, i + 80);
+    stmts.push(env.DB.prepare(
+      `UPDATE garments SET ai_status = ?, ai_claimed_at = NULL, ai_claimed_by = NULL, updated_at = ?, version = version + 1
+       WHERE id IN (${part.map(() => "?").join(",")}) AND ai_status IS NOT NULL`,
+    ).bind(status, now, ...part));
+  }
+  const updated = (await env.DB.batch(stmts)).reduce((n, r) => n + (r.meta?.changes ?? 0), 0);
+  await audit(env, actor, "ai.set_status", undefined, { status, count: updated });
+  return { updated };
 }
 
 // ───────────────────────── 每分鐘維護 ─────────────────────────

@@ -10,6 +10,8 @@ class Stmt {
   }
   bind(...p) {
     for (const v of p) if (v === undefined) throw new Error("D1_TYPE_ERROR: undefined bind in: " + this.sql);
+    // 與正式 D1 相同：每個查詢最多 100 個綁定參數
+    if (p.length > 100) throw new Error("too many SQL variables (" + p.length + " > 100): SQLITE_ERROR");
     return new Stmt(this.db, this.sql, p);
   }
   _s() {

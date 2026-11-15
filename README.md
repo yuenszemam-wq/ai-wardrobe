@@ -37,9 +37,13 @@ npx wrangler d1 migrations apply DB --remote
 
 `0012_r2_usage.sql`（只新增 `r2_usage` 統計表）已於 2026-11-14 經 Cloudflare D1 API 套用到正式及預覽資料庫並記錄在 `d1_migrations`。未套用時 App 正常運作，只是 R2 用量頁沒有操作次數。回復：此表只供統計，可直接 `DROP TABLE r2_usage`，不影響其他資料。
 
+`0015_studio_stability.sql`、`0016_wardrobe_share.sql`（只新增欄位、資料表及索引）已於 2026-11-15 經 Cloudflare D1 API 套用到正式及預覽資料庫並記錄在 `d1_migrations`。之前未套用時，分享頁顯示「分享功能需要先套用資料庫遷移 0016」。
+
+**D1 限制：每個查詢最多 100 個綁定參數**（超過會出現 `too many SQL variables` → 500）。`IN (...)` 清單一律分批（每批 ≤ 80）；`test/harness.mjs` 的模擬 D1 同樣限制 100 個，`test/d1-limits.mjs` 以 150 件衣物測試同步及 AI 狀態批次更新。
+
 ### Phase 3.8B：本機優先、離線及 R2 用量
 
-- 本機衣櫃：IndexedDB `aw-local-<帳戶>`（衣物、同步資料、本機副本、3.8C 預留 outbox）。同步：`GET /api/sync/garments/manifest`（全部衣物 id＋指紋；digest 不變只回 `same`）→ `POST /api/sync/garments`（只讀取指紋改變的衣物，最多 200 件／次）；清單沒有的衣物＝已刪除或封存。
+- 本機衣櫃：IndexedDB `aw-local-<帳戶>`（衣物、同步資料、本機副本、3.8C 預留 outbox）。同步：`GET /api/sync/garments/manifest`（全部衣物 id＋指紋；digest 不變只回 `same`）→ `POST /api/sync/garments`（只讀取指紋改變的衣物；App 每次送 80 件，伺服器最多接受 200 件並以每批 80 件查詢，因為 D1 每個查詢最多 100 個綁定參數）；清單沒有的衣物＝已刪除或封存。
 - 離線安全策略：伺服器確認登入才開啟本機資料；401 鎖定但保留；網絡失敗時最近 30 日內成功登入的帳戶可唯讀查看；登出刪除該帳戶本機資料庫及私人快取。
 - Service Worker（`aw-shell-v4`）安裝時預先保存 App Shell 及其 JS／CSS／圖示，可離線冷啟動。
 - R2 用量頁：`GET /api/r2/usage`。官方數據需要 Worker Secret `CF_API_TOKEN`（只需 Account › Account Analytics › Read）；`CF_ACCOUNT_ID` 已在 `wrangler.jsonc` vars。Worker 內所有 `env.IMAGES` 操作經統一包裝計數（`worker/r2usage.ts`）。
