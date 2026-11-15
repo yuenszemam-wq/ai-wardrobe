@@ -4,7 +4,7 @@
 > 只記錄實際完成的動作；未部署、未測試的項目會明確標示。
 
 ## 1. 最後更新時間
-2026-11-16 06:30（香港時間）— 第 1 次執行
+2026-11-16 05:32（香港時間）— 第 1 次執行
 
 ## 2. 整體進度
 
@@ -24,37 +24,42 @@
 - ✅ 自由套索／多邊形套索／矩形選取（引擎：polygonSelection／rectSelection）
 - ✅ 邊緣修正（引擎：feather／morph／smooth／defringe white／color）
 - ✅ Undo／Redo（引擎：MaskHistory，RLE 壓縮區塊）
-- 🔄 工作室 UI `src/cutoutStudio/CutoutStudio.tsx`：已寫好並 build／typecheck 通過，**瀏覽器測試未完成**
-- 🔄 觸控手勢（已實作：雙指縮放移動、滾輪、Pencil 時手指只移動、pointercancel；未測試）
-- 🔄 儲存（`studioIO.ts`：原解析度 PNG、驗證 alpha、/api/images/upload、縮圖、`POST /api/cutout-edits`；遮罩不另存 R2，由去背圖 alpha÷原圖 alpha 還原；未做 UI 測試）
+- ✅ 工作室 UI `src/cutoutStudio/CutoutStudio.tsx`（Chromium 測試通過；WebKit／iPhone 實機未測試）
+- ✅ 觸控手勢（雙指縮放不誤擦、滾輪、縮放後筆刷位置已在 Chromium 以合成 PointerEvent 測試；Apple Pencil 及實機未測試）
+- 🔄 儲存（`studioIO.ts`：原解析度 PNG、驗證 alpha、/api/images/upload、縮圖、`POST /api/cutout-edits`；遮罩不另存 R2，由去背圖 alpha÷原圖 alpha 還原；Chromium UI 測試通過）
 - 🔄 migration `0017_cutout_edits.sql`（只新增表）：**未套用到任何遠端 D1**；未套用時去背圖照常保存，只是沒有跨衣物來源記錄
-- 🔄 另存為新衣物（已實作：只上傳新去背圖，cutout_edits 參照原圖；保存後返回同一原圖繼續；未測試）
+- ✅ 另存為新衣物（不重複存原圖、返回同一原圖繼續；Chromium 測試通過）
 - ✅ 入口：衣物詳情「編輯圖片／手動去背」、CutoutSheet「手動去背／以此結果手動修正」（上傳完成頁→?cutout=1 亦經此）
 - ⬜ 入口：創作工作室素材上傳（AssetUploadSheet，CutoutStudio 已支援 blob 模式，未接上）
 - ✅ Segmentation Provider Interface（`src/cutoutStudio/segmentation.ts`，只有 ManualFloodProvider）
-- ⬜ 測試／Preview
+- 🔄 測試／Preview：PR #25（draft）已開；Workers Builds 建置中，Preview URL 待確認
 
 ### 規格 B：AI Lab Phase 1
 - ⬜ 尚未開始
 
 ## 3. 正在做甚麼
-- 規格 A：分支 `claude/ai-wardrobe-cutout-ai-lab-nh3w0e`，最後 commit `0f9e34d`（工作室 UI＋入口）。正在寫 Playwright 測試 `test/cutout-studio-ui.mjs`。
+- 規格 A：分支 `claude/ai-wardrobe-cutout-ai-lab-nh3w0e`，最後 commit `0c84ec6`，PR #25（draft，不合併）。等待 Workers Builds Preview 結果。
 
 ## 4. 下一步
-1. 寫並執行 `test/cutout-studio-ui.mjs`（Chromium＋WebKit）：開啟工作室、擦除、Undo／Redo、魔術棒、套索、儲存→確認上傳 PNG 有透明像素、原圖 sha 不變、另存新衣物。加入 CI workflow。
-2. 接上 AssetUploadSheet 的手動去背（blob 模式）。
-3. 開 PR（不合併），等 Workers Builds Preview URL。
-4. 然後開始規格 B（獨立分支 `feature/ai-lab-workers-vision`，從 main 開）。
+1. 查 PR #25 的 Workers Builds 及 GitHub Actions CI 結果，記錄 Preview URL；CI 失敗就修。
+2. 規格 A 餘項：AssetUploadSheet（創作工作室素材上傳）接上 CutoutStudio blob 模式。
+3. 開始規格 B：從 main 開 `feature/ai-lab-workers-vision`。先讀 `worker/ai.ts`（ai_suggestions 流程）、migrations 0004、`shared/taxonomy.ts`。Workers AI binding 要加到 wrangler.jsonc（`"ai": {"binding": "AI"}`），預設 AI_LAB_ENABLED=false。Meta Llama 3.2 Vision 授權需要 Sally 同意，不可自動接受。
 
 ## 5. 問題及已嘗試方法
 - `gh auth status` 顯示 GH_TOKEN 無效；改用 GitHub MCP 工具及 git（經 proxy）操作，git fetch 正常。
 
 ## 6. 等待 Sally 決定
+- 規格 A：migration `0017_cutout_edits.sql`（只新增表）是否套用到 Preview／正式 D1（未套用時功能仍可用，只是缺跨衣物來源記錄）。
+- 規格 A：PR #25 實機驗收後才合併。
 - （暫無）
 
 ## 7. 分支／PR／Preview
 - 分支 `claude/ai-wardrobe-cutout-ai-lab-nh3w0e`（規格 A，系統指定的開發分支名稱）
+- PR #25（draft）：https://github.com/yuenszemam-wq/ai-wardrobe/pull/25
+- Preview URL：建置中，待確認
 
 ## 8. 測試結果
 - `node test/cutout-studio.mjs`：52 項通過（Node，非瀏覽器；2000×3000 魔術棒約 120 ms、柔化約 880 ms）
-- UI：未測試（尚未寫）
+- `node test/cutout-studio-ui.mjs`（Chromium，模擬 iPhone）：55 項通過
+- build、typecheck 通過；回歸 cutout、e2e、doll-api、phase39a2、39a21、39a3、38c、d1-limits、phase39a2-ui、39a21-ui、39a3-ui、38-wardrobe 通過
+- 未測試：WebKit（本機未安裝，CI continue-on-error）、iPhone 實機、Preview
