@@ -1,3 +1,4 @@
+import { hasColumn, hasTable } from "./schema";
 import { GARMENT_FIELDS, isColumnAttribute, joinMulti, LEGACY_COLOR, LEGACY_SEASON, LEGACY_SUBCATEGORY, splitMulti } from "../shared/taxonomy";
 import { transparentImageSql } from "./transparent";
 import { currentTaxonomy } from "./taxonomy";
@@ -660,6 +661,16 @@ export async function mergeGarments(env: Env, actor: Actor, targetId: string, so
     ).bind(targetId, ...tImgs.map((i) => i.id)),
   );
   stmts.push(env.DB.prepare("UPDATE OR IGNORE outfit_items SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
+  // Phase 3.9A.2.1：工作室圖層亦改指向合併後的衣物（以前只更新 outfit_items，圖層會變成「已刪除的衣物」）；
+  // 已保存的圖片版本若因重複而捨棄，改為 target 的相同圖片（內容相同，畫面不變）
+  if (await hasTable(env, "outfit_layers")) {
+    stmts.push(env.DB.prepare("UPDATE outfit_layers SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
+    stmts.push(env.DB.prepare("UPDATE outfit_layers SET group_id = ? WHERE group_id = ?").bind(targetId, sourceId));
+    if (await hasColumn(env, "outfit_layers", "image_id")) {
+      const tBy = new Map(tImgs.map((i) => [`${i.image_type}:${i.sha256}`, i.id]));
+      for (const d of drop) { const same = tBy.get(`${d.image_type}:${d.sha256}`); stmts.push(env.DB.prepare("UPDATE outfit_layers SET image_id = ? WHERE image_id = ?").bind(same ?? null, d.id)); }
+    }
+  }
   stmts.push(env.DB.prepare("UPDATE import_jobs SET garment_id = ? WHERE garment_id = ?").bind(targetId, sourceId));
   stmts.push(env.DB.prepare(`UPDATE garments SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, targetId));
   // Retain links for moved images; refresh stale AI suggestions after the image set changes.

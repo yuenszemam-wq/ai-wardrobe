@@ -10,7 +10,7 @@ import { api, Garment } from "./api";
 import { cachedHighResolution, forgetThumb, highResolutionBlob, pinHighResolution, thumbnailBlob } from "./imageCache";
 import { localGarments } from "./localWardrobe";
 
-export type JobKind = "thumbs" | "hd" | "assets" | "missing";
+export type JobKind = "thumbs" | "hd" | "assets" | "missing" | "models";
 export interface JobItem { key: string; label: string; src: string; kind: "thumb" | "hd"; bytes?: number }
 export interface JobState { id: number; kind: JobKind; label: string; total: number; done: number; skipped: number; failed: { item: JobItem; message: string }[]; running: boolean; paused: boolean; cancelled: boolean; finished: boolean; bytes: number }
 
@@ -45,6 +45,31 @@ export async function planAssets(): Promise<Plan> {
   let cached = 0, est = 0;
   for (const it of items) { if (await cachedHighResolution(it.src)) cached++; else est += it.bytes ?? 300 * 1024; }
   return { items, cached, toDownload: items.length - cached, estBytes: est, r2Reads: items.length - cached };
+}
+
+/**
+ * Phase 3.8C：角色換裝離線使用。身體模型（內置及自訂，最新版本）的全部部件圖、衣服設定資料、
+ * 已去背衣物的透明圖，以及我的素材庫圖片；以「指定保留」保存。模型及設定資料（API 回應）由 Service Worker 保存。
+ */
+export async function planModels(opts: { garments: boolean; studio: boolean } = { garments: true, studio: true }): Promise<Plan> {
+  const [{ listModels, loadModel, modelLabel }, { fetchTemplates }, { partImage }, { refUrl }] = await Promise.all([import("./doll/models"), import("./doll/model"), import("../shared/avatarModel"), import("../shared/avatarV2")]);
+  const ml = await listModels();
+  const items = new Map<string, JobItem>();
+  for (const sm of ml.models) {
+    const m = await loadModel(sm.id, null);
+    await fetchTemplates(m.id).catch(() => undefined); // 衣服設定（經 Service Worker 保存，離線可用）
+    for (const part of Object.values(m.rig.parts)) { const src = refUrl(partImage(m, part)); items.set(src, { key: src, label: modelLabel(m), src, kind: "hd" }); }
+  }
+  for (const it of (await planAssets()).items) items.set(it.src, it); // 頭部及髮型
+  if (opts.garments) for (const g of localGarments() ?? []) if (g.transparent_image_id) { const src = `/api/images/${g.transparent_image_id}`; items.set(src, { key: g.transparent_image_id, label: g.name, src, kind: "hd" }); }
+  if (opts.studio) {
+    const r = await api<{ assets: { name: string; version: { url: string; cutout_url: string | null } | null }[] }>("/api/studio/assets").catch(() => ({ assets: [] }));
+    for (const a of r.assets) for (const src of [a.version?.url, a.version?.cutout_url].filter((x): x is string => !!x)) items.set(src, { key: src, label: a.name, src, kind: "hd" });
+  }
+  const list = [...items.values()];
+  let cached = 0, est = 0;
+  for (const it of list) { if (await cachedHighResolution(it.src)) cached++; else est += it.bytes ?? 250 * 1024; }
+  return { items: list, cached, toDownload: list.length - cached, estBytes: est, r2Reads: list.filter((i) => i.src.startsWith("/api/")).length - cached };
 }
 
 export function startJob(kind: JobKind, label: string, items: JobItem[]) {

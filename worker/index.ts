@@ -9,8 +9,10 @@ import { handleMcp } from "./mcp";
 import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload, recordOrigin, reviewList, serveSignedImage, setAiStatus, submitSuggestion } from "./ai";
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
-import { createOutfit, deleteOutfit, getOutfit, listOutfits, serveOutfitThumb, updateOutfit } from "./outfits";
+import { createOutfit, deleteOutfit, getOutfit, listOutfitsPage, serveOutfitThumb, updateOutfit } from "./outfits";
 import * as studio from "./studio";
+import { drainPurge } from "./purge";
+import { pruneOps } from "./ops";
 import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getPalette, putPalette, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, batchTemplates, serveAssetFile, updateAsset, updateLook } from "./doll";
 import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
@@ -63,6 +65,9 @@ export default {
         })
         .catch((e) => console.error("aiMaintenance", e)),
     );
+    // Phase 3.9A.2.1：重試 R2 清理佇列（只處理已排隊的檔案，刪除前再核對引用）；每小時清理一次舊的冪等紀錄
+    wait(drainPurge(env, { limit: 50 }).then((r) => { if (r.deleted.length || r.failed.length) console.log(JSON.stringify({ purge: { deleted: r.deleted.length, kept: r.kept.length, failed: r.failed.length } })); }).catch((e) => console.error("purge_cron", String(e))));
+    if (new Date().getUTCMinutes() === 7) wait(pruneOps(env).catch((e) => console.error("ops_prune", String(e))));
     // 所有背景工作完成後，一次寫入這次排程的 R2 操作計數
     ctx.waitUntil(Promise.allSettled(waits).then(() => flushUsage(rawEnv, counter)));
   },
@@ -459,7 +464,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (path === "/api/outfits") {
     if (method === "GET") {
       requireScope(actor, "read");
-      return json({ outfits: await listOutfits(env, url.searchParams) });
+      return json(await listOutfitsPage(env, url.searchParams));
     }
     if (method === "POST") {
       requireScope(actor, "update");
@@ -473,6 +478,12 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (method === "GET") { requireScope(actor, "read"); return json(await studio.listAssets(env, url.searchParams)); }
     if (method === "POST") { requireSession(actor); return json(await studio.createAsset(env, actor, req), 201); }
   }
+  if (path === "/api/studio/bg-presets") {
+    if (method === "GET") { requireScope(actor, "read"); return json(await studio.listPresets(env)); }
+    if (method === "POST") { requireSession(actor); return json(await studio.addPreset(env, actor, await readJson(req)), 201); }
+  }
+  m = path.match(/^\/api\/studio\/bg-presets\/(bgp_[a-z2-7]+)$/);
+  if (m && method === "DELETE") { requireSession(actor); return json(await studio.deletePreset(env, actor, m[1])); }
   m = path.match(/^\/api\/studio\/assets\/(sta_[a-z2-7]+)$/);
   if (m) {
     if (method === "GET") { requireScope(actor, "read"); return json(await studio.getAsset(env, m[1])); }
@@ -643,6 +654,12 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   }
 
   // ───── 維護 ─────
+  // R2 清理佇列：GET＝dry-run（只列出會刪除／保留的檔案）；POST＝執行
+  if (path === "/api/maintenance/r2-purge" && (method === "GET" || method === "POST")) {
+    requireSession(actor);
+    const r = await drainPurge(env, { limit: 200, dryRun: method === "GET" });
+    return json({ ...r, deleted: r.deleted.length, kept: r.kept.length, sample: r.deleted.slice(0, 20) });
+  }
   if (path === "/api/maintenance/orphans" && method === "POST") {
     requireSession(actor);
     const body = await readJson<{ delete?: boolean }>(req);

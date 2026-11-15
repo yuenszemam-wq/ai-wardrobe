@@ -9,6 +9,8 @@
  */
 import { BackgroundSpec, Layer, LegacyItem, MAX_LAYERS, garmentIdsOf, legacyLayers, normalizeBackground, normalizeLayer, slotFor } from "../shared/studioScene";
 import { purgeUnusedAssets } from "./studio";
+import { findOp, opStatements, validOpId } from "./ops";
+import { hasColumn } from "./schema";
 import { parseImage } from "./images";
 import { transparentImageSql } from "./transparent";
 import { Actor, Env, HttpError, audit, newId, nowIso, sha256Hex, str } from "./util";
@@ -27,13 +29,15 @@ interface OutfitInput {
   /** 完整合成縮圖（base64 WebP／JPEG，最大 120 KB） */
   thumb?: unknown;
   base_updated_at?: unknown;
+  /** Phase 3.9A.2.1：冪等操作識別（建立造型時重試不會重複建立） */
+  op_id?: unknown;
 }
 
 const MAX_THUMB = 120 * 1024;
 
-type LayerRow = { outfit_id: string; layer_id: string; layer_type: Layer["layer_type"]; garment_id: string | null; garment_part_id: string | null; asset_id: string | null; asset_version_id: string | null; group_id: string | null; name: string | null; layer_order: number; x: number; y: number; w: number; h: number; rotation: number; flip_x: number; flip_y: number; opacity: number; hidden: number; locked: number; mask: string | null; variant: string | null };
+type LayerRow = { image_id?: string | null; outfit_id: string; layer_id: string; layer_type: Layer["layer_type"]; garment_id: string | null; garment_part_id: string | null; asset_id: string | null; asset_version_id: string | null; group_id: string | null; name: string | null; layer_order: number; x: number; y: number; w: number; h: number; rotation: number; flip_x: number; flip_y: number; opacity: number; hidden: number; locked: number; mask: string | null; variant: string | null };
 const parseJson = (s: string | null) => { if (!s) return null; try { return JSON.parse(s); } catch { return null; } };
-const rowToLayer = (r: LayerRow): Layer => ({ layer_id: r.layer_id, layer_type: r.layer_type, garment_id: r.garment_id, garment_part_id: r.garment_part_id, asset_id: r.asset_id, asset_version_id: r.asset_version_id, group_id: r.group_id, name: r.name ?? "", x: r.x, y: r.y, w: r.w, h: r.h, rotation: r.rotation, flip_x: !!r.flip_x, flip_y: !!r.flip_y, opacity: r.opacity, hidden: !!r.hidden, locked: !!r.locked, mask: parseJson(r.mask), variant: r.variant === "cutout" ? "cutout" : "original" });
+const rowToLayer = (r: LayerRow): Layer => ({ layer_id: r.layer_id, layer_type: r.layer_type, garment_id: r.garment_id, garment_part_id: r.garment_part_id, asset_id: r.asset_id, asset_version_id: r.asset_version_id, group_id: r.group_id, name: r.name ?? "", x: r.x, y: r.y, w: r.w, h: r.h, rotation: r.rotation, flip_x: !!r.flip_x, flip_y: !!r.flip_y, opacity: r.opacity, hidden: !!r.hidden, locked: !!r.locked, mask: parseJson(r.mask), variant: r.variant === "cutout" ? "cutout" : "original", image_id: r.image_id ?? null });
 
 /** 圖層需要的圖片：衣物＝透明圖；套裝部件＝部件檔案；素材＝版本（使用去背圖或原圖） */
 async function layerImages(env: Env, layers: Layer[]) {
@@ -41,6 +45,14 @@ async function layerImages(env: Env, layers: Layer[]) {
   const g = new Map<string, { name: string; category: string | null; image_id: string | null }>();
   const p = new Map<string, { name: string; file_id: string | null }>();
   const v = new Map<string, { asset_id: string; name: string; has_cutout: number; width: number; height: number }>();
+  // 已保存的衣物圖片版本（只接受仍屬於該衣物的圖片）
+  const pinned = new Map<string, string>();
+  const pins = [...new Set(layers.map((l) => (l.layer_type === "garment" ? l.image_id : null)).filter((x): x is string => !!x))];
+  for (let i = 0; i < pins.length; i += 80) {
+    const part = pins.slice(i, i + 80);
+    const r = await env.DB.prepare(`SELECT id, garment_id FROM garment_images WHERE id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ id: string; garment_id: string }>();
+    for (const x of r.results) pinned.set(x.id, x.garment_id);
+  }
   for (let i = 0; i < gids.length; i += 80) {
     const part = gids.slice(i, i + 80);
     const r = await env.DB.prepare(`SELECT g.id, g.name, g.category, ${transparentImageSql()} AS image_id FROM garments g WHERE g.id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ id: string; name: string; category: string | null; image_id: string | null }>();
@@ -56,7 +68,7 @@ async function layerImages(env: Env, layers: Layer[]) {
     const r = await env.DB.prepare(`SELECT v.id, v.asset_id, a.name, (v.cutout_key IS NOT NULL) AS has_cutout, v.width, v.height FROM studio_asset_versions v JOIN studio_assets a ON a.id = v.asset_id WHERE v.id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ id: string; asset_id: string; name: string; has_cutout: number; width: number; height: number }>();
     for (const x of r.results) v.set(x.id, x);
   }
-  return { g, p, v };
+  return { g, p, v, pinned };
 }
 function decorate(layers: Layer[], im: Awaited<ReturnType<typeof layerImages>>) {
   return layers.map((l) => {
@@ -69,7 +81,11 @@ function decorate(layers: Layer[], im: Awaited<ReturnType<typeof layerImages>>) 
       const p = im.p.get(l.garment_part_id!);
       return { ...l, name: l.name || (g && p ? `${g.name}｜${p.name}` : p?.name ?? "部件"), category: g?.category ?? null, image_url: p?.file_id ? `/api/doll/files/${p.file_id}` : null, missing: !p };
     }
-    return { ...l, name: l.name || g?.name || "已刪除的衣物", category: g?.category ?? null, image_id: g?.image_id ?? null, image_url: g?.image_id ? `/api/images/${g.image_id}` : null, missing: !g };
+    // 圖片版本：保存時的版本仍存在＝使用該版本（衣櫃換圖不影響舊造型）；版本已不存在＝退回目前透明圖並標示
+    const pin = l.image_id && im.pinned.get(l.image_id) === l.garment_id ? l.image_id : null;
+    const use = pin ?? g?.image_id ?? null;
+    return { ...l, name: l.name || g?.name || "已刪除的衣物", category: g?.category ?? null, image_id: use, image_url: use ? `/api/images/${use}` : null, missing: !g || !use,
+      latest_image_id: g?.image_id ?? null, image_outdated: !!(pin && g?.image_id && pin !== g.image_id), image_fallback: !!(l.image_id && !pin) };
   });
 }
 
@@ -95,15 +111,27 @@ async function loadLayers(env: Env, ids: string[]): Promise<Map<string, Layer[]>
   return out;
 }
 
-export async function listOutfits(env: Env, params: URLSearchParams) {
-  const where = params.get("status") ? "o.status = ?" : "o.status != 'archived'";
-  const binds = params.get("status") ? [params.get("status")] : [];
-  const fav = params.get("favorite") === "1" ? " AND o.is_favorite = 1" : "";
+/** 分頁：cursor＝上一頁最後一套的「created_at|id」；回應另附 next_cursor 及 total（舊版 App 只讀 outfits，不受影響） */
+export async function listOutfitsPage(env: Env, params: URLSearchParams) {
+  const where = [params.get("status") ? "o.status = ?" : "o.status != 'archived'"];
+  const binds: unknown[] = params.get("status") ? [params.get("status")] : [];
+  if (params.get("favorite") === "1") where.push("o.is_favorite = 1");
+  const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM outfits o WHERE ${where.join(" AND ")}`).bind(...binds).first<{ n: number }>())?.n ?? 0;
+  const cur = params.get("cursor")?.split("|");
+  if (cur && cur.length === 2) { where.push("(o.created_at < ? OR (o.created_at = ? AND o.id < ?))"); binds.push(cur[0], cur[0], cur[1]); }
+  const limit = Math.min(200, Math.max(1, Number(params.get("limit")) || 200));
   const { results } = await env.DB.prepare(
     `SELECT o.*,
        (SELECT oi.id FROM outfit_images oi WHERE oi.outfit_id = o.id AND oi.has_alpha = 1 AND oi.image_type = 'processed' ORDER BY oi.is_primary DESC LIMIT 1) AS image_id
-     FROM outfits o WHERE ${where}${fav} ORDER BY o.created_at DESC LIMIT 200`,
-  ).bind(...binds).all<Record<string, unknown>>();
+     FROM outfits o WHERE ${where.join(" AND ")} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`,
+  ).bind(...binds, limit + 1).all<Record<string, unknown>>();
+  const more = results.length > limit;
+  const page = results.slice(0, limit);
+  const last = page[page.length - 1];
+  return { outfits: await shapeList(env, page), total, next_cursor: more && last ? `${last.created_at}|${last.id}` : null };
+}
+export async function listOutfits(env: Env, params: URLSearchParams) { return (await listOutfitsPage(env, params)).outfits; }
+async function shapeList(env: Env, results: Record<string, unknown>[]) {
   const ids = results.map((o) => String(o.id));
   const layers = await loadLayers(env, ids);
   const thumbs = new Map<string, string>();
@@ -115,7 +143,7 @@ export async function listOutfits(env: Env, params: URLSearchParams) {
   const im = await layerImages(env, [...layers.values()].flat());
   return results.map((o) => {
     const ls = decorate(layers.get(String(o.id)) ?? [], im);
-    const { background: bg, ...rest } = o;
+    const { background: bg, save_token: _t, ...rest } = o;
     return {
       ...rest, is_favorite: Number(o.is_favorite) === 1, background: normalizeBackground(parseJson(bg as string | null)),
       item_count: garmentIdsOf(ls).length, layer_count: ls.length,
@@ -137,8 +165,9 @@ export async function getOutfit(env: Env, id: string) {
     "SELECT id, image_type, width, height, has_alpha, is_primary FROM outfit_images WHERE outfit_id = ? AND has_alpha = 1 AND image_type = 'processed' ORDER BY is_primary DESC, created_at",
   ).bind(id).all();
   const thumb = await env.DB.prepare("SELECT version FROM outfit_thumbs WHERE outfit_id = ?").bind(id).first<{ version: string }>().catch(() => null);
+  const { save_token: _t, ...head } = o;
   return {
-    ...o, is_favorite: Number(o.is_favorite) === 1, background: normalizeBackground(parseJson(o.background as string | null)),
+    ...head, is_favorite: Number(o.is_favorite) === 1, background: normalizeBackground(parseJson(o.background as string | null)),
     layers: decorated,
     // 舊版欄位（衣物清單，由底至頂）
     items: decorated.filter((l) => l.layer_type === "garment").map((l, i) => {
@@ -198,6 +227,27 @@ async function prepare(env: Env, input: OutfitInput): Promise<Prepared> {
     for (const l of parts) if (!(await env.DB.prepare("SELECT id FROM doll_assets WHERE id = ? AND garment_id = ?").bind(l.garment_part_id, l.garment_id).first())) throw new HttpError(400, "part_not_found", "找不到套裝部件");
     const vers = [...new Set(layers.map((l) => l.asset_version_id).filter((x): x is string => !!x))];
     for (const v of vers) if (!(await env.DB.prepare("SELECT id FROM studio_asset_versions WHERE id = ?").bind(v).first())) throw new HttpError(400, "asset_not_found", "找不到素材（可能已刪除）");
+    // 衣物圖片版本：用戶端指定的版本必須屬於該衣物；沒有指定＝保存當時的透明圖（之後衣櫃換圖不會改變這套造型）
+    if (await hasColumn(env, "outfit_layers", "image_id")) {
+      const pins = [...new Set(layers.map((l) => (l.layer_type === "garment" ? l.image_id : null)).filter((x): x is string => !!x))];
+      const owner = new Map<string, string>();
+      for (let i = 0; i < pins.length; i += 80) {
+        const part = pins.slice(i, i + 80);
+        for (const r of (await env.DB.prepare(`SELECT id, garment_id FROM garment_images WHERE id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ id: string; garment_id: string }>()).results) owner.set(r.id, r.garment_id);
+      }
+      const need = [...new Set(layers.filter((l) => l.layer_type === "garment" && (!l.image_id || owner.get(l.image_id) !== l.garment_id)).map((l) => l.garment_id!))];
+      const current = new Map<string, string | null>();
+      for (let i = 0; i < need.length; i += 80) {
+        const part = need.slice(i, i + 80);
+        for (const r of (await env.DB.prepare(`SELECT g.id, ${transparentImageSql()} AS image_id FROM garments g WHERE g.id IN (${part.map(() => "?").join(",")})`).bind(...part).all<{ id: string; image_id: string | null }>()).results) current.set(r.id, r.image_id);
+      }
+      layers = layers.map((l) => {
+        if (l.layer_type !== "garment") return { ...l, image_id: null };
+        if (l.image_id && owner.get(l.image_id) === l.garment_id) return l;
+        // 指定的版本已刪除或不屬於該衣物：改用目前的透明圖（不拒絕保存，畫面與載入時一致）
+        return { ...l, image_id: current.get(l.garment_id!) ?? null };
+      });
+    }
     for (const l of layers) {
       if (l.layer_type !== "studio_asset") continue;
       const v = await env.DB.prepare("SELECT cutout_key FROM studio_asset_versions WHERE id = ? AND asset_id = ?").bind(l.asset_version_id, l.asset_id).first<{ cutout_key: string | null }>();
@@ -224,16 +274,17 @@ async function prepare(env: Env, input: OutfitInput): Promise<Prepared> {
   return { layers, background, thumb };
 }
 
-function writeStatements(env: Env, outfitId: string, p: Prepared) {
+async function writeStatements(env: Env, outfitId: string, p: Prepared) {
   const stmts: D1PreparedStatement[] = [];
+  const pin = await hasColumn(env, "outfit_layers", "image_id");
   if (p.legacyItems) {
     stmts.push(env.DB.prepare("DELETE FROM outfit_layers WHERE outfit_id = ?").bind(outfitId), env.DB.prepare("DELETE FROM outfit_items WHERE outfit_id = ?").bind(outfitId));
     for (const it of p.legacyItems) stmts.push(env.DB.prepare("INSERT INTO outfit_items (outfit_id, garment_id, position, layer_order, x, y, w, h) VALUES (?,?,?,?,?,?,?,?)").bind(outfitId, it.garment_id, it.position, it.layer_order, it.x, it.y, it.w, it.h));
   }
   if (p.layers) {
     stmts.push(env.DB.prepare("DELETE FROM outfit_layers WHERE outfit_id = ?").bind(outfitId));
-    p.layers.forEach((l, i) => stmts.push(env.DB.prepare("INSERT INTO outfit_layers (layer_id, outfit_id, layer_type, garment_id, garment_part_id, asset_id, asset_version_id, group_id, name, layer_order, x, y, w, h, rotation, flip_x, flip_y, opacity, hidden, locked, mask, variant) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(l.layer_id, outfitId, l.layer_type, l.garment_id, l.garment_part_id, l.asset_id, l.asset_version_id, l.group_id, l.name || null, i, l.x, l.y, l.w, l.h, l.rotation, l.flip_x ? 1 : 0, l.flip_y ? 1 : 0, l.opacity, l.hidden ? 1 : 0, l.locked ? 1 : 0, l.mask ? JSON.stringify(l.mask) : null, l.variant)));
+    p.layers.forEach((l, i) => stmts.push(env.DB.prepare(`INSERT INTO outfit_layers (layer_id, outfit_id, layer_type, garment_id, garment_part_id, asset_id, asset_version_id, group_id, name, layer_order, x, y, w, h, rotation, flip_x, flip_y, opacity, hidden, locked, mask, variant${pin ? ", image_id" : ""}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?${pin ? ",?" : ""})`)
+      .bind(l.layer_id, outfitId, l.layer_type, l.garment_id, l.garment_part_id, l.asset_id, l.asset_version_id, l.group_id, l.name || null, i, l.x, l.y, l.w, l.h, l.rotation, l.flip_x ? 1 : 0, l.flip_y ? 1 : 0, l.opacity, l.hidden ? 1 : 0, l.locked ? 1 : 0, l.mask ? JSON.stringify(l.mask) : null, l.variant, ...(pin ? [l.image_id ?? null] : []))));
     // outfit_items：不重複的衣物清單（日誌、分析、衣物使用次數沿用）；位置取該衣物最上層的整件圖層
     stmts.push(env.DB.prepare("DELETE FROM outfit_items WHERE outfit_id = ?").bind(outfitId));
     garmentIdsOf(p.layers).forEach((gid, i) => {
@@ -242,18 +293,24 @@ function writeStatements(env: Env, outfitId: string, p: Prepared) {
     });
   }
   if (p.background !== undefined) stmts.push(env.DB.prepare("UPDATE outfits SET background = ? WHERE id = ?").bind(p.background ? JSON.stringify(p.background) : null, outfitId));
+  // 畫面已改變但沒有新縮圖（圖片未載入、舊版 App、AI 工具）：移除舊縮圖，避免列表顯示過時的畫面；App 之後會補建
+  if (!p.thumb && (p.layers || p.legacyItems || p.background !== undefined)) stmts.push(env.DB.prepare("DELETE FROM outfit_thumbs WHERE outfit_id = ?").bind(outfitId));
   if (p.thumb) stmts.push(env.DB.prepare("INSERT INTO outfit_thumbs (outfit_id, data, mime_type, byte_size, version, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(outfit_id) DO UPDATE SET data=excluded.data, mime_type=excluded.mime_type, byte_size=excluded.byte_size, version=excluded.version, updated_at=excluded.updated_at").bind(outfitId, p.thumb.bytes, p.thumb.mime, p.thumb.bytes.byteLength, p.thumb.version, nowIso()));
   return stmts;
 }
 
 export async function createOutfit(env: Env, actor: Actor, input: OutfitInput) {
+  const opId = validOpId(input.op_id);
+  const done = await findOp(env, opId, "outfit.create");
+  if (done) return getOutfit(env, done); // 重試：取回第一次建立的造型
   const p = await prepare(env, input);
   const id = newId("out");
   const now = nowIso();
   await env.DB.batch([
     env.DB.prepare("INSERT INTO outfits (id, name, notes, style, is_favorite, status, source, created_at, updated_at) VALUES (?,?,?,?,?, 'active', ?, ?, ?)")
       .bind(id, str(input.name, 120) || "新穿搭", str(input.notes, 2000), str(input.style, 40), input.is_favorite ? 1 : 0, actor.kind === "session" ? "manual" : actor.label, now, now),
-    ...writeStatements(env, id, p),
+    ...(await writeStatements(env, id, p)),
+    ...(await opStatements(env, opId, "outfit.create", id)),
   ]);
   await audit(env, actor, "outfit.create", id);
   return getOutfit(env, id);
@@ -262,7 +319,8 @@ export async function createOutfit(env: Env, actor: Actor, input: OutfitInput) {
 export async function updateOutfit(env: Env, actor: Actor, id: string, input: OutfitInput) {
   const cur = await env.DB.prepare("SELECT id, updated_at FROM outfits WHERE id = ?").bind(id).first<{ id: string; updated_at: string }>();
   if (!cur) throw new HttpError(404, "outfit_not_found", "找不到這套穿搭");
-  if (typeof input.base_updated_at === "string" && input.base_updated_at !== cur.updated_at) throw new HttpError(409, "outfit_conflict", "這套造型已在另一處修改。你的修改仍保留在畫面，可以重新載入或再次保存覆寫。");
+  const base = typeof input.base_updated_at === "string" ? input.base_updated_at : null;
+  if (base && base !== cur.updated_at) throw conflict();
   const p = await prepare(env, input);
   const sets: string[] = [];
   const binds: unknown[] = [];
@@ -280,11 +338,21 @@ export async function updateOutfit(env: Env, actor: Actor, id: string, input: Ou
   // 同一毫秒內連續保存：updated_at 仍需改變，衝突偵測才可靠
   const now = nowIso();
   binds.push(now === cur.updated_at ? new Date(Date.parse(now) + 1).toISOString() : now);
-  // 原子提交：造型資料、圖層、衣物清單、背景及縮圖一起成功或一起失敗
-  await env.DB.batch([env.DB.prepare(`UPDATE outfits SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id), ...writeStatements(env, id, p)]);
+  // 原子提交：造型資料、圖層、衣物清單、背景及縮圖一起成功或一起失敗。
+  // CAS：在同一個交易內以 base_updated_at 更新並寫入隨機標記，下一句核對標記；
+  // 另一部裝置在「檢查」與「提交」之間保存了＝更新 0 行、標記不符，整個交易回滾（不會互相覆蓋）。
+  const cas = await hasColumn(env, "outfits", "save_token");
+  const token = cas ? crypto.randomUUID() : null;
+  if (token) { sets.push("save_token = ?"); binds.push(token); }
+  const head = [env.DB.prepare(`UPDATE outfits SET ${sets.join(", ")} WHERE id = ?${base ? " AND updated_at = ?" : ""}`).bind(...binds, id, ...(base ? [base] : []))];
+  if (token) head.push(env.DB.prepare("SELECT CASE WHEN (SELECT save_token FROM outfits WHERE id = ?) = ? THEN 1 ELSE json('outfit_conflict') END AS ok").bind(id, token));
+  try { await env.DB.batch([...head, ...(await writeStatements(env, id, p))]); }
+  catch (e) { if (token && /malformed JSON|outfit_conflict/i.test(String((e as Error)?.message ?? e))) throw conflict(); throw e; }
   await audit(env, actor, "outfit.update", id);
   return getOutfit(env, id);
 }
+
+const conflict = () => new HttpError(409, "outfit_conflict", "這套造型已在另一處修改。你的修改仍保留在畫面，可以重新載入或再次保存覆寫。");
 
 export async function serveOutfitThumb(req: Request, env: Env, id: string): Promise<Response> {
   const t = await env.DB.prepare("SELECT data, mime_type, version FROM outfit_thumbs WHERE outfit_id = ?").bind(id).first<{ data: ArrayBuffer; mime_type: string; version: string }>();
@@ -298,10 +366,14 @@ export async function serveOutfitThumb(req: Request, env: Env, id: string): Prom
 export async function deleteOutfit(env: Env, actor: Actor, id: string) {
   const { results } = await env.DB.prepare("SELECT r2_key FROM outfit_images WHERE outfit_id = ?").bind(id).all<{ r2_key: string }>();
   // 只用於這套造型的素材（不在素材庫，也沒有其他造型使用）：一併清理
-  const own = (await env.DB.prepare("SELECT DISTINCT asset_id FROM outfit_layers WHERE outfit_id = ? AND asset_id IS NOT NULL").bind(id).all<{ asset_id: string }>().catch(() => ({ results: [] as { asset_id: string }[] }))).results.map((r) => r.asset_id);
+  const own = (await env.DB.prepare("SELECT DISTINCT asset_id FROM outfit_layers WHERE outfit_id = ? AND asset_id IS NOT NULL").bind(id).all<{ asset_id: string }>()).results.map((r) => r.asset_id);
+  // 背景圖片素材亦需檢查（以前只檢查圖層，造型刪除後「只用於這套造型」的背景圖會一直留在 R2）
+  const bg = normalizeBackground(parseJson((await env.DB.prepare("SELECT background FROM outfits WHERE id = ?").bind(id).first<{ background: string | null }>())?.background ?? null));
+  if (bg?.image?.asset_id && !own.includes(bg.image.asset_id)) own.push(bg.image.asset_id);
   const res = await env.DB.prepare("DELETE FROM outfits WHERE id = ?").bind(id).run();
   if (!res.meta.changes) throw new HttpError(404, "outfit_not_found", "找不到這套穿搭");
   if (results.length) await env.IMAGES.delete(results.map((r) => r.r2_key));
+  // 素材清理失敗不影響刪除造型：未刪除的檔案留在 r2_purge_queue，之後再重試
   if (own.length) await purgeUnusedAssets(env, own).catch((e) => console.warn("studio_purge", String(e)));
   await audit(env, actor, "outfit.delete", id);
 }

@@ -60,14 +60,23 @@ async function thumbOf(src: HTMLCanvasElement | ImageBitmap) {
   return b;
 }
 
-export async function uploadStudioAsset(img: PreparedImage, opts: { kind: AssetKind; name: string; inLibrary: boolean }): Promise<StudioAsset> {
-  if (!navigator.onLine) throw new Error("目前離線：素材需要連線才可以上傳");
+export async function uploadStudioAsset(img: PreparedImage, opts: { kind: AssetKind; name: string; inLibrary: boolean; opId?: string; allowOffline?: boolean }): Promise<StudioAsset> {
+  if (!navigator.onLine) {
+    if (!opts.allowOffline) throw new Error("目前離線：素材需要連線才可以上傳");
+    // Phase 3.8C：離線素材保存在 Outbox，畫面先使用本機圖片；造型保存時以 local:<op> 引用，連線後按次序上傳再保存造型
+    const { enqueue, fileOf } = await import("../outbox");
+    const op = await enqueue({ id: opts.opId, kind: "studio.asset", label: `素材「${opts.name}」`, payload: { kind: opts.kind, name: opts.name, in_library: opts.inLibrary }, files: { file: await fileOf(img.blob, img.hasAlpha ? "asset.png" : "asset.jpg"), thumb: await fileOf(img.thumb, "thumb") } });
+    const url = URL.createObjectURL(img.blob), now = new Date().toISOString();
+    return { id: `local:${op}:asset`, kind: opts.kind, name: opts.name, is_favorite: false, in_library: opts.inLibrary, created_at: now, updated_at: now, version: { id: `local:${op}:version`, width: img.width, height: img.height, has_alpha: img.hasAlpha, has_cutout: false, url, cutout_url: null, thumb_url: url } };
+  }
   const fd = new FormData();
   fd.set("file", img.blob, img.hasAlpha ? "asset.png" : "asset.jpg");
   fd.set("thumb", img.thumb, "thumb");
   fd.set("kind", opts.kind);
   fd.set("name", opts.name);
   if (opts.inLibrary) fd.set("in_library", "1");
+  // 冪等：同一次上傳重試（網絡中斷後）沿用同一個 op_id，伺服器取回第一次建立的素材
+  if (opts.opId) fd.set("op_id", opts.opId);
   return api<StudioAsset>("/api/studio/assets", { method: "POST", body: fd });
 }
 
@@ -89,4 +98,9 @@ export const patchStudioAsset = (id: string, body: Partial<Pick<StudioAsset, "na
 export const deleteStudioAsset = (id: string) => api<{ deleted: boolean; removed_from_library?: boolean; used_by?: { id: string; name: string }[] }>(`/api/studio/assets/${id}`, { method: "DELETE" });
 export const getStudioAsset = (id: string) => api<StudioAsset>(`/api/studio/assets/${id}`);
 export const versionToGarment = (versionId: string, body: { name: string; category: string; variant: "original" | "cutout" }) => api<{ garment_id: string }>(`/api/studio/versions/${versionId}/to-garment`, { method: "POST", json: body });
+/** Phase 3.9A.3：背景預設庫 */
+export interface BgPreset { id: string; name: string; spec: import("../../shared/studioScene").BackgroundSpec; created_at: string }
+export const listBgPresets = () => api<{ presets: BgPreset[] }>("/api/studio/bg-presets").then((r) => r.presets);
+export const addBgPreset = (name: string, spec: BgPreset["spec"]) => api<{ presets: BgPreset[] }>("/api/studio/bg-presets", { method: "POST", json: { name, spec } }).then((r) => r.presets);
+export const deleteBgPreset = (id: string) => api<{ presets: BgPreset[] }>(`/api/studio/bg-presets/${id}`, { method: "DELETE" }).then((r) => r.presets);
 export { ApiError };

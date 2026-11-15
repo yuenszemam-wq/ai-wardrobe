@@ -31,7 +31,7 @@ export interface Worn extends LookItem { v1fit?: Fit | null }
 export interface Appearance { head: string; head_config?: HeadConfig | null; hair: string; hair_config?: HairConfig | null; hair_color: string; accent_color: string | null; tip_color: string | null }
 export const DEFAULT_APPEARANCE: Appearance = { head: BUILTIN_HEAD_ID, hair: BUILTIN_HAIR_ID, hair_color: "brown_pink", accent_color: null, tip_color: null };
 
-export interface LookDetail { id: string; name: string; is_favorite: boolean; thumb_at: string | null; state: LookState | null; legacy: LegacyLook | null; garments: GarmentLite[] }
+export interface LookDetail { id: string; name: string; is_favorite: boolean; thumb_at: string | null; updated_at?: string; state: LookState | null; legacy: LegacyLook | null; garments: GarmentLite[] }
 interface LegacyLook { avatar_id: string; hair_color: string | null; accent_color: string | null; pose: unknown; items: { garment_id: string; slot: string; override: Fit | null }[] }
 
 /**

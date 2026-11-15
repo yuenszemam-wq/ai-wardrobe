@@ -36,6 +36,8 @@ export interface Layer {
   mask: LayerMask | null;
   /** 素材圖層：使用原圖或去背圖（衣物圖層固定 original） */
   variant: "original" | "cutout";
+  /** Phase 3.9A.2.1：衣物圖層保存時使用的衣物圖片版本（garment_images.id）；null＝使用衣物目前的透明圖 */
+  image_id?: string | null;
 }
 
 // ───── 背景 ─────
@@ -129,6 +131,7 @@ export function normalizeLayer(raw: unknown): Layer | string {
     x: round(num(r.x, 0, -300, 300)), y: round(num(r.y, 0, -300, 300)), w, h,
     rotation: round(((num(r.rotation, 0, -3600, 3600) % 360) + 540) % 360 - 180, 2),
     flip_x: !!r.flip_x, flip_y: !!r.flip_y, opacity: round(num(r.opacity, 1, 0, 1)), hidden: !!r.hidden, locked: !!r.locked, mask: normalizeMask(r.mask), variant: type === "studio_asset" && r.variant === "cutout" ? "cutout" : "original",
+    image_id: type === "garment" ? id("image_id") : null,
   };
 }
 
@@ -137,7 +140,7 @@ export interface LegacyItem { garment_id: string; name?: string | null; category
 export function legacyLayers(items: LegacyItem[], fallback: (i: LegacyItem) => { x: number; y: number; w: number; h: number }): Layer[] {
   return [...items].sort((a, b) => (a.layer_order ?? 0) - (b.layer_order ?? 0) || (a.position ?? 0) - (b.position ?? 0)).map((i) => {
     const d = i.x == null || i.y == null || i.w == null || i.h == null ? fallback(i) : { x: i.x, y: i.y, w: i.w, h: i.h };
-    return { layer_id: "g:" + i.garment_id, layer_type: "garment", garment_id: i.garment_id, garment_part_id: null, asset_id: null, asset_version_id: null, group_id: null, name: i.name ?? "", ...d, rotation: 0, flip_x: false, flip_y: false, opacity: 1, hidden: false, locked: false, mask: null, variant: "original" };
+    return { layer_id: "g:" + i.garment_id, layer_type: "garment", garment_id: i.garment_id, garment_part_id: null, asset_id: null, asset_version_id: null, group_id: null, name: i.name ?? "", ...d, rotation: 0, flip_x: false, flip_y: false, opacity: 1, hidden: false, locked: false, mask: null, variant: "original", image_id: null };
   });
 }
 

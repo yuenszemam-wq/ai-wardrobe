@@ -3,6 +3,7 @@
 // Phase 3：Avatar V2 是唯一角色；衣物分類只決定預設位置及圖層，不再限制可以怎樣疊穿。
 
 import { BackgroundSpec, normalizeBackground } from "./studioScene";
+import { PropLayer, normalizeProps } from "./lookProps";
 import { normalizeManualMesh, manualUV } from "./manualMesh";
 import { AVATAR_V2_ID, ImageRef, HeadConfig, normalizeHeadConfig, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
 import { Pose, Rig, normalizePose, posedAnchors } from "./avatarRig";
@@ -480,6 +481,8 @@ export interface LookState {
   items: LookItem[];
   /** Phase 3.9A.2：造型背景（與衣服配搭共用 BackgroundSpec）；沒有＝原本預設背景 */
   background?: BackgroundSpec | null;
+  /** Phase 3.9A.3：素材圖層（道具、裝飾），可附接骨骼；沒有＝空 */
+  props?: PropLayer[];
 }
 export const MAX_ITEMS = 40;
 const modelRef = (v: unknown): { id: string; rev: number } | null => {
@@ -541,5 +544,6 @@ export function normalizeLookState(v: unknown): LookState | null {
     tip_color: typeof o.tip_color === "string" && /^#[0-9a-f]{6}$/i.test(o.tip_color) ? o.tip_color.toLowerCase() : null,
     pose, front: frontOf(o.front), items,
     ...(normalizeBackground(o.background) ? { background: normalizeBackground(o.background) } : {}),
+    ...(normalizeProps(o.props).length ? { props: normalizeProps(o.props) } : {}),
   };
 }

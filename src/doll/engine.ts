@@ -1,7 +1,8 @@
 // 角色換裝的畫布渲染器：身體部件、頭部、髮型、衣物全部畫在同一張 Canvas 上。
 // 衣物用連續網格跟隨骨架（shared/garmentMesh.ts）；畫面、造型縮圖及匯出圖片用同一套繪畫程式。
 import type { BackgroundSpec } from "../../shared/studioScene";
-import { paintBackground } from "../studio/render";
+import { maskedCanvas, paintBackground } from "../studio/render";
+import type { PropLayer, PropZ } from "../../shared/lookProps";
 import { Mat, Pose, Rig, applyMat, invert, multiply, rotateAbout, solve } from "../../shared/avatarRig";
 import { FrontPart, HairConfig, HairPart, HairStats, HeadConfig, Rgb, resolveHairColors, hexToRgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
 import { Content, DOLL_H, DOLL_W, Fit, FULL_CONTENT, defaultOpts, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
@@ -47,6 +48,14 @@ export interface Scene {
   omitBehind?: string | null;
   /** Phase 3.9A.2：造型背景（與衣服配搭共用渲染）；null＝原本預設 */
   background?: { spec: BackgroundSpec; img: HTMLImageElement | null } | null;
+  /** Phase 3.9A.3：素材圖層（src＝圖片網址）；附接骨骼，按 z 分三層畫 */
+  props?: (PropLayer & { src: string })[];
+}
+/** 素材圖層的變換：邏輯座標 → 方框內（以中心為原點、已旋轉／翻轉）。world＝不跟隨骨骼 */
+export function propMatrix(p: Pick<PropLayer, "bone" | "cx" | "cy" | "rotation" | "flip_x" | "flip_y">, mats: Record<string, Mat>): Mat {
+  const bone: Mat = p.bone === "world" ? [1, 0, 0, 1, 0, 0] : mats[p.bone] ?? mats.root;
+  const a = (p.rotation * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), fx = p.flip_x ? -1 : 1, fy = p.flip_y ? -1 : 1;
+  return multiply(bone, [c * fx, s * fx, -s * fy, c * fy, p.cx, p.cy]);
 }
 /** 「移到身後」的量度結果：total＝身後部分本身的像素；visible＝在完整角色畫面中仍然看得到的像素（其餘被身體、頭部、頭髮或衣物前面部分遮住） */
 export interface BehindStats { total: number; visible: number }
@@ -508,6 +517,19 @@ export class DollRenderer {
     return canvas;
   }
 
+  private propTex = new Map<string, HTMLCanvasElement>();
+  /** 素材圖層遮罩（以圖片及遮罩內容快取；最多 30 個） */
+  private propMasked(p: PropLayer & { src: string }, img: Bitmap): HTMLCanvasElement {
+    const key = p.src + "|" + hashOf(JSON.stringify(p.mask));
+    let c = this.propTex.get(key);
+    if (!c) {
+      c = maskedCanvas(img, p.mask, 1400);
+      this.propTex.set(key, c);
+      if (this.propTex.size > 30) { const k = this.propTex.keys().next().value!; this.propTex.get(k)!.width = 0; this.propTex.delete(k); }
+    }
+    return c;
+  }
+
   /** 頸部（上半）的遮罩：用來把頸部顯示在衣服後領前面 */
   private neck(): { mask: HTMLCanvasElement; img: Bitmap } | null {
     const p = this.model.rig.parts.neck;
@@ -574,6 +596,21 @@ export class DollRenderer {
 
     ctx.save();
     ctx.imageSmoothingQuality = "high";
+    // Phase 3.9A.3：素材圖層（按 z 分層；同一層按次序由後至前）
+    const props = (z: PropZ) => {
+      for (const p of scene.props ?? []) {
+        if (p.z !== z || p.hidden) continue;
+        const img = this.img(p.src);
+        if (!img) { complete = false; continue; }
+        const src = p.mask ? this.propMasked(p, img) : img;
+        const [iw, ih] = dims(img), k = Math.min(p.w / iw, p.h / ih), dw = iw * k, dh = ih * k;
+        set(multiply(base, propMatrix(p, mats)));
+        ctx.globalAlpha = p.opacity;
+        ctx.drawImage(src, -dw / 2, -dh / 2, dw, dh);
+        ctx.globalAlpha = 1;
+      }
+    };
+    props("back");
     hair("back");
     const visible = scene.items.filter((it) => !it.hidden);
     const ready = new Map<string, Ready>();
@@ -606,9 +643,11 @@ export class DollRenderer {
     body(false);
     hair("mid");
     for (const name of scene.front) bodyPart(name);
+    props("middle");
     part(scene.head.file, scene.head.x, scene.head.y, scene.head.w, scene.head.h, "head");
     hair("front");
     body(true);
+    props("front");
     const ov = scene.overlay ? visible.find((it) => it.key === scene.overlay!.key) : null;
     if (ov && ready.has(ov.key)) {
       const r = ready.get(ov.key)!, o = this.overlay(ov, scene.overlay!.mode, r.rig);

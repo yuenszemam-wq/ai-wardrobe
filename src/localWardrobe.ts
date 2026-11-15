@@ -8,7 +8,7 @@
  * - 同步不依賴 offset 分頁；較舊的同步工作不會覆蓋較新的結果；網絡失敗保留最後成功資料，不會清空。
  * - 「完整重新同步」只重新下載衣物資料，不會清除圖片快取。
  * - 首頁、衣櫃、衣服設定、穿搭選單共用同一份本機資料（透過 wardrobeList.loadFullList）。
- * 預留（Phase 3.8C）：outbox 資料表名稱已保留，未啟用離線修改。
+ * Phase 3.8C：outbox 資料表保存離線修改及上傳（src/outbox.ts）。
  */
 import { api, ApiError, Garment } from "./api";
 
@@ -220,6 +220,15 @@ export async function kvGet<T>(key: string): Promise<T | undefined> {
 export async function kvSet(key: string, value: unknown) {
   if (!dbp) return;
   try { await tx(["kv"], "readwrite", (t) => { t.objectStore("kv").put(value, key); }); } catch { /* 容量不足：只是不保存 */ }
+}
+// ───── Phase 3.8C：離線操作佇列（outbox 資料表；使用同一個已開啟的帳戶資料庫） ─────
+export async function outboxRead<T>(): Promise<T[]> {
+  if (!dbp) throw new Error("離線佇列未能開啟（請確認已登入）");
+  return tx(["outbox"], "readonly", (t) => reqP(t.objectStore("outbox").getAll() as IDBRequest<T[]>));
+}
+export async function outboxWrite(op: { id: string } | null, removeId?: string) {
+  if (!dbp) throw new Error("離線佇列未能開啟（請確認已登入）");
+  await tx(["outbox"], "readwrite", (t) => { if (op) t.objectStore("outbox").put(op); if (removeId) t.objectStore("outbox").delete(removeId); });
 }
 /** 讀取伺服器資料並保存本機副本；失敗時使用最後成功的本機副本（離線） */
 export async function cachedApi<T>(path: string, key = "api:" + path): Promise<{ data: T; offline: boolean }> {

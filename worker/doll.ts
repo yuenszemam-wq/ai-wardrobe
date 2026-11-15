@@ -1,5 +1,6 @@
 // 角色換裝 API：衣物預設穿著設定、造型、造型縮圖及角色素材（頭部／髮型／衣物額外部件）。
 // 只讀寫 doll_* 資料表及 R2 的 doll/ 路徑；不修改 garments、garment_images、outfits 或衣物圖片。
+import { purgeUnusedAssets } from "./studio";
 import { DEFAULT_AVATAR, Fit, LEGACY_AVATAR, LookState, isSlot, normalizeFit, normalizeLookState, normalizeTemplateData, slotFor } from "../shared/doll";
 import { normalizeHairConfig, normalizeHeadConfig, normalizePalette } from "../shared/avatarV2";
 import { parseImage } from "./images";
@@ -141,7 +142,7 @@ export async function deleteTemplate(env: Env, actor: Actor, garmentId: string, 
 }
 
 // ───── 造型 ─────
-interface LookInput { name?: unknown; notes?: unknown; is_favorite?: unknown; status?: unknown; state?: unknown }
+interface LookInput { name?: unknown; notes?: unknown; is_favorite?: unknown; status?: unknown; state?: unknown; /** Phase 3.8C：離線保存的版本基準；不同＝409 */ base_updated_at?: unknown }
 interface LookRow { id: string; name: string; avatar_id: string; notes: string | null; is_favorite: number; status: string; created_at: string; updated_at: string; state: string | null }
 
 const summary = (l: LookRow & { item_count?: number; thumb_at?: string | null }) => ({
@@ -199,6 +200,14 @@ async function stateStatements(env: Env, lookId: string, raw: unknown): Promise<
     const g = await env.DB.prepare("SELECT id FROM garments WHERE id = ?").bind(gid).first();
     if (!g) throw new HttpError(400, "bad_garment", "有衣物不存在，未能儲存造型");
   }
+  // Phase 3.9A.3：素材圖層及背景圖片必須引用存在的素材版本（去背圖必須已有）
+  for (const p of state.props ?? []) {
+    const v = await env.DB.prepare("SELECT cutout_key FROM studio_asset_versions WHERE id = ? AND asset_id = ?").bind(p.version_id, p.asset_id).first<{ cutout_key: string | null }>().catch(() => null);
+    if (!v) throw new HttpError(400, "asset_not_found", `找不到素材「${p.name || p.asset_id}」（可能已刪除）`);
+    if (p.variant === "cutout" && !v.cutout_key) throw new HttpError(400, "no_cutout", "這個素材版本未有去背圖");
+  }
+  const bgImg = state.background?.image;
+  if (bgImg && !(await env.DB.prepare("SELECT id FROM studio_asset_versions WHERE id = ? AND asset_id = ?").bind(bgImg.version_id, bgImg.asset_id).first().catch(() => null))) throw new HttpError(400, "background_not_found", "找不到背景圖片");
   const stmts = [env.DB.prepare("DELETE FROM doll_look_items WHERE look_id = ?").bind(lookId)];
   // doll_look_items 只是索引（每件衣物一行）：同一套裝穿了多個部件時只記一次；完整內容在 state
   const indexed = new Set<string>();
@@ -228,8 +237,9 @@ export async function createLook(env: Env, actor: Actor, input: LookInput) {
 }
 
 export async function updateLook(env: Env, actor: Actor, id: string, input: LookInput) {
-  const cur = await env.DB.prepare("SELECT id FROM doll_looks WHERE id = ?").bind(id).first<{ id: string }>();
+  const cur = await env.DB.prepare("SELECT id, updated_at FROM doll_looks WHERE id = ?").bind(id).first<{ id: string; updated_at: string }>();
   if (!cur) throw new HttpError(404, "look_not_found", "找不到這個造型");
+  if (typeof input.base_updated_at === "string" && input.base_updated_at !== cur.updated_at) throw new HttpError(409, "look_conflict", "這個角色造型已在另一處修改。你的修改仍保留，可以選擇覆寫或另存副本。");
   const has = (k: string) => Object.prototype.hasOwnProperty.call(input, k);
   const sets: string[] = [];
   const binds: unknown[] = [];
@@ -251,15 +261,24 @@ export async function updateLook(env: Env, actor: Actor, id: string, input: Look
   // 只改收藏不算「更新造型」，列表次序不變
   if (sets.some((s) => !s.startsWith("is_favorite"))) { sets.push("updated_at = ?"); binds.push(nowIso()); }
   if (!sets.length) return getLook(env, id);
-  await env.DB.batch([env.DB.prepare(`UPDATE doll_looks SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id), ...stmts]);
+  // 有版本基準：同一交易內以 updated_at 作條件更新，另一處剛剛保存＝0 行 → 整個交易回滾（造型索引不會被改動）
+  const base = typeof input.base_updated_at === "string" ? input.base_updated_at : null;
+  const head = [env.DB.prepare(`UPDATE doll_looks SET ${sets.join(", ")} WHERE id = ?${base ? " AND updated_at = ?" : ""}`).bind(...binds, id, ...(base ? [base] : []))];
+  if (base) head.push(env.DB.prepare("SELECT CASE WHEN changes() = 0 THEN json('look_conflict') ELSE 1 END AS ok"));
+  try { await env.DB.batch([...head, ...stmts]); }
+  catch (e) { if (base && /malformed JSON|look_conflict/i.test(String((e as Error)?.message ?? e))) throw new HttpError(409, "look_conflict", "這個角色造型已在另一處修改。你的修改仍保留，可以選擇覆寫或另存副本。"); throw e; }
   await audit(env, actor, "doll.look.update", id);
   return getLook(env, id);
 }
 
 export async function deleteLook(env: Env, actor: Actor, id: string) {
+  // 只用於這個造型的工作室素材（素材圖層、背景圖）：刪除造型後若已沒有任何引用，一併清理（素材庫內的保留）
+  const st = normalizeLookState(parse((await env.DB.prepare("SELECT state FROM doll_looks WHERE id = ?").bind(id).first<{ state: string | null }>())?.state ?? null));
+  const own = [...new Set([...(st?.props ?? []).map((p) => p.asset_id), ...(st?.background?.image ? [st.background.image.asset_id] : [])])];
   const res = await env.DB.prepare("DELETE FROM doll_looks WHERE id = ?").bind(id).run();
   if (!res.meta.changes) throw new HttpError(404, "look_not_found", "找不到這個造型");
   await env.DB.prepare("DELETE FROM doll_look_thumbs WHERE look_id = ?").bind(id).run();
+  if (own.length) await purgeUnusedAssets(env, own).catch((e) => console.warn("look_purge", String(e)));
   await audit(env, actor, "doll.look.delete", id);
 }
 

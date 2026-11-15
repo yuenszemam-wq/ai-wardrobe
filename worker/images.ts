@@ -1,3 +1,5 @@
+import { hasColumn, hasTable } from "./schema";
+import { referencedKeys } from "./purge";
 import { acceptSmallThumbnail } from "./thumbnails";
 import { Actor, Env, HttpError, audit, intVar, json, newId, nowIso, sha256Hex } from "./util";
 
@@ -418,6 +420,11 @@ export async function serveImage(req: Request, env: Env, imageId: string): Promi
 
 export async function deleteImage(env: Env, actor: Actor, imageId: string): Promise<Response> {
   if (await env.DB.prepare("SELECT id FROM doll_looks WHERE state LIKE ? LIMIT 1").bind('%img:' + imageId + '%').first()) throw new HttpError(409, "image_in_use", "這張圖片仍被已保存造型引用，請保留此版本");
+  // Phase 3.9A.2.1：衣服配搭的圖層保存了圖片版本，被使用的版本不能刪除（否則舊造型會改變或缺圖）
+  if (await hasColumn(env, "outfit_layers", "image_id")) {
+    const u = await env.DB.prepare("SELECT o.name FROM outfit_layers l JOIN outfits o ON o.id = l.outfit_id WHERE l.image_id = ? LIMIT 1").bind(imageId).first<{ name: string }>();
+    if (u) throw new HttpError(409, "image_in_use", `這張圖片仍被造型「${u.name}」使用。可先在造型中改用新圖片，再刪除此版本`);
+  }
   for (const { table, fk } of [tableFor("garment"), tableFor("outfit")]) {
     const row = await env.DB.prepare(`SELECT id, r2_key, ${fk} AS owner_id, is_primary FROM ${table} WHERE id = ?`)
       .bind(imageId)
@@ -473,10 +480,9 @@ export async function cleanupOrphans(env: Env, actor: Actor, doDelete: boolean):
       const chunk = keys.slice(i, i + 50);
       const ph = chunk.map(() => "?").join(",");
       const found = new Set<string>();
-      for (const t of ["garment_images", "outfit_images"]) {
-        const { results } = await env.DB.prepare(`SELECT r2_key FROM ${t} WHERE r2_key IN (${ph})`).bind(...chunk).all<{ r2_key: string }>();
-        results.forEach((r) => found.add(r.r2_key));
-      }
+      // 所有保存 R2 key 的資料表（以前只檢查衣物及造型圖片：日誌照片、工作室素材會被誤當作孤兒）
+      for (const k of await referencedKeys(env, chunk)) found.add(k);
+      if (await hasTable(env, "r2_purge_queue")) for (const r of (await env.DB.prepare(`SELECT r2_key FROM r2_purge_queue WHERE r2_key IN (${ph})`).bind(...chunk).all<{ r2_key: string }>()).results) found.add(r.r2_key);
       // 只當作孤兒處理超過 1 小時的檔案，避免誤刪正在寫入中的上傳
       for (const o of list.objects.slice(i, i + 50)) {
         // settings/ 是主頁背景圖等設定檔案；doll/ 是角色素材（由 doll_asset_files 管理），都不屬於孤兒
