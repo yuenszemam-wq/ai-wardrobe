@@ -21,7 +21,7 @@ export type OpClass = "class_a" | "class_b" | "free" | "unknown";
 /** 官方分類；文件沒有列出的操作標示為 unknown（不會當作免費） */
 export const classOf = (action: string): OpClass => (CLASS_A.has(action) ? "class_a" : CLASS_B.has(action) ? "class_b" : FREE_OPS.has(action) ? "free" : "unknown");
 
-export const PURPOSES: [string, string][] = [["originals", "衣物原圖"], ["processed", "去背圖片（衣物高清圖）"], ["thumbnails", "舊版 R2 縮圖"], ["outfits", "穿搭圖片"], ["doll_assets", "頭部、髮件及衣物部件"], ["doll_models", "自訂身體素材"], ["home_bg", "首頁背景"], ["diary_photos", "穿搭日誌照片"], ["other", "其他 R2 物件"]];
+export const PURPOSES: [string, string][] = [["originals", "衣物原圖"], ["processed", "去背圖片（衣物高清圖）"], ["thumbnails", "舊版 R2 縮圖"], ["outfits", "穿搭圖片"], ["doll_assets", "頭部、髮件及衣物部件"], ["doll_models", "自訂身體素材"], ["home_bg", "首頁背景"], ["diary_photos", "穿搭日誌照片"], ["studio_background", "工作室背景（Studio background）"], ["studio_asset", "工作室素材（Studio asset）"], ["other", "其他 R2 物件"]];
 export function purposeOf(key: string): string {
   if (key.startsWith("originals/")) return "originals";
   if (key.startsWith("processed/")) return "processed";
@@ -31,6 +31,8 @@ export function purposeOf(key: string): string {
   if (key.startsWith("doll/models/")) return "doll_models";
   if (key.startsWith("settings/home-bg")) return "home_bg";
   if (key.startsWith("diary/")) return "diary_photos";
+  if (key.startsWith("studio/background/")) return "studio_background";
+  if (key.startsWith("studio/")) return "studio_asset";
   return "other";
 }
 export type Counter = Map<string, number>;
@@ -238,6 +240,9 @@ export async function appUsage(env: Env) {
   if (dollModels) { storage.doll_models.objects += dollModels.n; storage.doll_models.bytes += dollModels.b; }
   const diary = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(file_size),0) AS b FROM diary_photos").first<{ n: number; b: number }>().catch(() => null);
   if (diary) { storage.diary_photos.objects += diary.n; storage.diary_photos.bytes += diary.b; }
+  // 工作室素材：原圖（同一檔案被多個版本共用時只計一次）及去背圖；背景與其他素材分開統計
+  const studio = await env.DB.prepare("SELECT a.kind AS kind, COUNT(*) AS n, COALESCE(SUM(x.b),0) AS b FROM (SELECT asset_id, r2_key AS k, MAX(file_size) AS b FROM studio_asset_versions GROUP BY r2_key UNION ALL SELECT asset_id, cutout_key AS k, MAX(COALESCE(cutout_size,0)) AS b FROM studio_asset_versions WHERE cutout_key IS NOT NULL GROUP BY cutout_key) x JOIN studio_assets a ON a.id = x.asset_id GROUP BY a.kind").all<{ kind: string; n: number; b: number }>().catch(() => ({ results: [] as { kind: string; n: number; b: number }[] }));
+  for (const r of studio.results) { const p = r.kind === "background" ? "studio_background" : "studio_asset"; storage[p].objects += r.n; storage[p].bytes += r.b; }
   const bg = await env.DB.prepare("SELECT value FROM app_settings WHERE key = 'home_bg'").first<{ value: string }>().catch(() => null);
   if (bg) { try { const o = JSON.parse(bg.value) as { size?: number }; storage.home_bg.objects += 1; storage.home_bg.bytes += Number(o.size) || 0; } catch { /* ignore */ } }
   let ops: { purpose: string; op: string; n: number }[] = [], table = true;

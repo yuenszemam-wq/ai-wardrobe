@@ -1,5 +1,9 @@
 // 角色換裝工作室（Phase 3）：角色始終可見，底部短面板切換「衣服／圖層／外貌／姿勢」。
 // 穿著衣服時可直接在畫布上調整骨架；衣物自由疊穿；頭部及髮型可在這裡上傳及校正。
+import type { BackgroundSpec } from "../../shared/studioScene";
+import { BackgroundPanel } from "../studio/BackgroundPanel";
+import { loadImage as loadStudioImage } from "../studio/render";
+import { prepareImage as prepareStudioImage, uploadStudioAsset } from "../studio/assets";
 import { PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarModel, DEFAULT_BODY_MODEL, adjustHair, adjustHead, headFitFor, isBuiltinModel, unadjustRect } from "../../shared/avatarModel";
 import { RIG_V2 } from "../../shared/avatarV2";
@@ -13,7 +17,7 @@ import { DOLL_H, DOLL_W, FULL_CONTENT, Fit, Piece, SETUP_KEYS, SETUP_LABEL, Setu
 import { poseDistance, suggestSleeveRot } from "../../shared/garmentMesh";
 import { api, ApiError, displayName, Garment } from "../api";
 import { IconChevronLeft, IconChevronRight, IconEye, IconEyeOff, IconHand, IconHeart, IconLayers, IconMore, IconPerson, IconPose, IconSave, IconShirt, IconTarget, IconRotate, IconLock, IconArm } from "../components/icons";
-import { Spinner, toast } from "../components/ui";
+import { Sheet, Spinner, toast } from "../components/ui";
 import { AssetPanel, Draft } from "../doll/AssetPanel";
 import { Analysis, analyze, canvasBlob, loadImage, prepareAsset } from "../doll/content";
 import { BehindStats, DollRenderer, Scene, flatLocate, flatRect, mainBone } from "../doll/engine";
@@ -76,6 +80,12 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
   const [analyses, setAnalyses] = useState<Map<string, Analysis>>(new Map());
   const [worn, setWorn] = useState<Worn[]>([]);
   const [look, setLook] = useState<Appearance>(DEFAULT_APPEARANCE);
+  // Phase 3.9A.2：造型背景（與衣服配搭共用）；null＝原本預設背景
+  const [bg, setBg] = useState<BackgroundSpec | null>(null);
+  const [bgOpen, setBgOpen] = useState(false);
+  const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
+  const bgSrc = bg?.type === "image" && bg.image ? `/api/studio/versions/${bg.image.version_id}${bg.image.variant === "cutout" ? "?cutout=1" : ""}` : null;
+  useEffect(() => { if (!bgSrc) { setBgImg(null); return; } let live = true; loadStudioImage(bgSrc).then((i) => live && setBgImg(i)).catch(() => live && setBgImg(null)); return () => { live = false; }; }, [bgSrc]);
   const [pose, setPoseState] = useState<Pose>({});
   const [front, setFront] = useState<FrontPart[]>([]);
   const [name, setName] = useState("");
@@ -177,10 +187,10 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
       const latest = ref ? ml.models.find((x) => x.id === ref.id) : null;
       if (ref && latest && latest.revision > ref.rev) setNotice(`這個造型使用「${modelLabel(m)}」第 ${ref.rev} 版（最新第 ${latest.revision} 版），已按保存時的樣子顯示。可在「外貌 › 身體」更新到最新版本。`);
       if (l) {
-        setExtra(l.look.garments); setWorn(l.worn); setLook(l.appearance); setPoseState(l.pose); setFront(l.front); setName(l.look.name); setFavorite(l.look.is_favorite);
+        setExtra(l.look.garments); setWorn(l.worn); setLook(l.appearance); setPoseState(l.pose); setFront(l.front); setName(l.look.name); setFavorite(l.look.is_favorite); setBg(l.look.state?.background ?? null);
         if (l.converted) { setNotice("這個造型原本用舊角色保存，已自動換算到新角色。檢查位置後按「保存」即完成轉換。"); setDirty(true); }
       } else {
-        setExtra([]); setWorn([]); setLook(DEFAULT_APPEARANCE); setPoseState({}); setFront([]); setName(""); setFavorite(false);
+        setExtra([]); setWorn([]); setLook(DEFAULT_APPEARANCE); setPoseState({}); setFront([]); setName(""); setFavorite(false); setBg(null);
       }
       setLoaded(true);
     })().catch((e) => {
@@ -349,7 +359,8 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     // 衣物原圖視圖與對比是兩件事：對比時仍然留在原圖，只是暫時不套用遮罩
     flat: view === "source" ? selId : null,
     wire: view === "mesh" && !compare ? selId : null,
-  }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare]);
+    background: bg ? { spec: bg, img: bgImg } : null,
+  }), [shownHair, shownHead, colors, pose, front, resolved, overlayMode, selId, compareKind, view, compare, bg, bgImg]);
   const mats = useMemo(() => solve(rig, pose), [rig, pose]);
   // 「移到身後」的實際像素效果：停筆後量度一次（低解像度），讓使用者分辨「身後」與「隱藏」
   const [behindStats, setBehindStats] = useState<BehindStats | null>(null);
@@ -928,13 +939,13 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     ctx.fillRect(0, 0, 8, 8);
     setItem(r.key, { mask: c.toDataURL("image/png") });
   }
-  async function exportPng() {
+  async function exportPng(withBg = false) {
     setMenu(false);
     if (pending.size) return toast("衣物仍在載入，請稍後再試", "err");
     const c = document.createElement("canvas");
     c.width = DOLL_W; c.height = DOLL_H;
     const ctx = c.getContext("2d")!;
-    const still = { ...scene, overlay: null };
+    const still = { ...scene, overlay: null, background: withBg ? scene.background : null };
     for (let i = 0; i < 60 && !renderer.paint(ctx, still, [1, 0, 0, 1, 0, 0]); i++) { await new Promise((r) => setTimeout(r, 120)); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); }
     try {
       const blob = await canvasBlob(c, "image/png"), file = new File([blob], `${name.trim() || "造型"}.png`, { type: "image/png" });
@@ -1171,6 +1182,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
     const state: LookState = {
       v: 3, model: modelRef(bodyModel), head: look.head, head_config: head, hair: look.hair, ...(hair?{hair_config:hair}:{}), hair_color: look.hair_color, accent_color: look.accent_color, tip_color: look.tip_color, pose: clampPose(rig, pose), front,
       items: resolved.map(frozenItem),
+      ...(bg ? { background: bg } : {}),
     };
     const target = asNew ? undefined : id;
     try {
@@ -1367,6 +1379,7 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
           <button type="button" aria-label="更多" aria-expanded={menu} onClick={() => setMenu(!menu)} className="chip grid h-9 w-9 shrink-0 place-items-center rounded-full text-[17px]"><IconMore /></button>
         </div>
         )}
+        {bgOpen && <Sheet title="造型背景" onClose={() => setBgOpen(false)}><div data-testid="look-bg-panel"><BackgroundPanel value={bg} legacyLabel="原本背景" onChange={(b) => { setBg(b); setDirty(true); }} onUpload={async (f) => { try { const img = await prepareStudioImage(f); const a = await uploadStudioAsset(img, { kind: "background", name: f.name.replace(/\.[^.]+$/, "") || "背景", inLibrary: false }); return { asset_id: a.id, version_id: a.version!.id }; } catch (e) { toast((e as Error).message, "err"); return null; } }} /></div></Sheet>}
         {menu && !setup && (
           <div className="absolute right-2.5 z-50 mt-1 w-44 overflow-hidden rounded-2xl border border-gold/50 bg-velvet text-[13px] shadow-xl" role="menu">
             <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); leave("/dressing"); }}>新造型</button>
@@ -1374,7 +1387,9 @@ export default function DressingRoom({ id, setup }: { id?: string; setup?: Setup
             <button type="button" role="menuitem" data-testid="menu-batch-save" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); openBatch(); }}>一次保存全部衣物設定</button>
             <button type="button" role="menuitem" data-testid="menu-save-both" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); openBatch(true); }}>保存造型及全部衣物設定</button>
             <button type="button" role="menuitem" data-testid="menu-diary" className="block w-full px-4 py-2.5 text-left" onClick={async () => { setMenu(false); const lid = dirty || !id ? await save() : id; if (lid) navigate(`/diary/new?look=${lid}`); }}>加入穿搭日誌</button>
+            <button type="button" role="menuitem" data-testid="menu-background" className="block w-full px-4 py-2.5 text-left" onClick={() => { setMenu(false); setBgOpen(true); }}>背景</button>
             <button type="button" role="menuitem" data-testid="export-png" className="block w-full px-4 py-2.5 text-left" onClick={() => void exportPng()}>匯出透明 PNG</button>
+            {bg && bg.type !== "transparent" && <button type="button" role="menuitem" data-testid="export-png-bg" className="block w-full px-4 py-2.5 text-left" onClick={() => void exportPng(true)}>匯出 PNG（含背景）</button>}
             {id && <button type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left text-wine" onClick={() => { setMenu(false); void removeLook(); }}>刪除造型</button>}
           </div>
         )}

@@ -1,5 +1,7 @@
 // 角色換裝的畫布渲染器：身體部件、頭部、髮型、衣物全部畫在同一張 Canvas 上。
 // 衣物用連續網格跟隨骨架（shared/garmentMesh.ts）；畫面、造型縮圖及匯出圖片用同一套繪畫程式。
+import type { BackgroundSpec } from "../../shared/studioScene";
+import { paintBackground } from "../studio/render";
 import { Mat, Pose, Rig, applyMat, invert, multiply, rotateAbout, solve } from "../../shared/avatarRig";
 import { FrontPart, HairConfig, HairPart, HairStats, HeadConfig, Rgb, resolveHairColors, hexToRgb, analyzeHair, hairBoneId, recolorHair, rigFor } from "../../shared/avatarV2";
 import { Content, DOLL_H, DOLL_W, Fit, FULL_CONTENT, defaultOpts, SLOT_BONE, SLOT_SKIN, Slot, WearOpts, fitHeight, toImage } from "../../shared/doll";
@@ -43,6 +45,8 @@ export interface Scene {
   wire?: string | null;
   /** 只供量度：不畫這件衣物「移到身後」的部分（比較兩次結果＝實際仍可見的身後像素） */
   omitBehind?: string | null;
+  /** Phase 3.9A.2：造型背景（與衣服配搭共用渲染）；null＝原本預設 */
+  background?: { spec: BackgroundSpec; img: HTMLImageElement | null } | null;
 }
 /** 「移到身後」的量度結果：total＝身後部分本身的像素；visible＝在完整角色畫面中仍然看得到的像素（其餘被身體、頭部、頭髮或衣物前面部分遮住） */
 export interface BehindStats { total: number; visible: number }
@@ -530,6 +534,10 @@ export class DollRenderer {
    * 繪畫整個角色。base＝邏輯座標 → 畫布像素的矩陣。回傳是否全部圖片已就緒（未就緒的會在讀取後觸發 onReady）。
    */
   paint(ctx: CanvasRenderingContext2D, scene: Scene, base: Mat): boolean {
+    if (scene.background && !scene.flat) {
+      ctx.setTransform(base[0], base[1], base[2], base[3], base[4], base[5]);
+      paintBackground(ctx, scene.background.spec, DOLL_W, DOLL_H, scene.background.img);
+    }
     if (scene.flat) { const it = scene.items.find((i) => i.key === scene.flat); if (it) return this.paintFlat(ctx, it, scene, base); }
     let complete = true;
     const rig: Rig = rigFor(scene.hair, this.model.rig);
@@ -734,10 +742,13 @@ export class DollRenderer {
     const k = width / DOLL_W;
     const once = () => {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      g.addColorStop(0, "#f7f0f6"); g.addColorStop(1, "#e6d6ea");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!scene.background || scene.background.spec.type === "transparent") {
+        const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        g.addColorStop(0, "#f7f0f6"); g.addColorStop(1, "#e6d6ea");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
       return this.paint(ctx, scene, [k, 0, 0, k, 0, 0]);
     };
     const prev = this.onReady;

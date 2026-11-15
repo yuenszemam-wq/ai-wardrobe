@@ -2,6 +2,7 @@
 // 全部是純函數／常數，前端及 Worker 共用，可直接單元測試。座標＝1200×1800 邏輯畫布像素。
 // Phase 3：Avatar V2 是唯一角色；衣物分類只決定預設位置及圖層，不再限制可以怎樣疊穿。
 
+import { BackgroundSpec, normalizeBackground } from "./studioScene";
 import { normalizeManualMesh, manualUV } from "./manualMesh";
 import { AVATAR_V2_ID, ImageRef, HeadConfig, normalizeHeadConfig, FrontPart, HairConfig, normalizeHairConfig, RIG_V2, isImageRef, normalizeColorValue } from "./avatarV2";
 import { Pose, Rig, normalizePose, posedAnchors } from "./avatarRig";
@@ -477,6 +478,8 @@ export interface LookState {
   pose: Pose;
   front: FrontPart[];
   items: LookItem[];
+  /** Phase 3.9A.2：造型背景（與衣服配搭共用 BackgroundSpec）；沒有＝原本預設背景 */
+  background?: BackgroundSpec | null;
 }
 export const MAX_ITEMS = 40;
 const modelRef = (v: unknown): { id: string; rev: number } | null => {
@@ -537,5 +540,6 @@ export function normalizeLookState(v: unknown): LookState | null {
     accent_color: o.accent_color === "original" ? "original" : normalizeColorValue(o.accent_color),
     tip_color: typeof o.tip_color === "string" && /^#[0-9a-f]{6}$/i.test(o.tip_color) ? o.tip_color.toLowerCase() : null,
     pose, front: frontOf(o.front), items,
+    ...(normalizeBackground(o.background) ? { background: normalizeBackground(o.background) } : {}),
   };
 }
