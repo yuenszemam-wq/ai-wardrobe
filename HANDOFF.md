@@ -4,7 +4,7 @@
 > 只記錄實際完成的動作；未部署、未測試的項目會明確標示。
 
 ## 1. 最後更新時間
-2026-11-16 05:45（香港時間）— 第 1 次執行
+2026-11-16 06:30（香港時間）— 第 1 次執行
 
 ## 2. 整體進度
 
@@ -24,10 +24,13 @@
 - ✅ 自由套索／多邊形套索／矩形選取（引擎：polygonSelection／rectSelection）
 - ✅ 邊緣修正（引擎：feather／morph／smooth／defringe white／color）
 - ✅ Undo／Redo（引擎：MaskHistory，RLE 壓縮區塊）
-- ⬜ 工作室 UI（CutoutStudio.tsx）
-- ⬜ 觸控手勢（縮放、移動、Pencil）
-- ⬜ 儲存（R2、garment_images、遮罩持久化）
-- ⬜ 另存為新衣物（同一原圖拆多件）
+- 🔄 工作室 UI `src/cutoutStudio/CutoutStudio.tsx`：已寫好並 build／typecheck 通過，**瀏覽器測試未完成**
+- 🔄 觸控手勢（已實作：雙指縮放移動、滾輪、Pencil 時手指只移動、pointercancel；未測試）
+- 🔄 儲存（`studioIO.ts`：原解析度 PNG、驗證 alpha、/api/images/upload、縮圖、`POST /api/cutout-edits`；遮罩不另存 R2，由去背圖 alpha÷原圖 alpha 還原；未做 UI 測試）
+- 🔄 migration `0017_cutout_edits.sql`（只新增表）：**未套用到任何遠端 D1**；未套用時去背圖照常保存，只是沒有跨衣物來源記錄
+- 🔄 另存為新衣物（已實作：只上傳新去背圖，cutout_edits 參照原圖；保存後返回同一原圖繼續；未測試）
+- ✅ 入口：衣物詳情「編輯圖片／手動去背」、CutoutSheet「手動去背／以此結果手動修正」（上傳完成頁→?cutout=1 亦經此）
+- ⬜ 入口：創作工作室素材上傳（AssetUploadSheet，CutoutStudio 已支援 blob 模式，未接上）
 - ✅ Segmentation Provider Interface（`src/cutoutStudio/segmentation.ts`，只有 ManualFloodProvider）
 - ⬜ 測試／Preview
 
@@ -35,12 +38,13 @@
 - ⬜ 尚未開始
 
 ## 3. 正在做甚麼
-- 規格 A：分支 `claude/ai-wardrobe-cutout-ai-lab-nh3w0e`，最後 commit `012a136`（遮罩引擎）。下一個檔案：`src/cutoutStudio/CutoutStudio.tsx`（全螢幕 UI）。
+- 規格 A：分支 `claude/ai-wardrobe-cutout-ai-lab-nh3w0e`，最後 commit `0f9e34d`（工作室 UI＋入口）。正在寫 Playwright 測試 `test/cutout-studio-ui.mjs`。
 
 ## 4. 下一步
-- 寫 `src/cutoutStudio/CutoutStudio.tsx`：全螢幕；載入原圖（及既有 processed→maskFromProcessed）；顯示畫布＋縮放／移動；工具：自動、擦除、還原、魔術棒、套索、多邊形、矩形、邊緣、移動；背景預覽；Undo／Redo；完成→預覽→儲存（processed＋縮圖、設主圖、另存新衣物、另存換裝素材、下載 PNG）。
-- 入口：CutoutSheet 加「手動去背／選取衣物」按鈕；GarmentDetail 圖片管理。
-- 另存為新衣物不重複儲存原圖：需要 migration（例如 garment_images 加 `source_image_id` 跨衣物來源參照）— 尚未決定是否做，若做需套用到 Preview D1。
+1. 寫並執行 `test/cutout-studio-ui.mjs`（Chromium＋WebKit）：開啟工作室、擦除、Undo／Redo、魔術棒、套索、儲存→確認上傳 PNG 有透明像素、原圖 sha 不變、另存新衣物。加入 CI workflow。
+2. 接上 AssetUploadSheet 的手動去背（blob 模式）。
+3. 開 PR（不合併），等 Workers Builds Preview URL。
+4. 然後開始規格 B（獨立分支 `feature/ai-lab-workers-vision`，從 main 開）。
 
 ## 5. 問題及已嘗試方法
 - `gh auth status` 顯示 GH_TOKEN 無效；改用 GitHub MCP 工具及 git（經 proxy）操作，git fetch 正常。
