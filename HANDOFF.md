@@ -17,6 +17,7 @@
   - 正式 `AI_LAB_ENABLED="true"`；App 設定頁仍預設關閉，要 Sally 自己開啟。
   - Meta 授權：本環境沒有 Cloudflare API Token，所以在設定頁加了「接受 Meta Llama 3.2 授權」按鈕（擁有者確認後 Worker 以 AI binding 送出官方 `{"prompt":"agree"}`）。**需要 Sally 自己按一次**。
 - 還原方法：把 main 重設到 `backup-before-merge-20261116`（7639503）；資料表可按 README 的 DROP 指令移除（不影響衣物資料）。
+- ✅ 正式部署已確認：main `6808173` 上線後，正式網站首頁 200，JS 包含新功能文字，`/api/ai-lab/status` 未登入回 401。
 - 未做：真實 Workers AI 呼叫（由 Sally 自己測試）、iPhone 實機。
 
 ### 第 2 步：main 合併狀態檢查
@@ -66,7 +67,7 @@
 - 兩份規格已合併到 main 並部署正式版，等 Sally 自己測試及回報問題。
 
 ## 4. 下一步
-1. 查 main 的 Workers Builds（正式部署）是否成功，正式網站首頁 200。
+1. （已確認正式部署成功）先讀正式 D1 `ai_usage_events`（只讀）看 Sally 有沒有使用過。
 2. 查 Sally 在 GitHub／對話中的回報，修正問題（在新分支修，合併前問 Sally，除非她再指示直接合併）。
 3. 若 Sally 已在正式環境使用 AI Lab：從 `ai_usage_events` 讀取真實用量（只讀），整理成本及準確度報告；30 張 ground truth 測試等 Sally 提供答案。
 
