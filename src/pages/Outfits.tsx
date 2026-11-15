@@ -196,7 +196,7 @@ function MineTab() {
 /** Phase 3.9A.3：未保存的創作草稿（這部手機，按帳戶分開）；可繼續編輯或捨棄 */
 function DraftStrip() {
   const [drafts, setDrafts] = useState<StudioDraft[]>([]);
-  useEffect(() => { const load = () => void listStudioDrafts().then(setDrafts).catch(() => setDrafts([])); load(); return onDraftsChange(load); }, []);
+  useEffect(() => { const load = () => void listStudioDrafts().then(setDrafts).catch(() => setDrafts([])); load(); const off = onDraftsChange(load); return () => { off(); }; }, []);
   if (!drafts.length) return null;
   const open = (d: StudioDraft) => navigate(d.kind === "outfit" ? `${d.target ? `/outfits/${d.target}` : "/outfits/new"}?draft=${encodeURIComponent(d.id)}` : `${d.target ? `/dressing/${d.target}` : "/dressing"}?draft=${encodeURIComponent(d.id)}`);
   return (

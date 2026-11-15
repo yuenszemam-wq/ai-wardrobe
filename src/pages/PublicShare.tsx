@@ -25,7 +25,7 @@ export default function PublicShare({ token }: { token: string }) {
   const [cat, setCat] = useState("");
   const [open, setOpen] = useState<PublicGarment | null>(null);
   useEffect(() => {
-    fetch(`/api/share/${encodeURIComponent(token)}`, { credentials: "omit" }).then(async (r) => { const j = await r.json().catch(() => null); if (!r.ok) throw new Error(j?.error?.message || "連結無效或已停止分享"); setData(j); document.title = `${j.title}｜衣櫃分享`; }).catch((e) => setErr((e as Error).message));
+    fetch(`/api/share/${encodeURIComponent(token)}`, { credentials: "omit" }).then(async (r) => { const j = (await r.json().catch(() => null)) as (PublicData & { error?: { message?: string } }) | null; if (!r.ok) throw new Error(j?.error?.message || "連結無效或已停止分享"); if (!j) throw new Error("連結無效或已停止分享"); setData(j); document.title = `${j.title}｜衣櫃分享`; }).catch((e) => setErr((e as Error).message));
   }, [token]);
   const cats = useMemo(() => [...new Set((data?.garments ?? []).map((g) => g.category).filter((x): x is string => !!x))], [data]);
   const list = (data?.garments ?? []).filter((g) => !cat || g.category === cat);
