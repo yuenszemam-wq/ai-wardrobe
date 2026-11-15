@@ -10,7 +10,7 @@
  * - 從未穿著優先：從未穿著（按最早加入，即擱置最久）→ 其餘按最久未穿。
  */
 export type WearMap = Record<string, [days: number, last: string]>;
-export interface SortableGarment { id: string; name: string; price: number | null; created_at: string; updated_at: string }
+export interface SortableGarment { id: string; name: string; price?: number | null; created_at: string; updated_at?: string }
 
 export const WEAR_SORTS = ["most_worn", "recent_worn", "least_recent", "never_first"] as const;
 export type WearSort = (typeof WEAR_SORTS)[number];
