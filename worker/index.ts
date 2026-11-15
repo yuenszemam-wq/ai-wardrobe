@@ -9,7 +9,8 @@ import { handleMcp } from "./mcp";
 import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload, recordOrigin, reviewList, serveSignedImage, setAiStatus, submitSuggestion } from "./ai";
 import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploads";
 import { processStaging } from "./staging";
-import { createOutfit, deleteOutfit, getOutfit, listOutfits, updateOutfit } from "./outfits";
+import { createOutfit, deleteOutfit, getOutfit, listOutfits, serveOutfitThumb, updateOutfit } from "./outfits";
+import * as studio from "./studio";
 import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getPalette, putPalette, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, batchTemplates, serveAssetFile, updateAsset, updateLook } from "./doll";
 import { addModelFile, createModel, createPose, deleteModel, deletePose, getModel, getModelRevision, getModelThumb, getPoseThumb, listModels, listPoses, putModelThumb, putPoseThumb, saveModelDef, serveModelFile, setDefaultModel, updateModelMeta, updatePose } from "./models";
 import { createTaxNode, deleteTaxNode, ensureTaxonomy, getTaxonomy, reorderTaxNodes, updateTaxNode } from "./taxonomy";
@@ -464,6 +465,26 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       requireScope(actor, "update");
       return json(await createOutfit(env, actor, await readJson(req)), 201);
     }
+  }
+  m = path.match(/^\/api\/outfits\/(out_[\w-]+)\/thumb$/);
+  if (m && method === "GET") { requireScope(actor, "read"); return serveOutfitThumb(req, env, m[1]); }
+  // ───── Phase 3.9A.2：工作室素材 ─────
+  if (path === "/api/studio/assets") {
+    if (method === "GET") { requireScope(actor, "read"); return json(await studio.listAssets(env, url.searchParams)); }
+    if (method === "POST") { requireSession(actor); return json(await studio.createAsset(env, actor, req), 201); }
+  }
+  m = path.match(/^\/api\/studio\/assets\/(sta_[a-z2-7]+)$/);
+  if (m) {
+    if (method === "GET") { requireScope(actor, "read"); return json(await studio.getAsset(env, m[1])); }
+    if (method === "PATCH") { requireSession(actor); return json(await studio.updateAsset(env, actor, m[1], await readJson(req))); }
+    if (method === "DELETE") { requireSession(actor); return json(await studio.deleteAsset(env, actor, m[1])); }
+  }
+  m = path.match(/^\/api\/studio\/versions\/(stv_[a-z2-7]+)(?:\/(thumb|cutout|to-garment))?$/);
+  if (m) {
+    if (!m[2] && method === "GET") { requireScope(actor, "read"); return studio.serveVersion(req, env, m[1], url.searchParams.get("cutout") === "1" ? "cutout" : "original"); }
+    if (m[2] === "thumb" && method === "GET") { requireScope(actor, "read"); return studio.serveVersion(req, env, m[1], "thumb"); }
+    if (m[2] === "cutout" && method === "POST") { requireSession(actor); return json(await studio.addCutout(env, actor, req, m[1]), 201); }
+    if (m[2] === "to-garment" && method === "POST") { requireSession(actor); return json(await studio.versionToGarment(env, actor, m[1], await readJson(req)), 201); }
   }
   m = path.match(/^\/api\/outfits\/([\w-]+)$/);
   if (m) {

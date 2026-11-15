@@ -25,6 +25,7 @@ import GarmentSetup from "./pages/GarmentSetup";
 import PublicUpload from "./pages/PublicUpload";
 import Settings from "./pages/Settings";
 import TaxonomyManager from "./pages/TaxonomyManager";
+import StudioAssets from "./pages/StudioAssets";
 import Wardrobe from "./pages/Wardrobe";
 import { setLocalAccount } from "./localWardrobe";
 import { ApiError } from "./api";
@@ -108,6 +109,7 @@ export default function App() {
   else if (match("/outfits", path)) page = <Outfits />;
   else if (match("/outfits/new", path)) page = <OutfitStudio />;
   else if ((p = match("/outfits/:id", path))) page = <OutfitStudio id={p.id} />;
+  else if (match("/studio/assets", path)) page = <StudioAssets />;
   else if (match("/dressing", path)) page = <DressingRoom />;
   else if (match("/dressing/setup", path)) page = <GarmentSetup />;
   else if ((p = match("/dressing/setup/:gid", path))) { const q = new URLSearchParams(path.split("?")[1] ?? ""); page = <DressingRoom setup={{ gid: p.gid, piece: q.get("piece"), model: q.get("model") }} />; }
@@ -186,7 +188,7 @@ const TABS = [
   { to: "/", label: "首頁", Icon: IconHome, test: (p: string) => p === "/" || p.startsWith("/analysis") },
   { to: "/wardrobe", label: "衣櫃", Icon: IconCrown, test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
   { to: "", label: "新增", Icon: IconPlus, test: (p: string) => p.startsWith("/import") },
-  { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") || p.startsWith("/dressing") || p.startsWith("/diary") },
+  { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") || p.startsWith("/dressing") || p.startsWith("/diary") || p.startsWith("/studio") },
   { to: "/settings", label: "設定", Icon: IconGear, test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
 ];
 

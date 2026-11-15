@@ -18,6 +18,9 @@ export interface OutfitSummary {
   created_at?: string;
   updated_at?: string;
   items: { garment_id: string; name: string; image_id: string | null; layer_order: number; x: number | null; y: number | null; w: number | null; h: number | null }[];
+  /** Phase 3.9A.2：完整合成縮圖（保存造型時產生，與畫布一致） */
+  thumb_url?: string | null;
+  layer_count?: number;
 }
 export interface LookSummary { id: string; name: string; is_favorite: boolean; item_count: number; thumb_at: string | null; created_at: string; updated_at: string }
 type Kind = "outfit" | "look";
@@ -27,7 +30,7 @@ type Sort = "updated" | "created" | "name";
 const SORT_LABEL: Record<Sort, string> = { updated: "最近更新", created: "最新建立", name: "名稱" };
 const KEY = "aw:outfits:view";
 /** 我的背景／我的素材庫（Phase 3.9A.2 啟用） */
-const STUDIO_ASSETS_READY = false;
+const STUDIO_ASSETS_READY = true;
 
 /** 穿搭頁三個分頁（我的穿搭／日誌日曆／素材管理）的共用切換列；日誌日曆即 /diary */
 export type OutfitsTab = "mine" | "diary" | "assets";
@@ -222,6 +225,11 @@ export function LookPreview({ l }: { l: LookSummary }) {
 
 /** 穿搭縮圖：已排版的按儲存位置縮小顯示；否則顯示成品照或頭四件單品 */
 export function OutfitPreview({ o }: { o: OutfitSummary }) {
+  if (o.thumb_url) return (
+    <div className="checker relative aspect-[3/4] overflow-hidden rounded-[14px] ring-1 ring-gold/50" data-thumb="full">
+      <img src={o.thumb_url} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-contain" />
+    </div>
+  );
   if (o.items.some((it) => it.x !== null))
     return (
       <div className="relative aspect-[3/4] overflow-hidden rounded-[14px] bg-field ring-1 ring-gold/50">

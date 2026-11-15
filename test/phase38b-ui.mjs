@@ -117,7 +117,7 @@ try {
   await page.goto(A.base + "/settings/r2");
   await page.waitForSelector('[data-testid="r2-usage"]');
   check("未設定官方 Token：清楚列出設定方法，不顯示虛構數字", (await page.getAttribute('[data-testid="r2-usage"]', "data-official")) === "0" && (await page.textContent('[data-testid="r2-official-missing"]')).includes("CF_API_TOKEN") && (await page.locator('[data-testid="r2-cost"]').count()) === 0);
-  check("App 自身用量按用途顯示", (await page.locator('[data-testid="r2-app"] [data-purpose]').count()) === 9);
+  check("App 自身用量按用途顯示（包括工作室背景及素材）", (await page.locator('[data-testid="r2-app"] [data-purpose]').count()) === 11);
   check("舊有縮圖狀態移到進階技術資訊", (await page.locator('[data-testid="r2-advanced"]').count()) === 1);
   await shot("03-r2");
 
