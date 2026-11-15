@@ -49,6 +49,8 @@ export interface WidgetOpts {
   show_category?: boolean;
   /** 分析：顯示圖例 */
   legend?: boolean;
+  /** 穿搭日誌元件：封面來源（auto／photo／look／garment，見 src/diaryCover.ts） */
+  cover?: "auto" | "photo" | "look" | "garment";
 }
 /** 衣櫃概覽可選統計（鍵、名稱） */
 export const OVERVIEW_ITEMS: [string, string][] = [["total", "衣物總數"], ["favorites", "收藏"], ["ai_todo", "待整理"], ["ai_review", "待確認"], ["ai_done", "已完成"], ["missing_image", "缺少圖片"], ["unpriced", "未填價格"]];
@@ -75,7 +77,7 @@ export const DISPLAYS: Record<WidgetType, [string, string, WidgetSize][]> = {
   todo: [["chips", "標籤列", "large"], ["list", "緊湊列表", "medium"], ["count", "待處理總數", "small"]],
   diary_today: [["card", "今日穿搭卡片", "large"], ["mini", "小型今日穿搭", "small"], ["photo", "今日照片大圖", "large"], ["list", "今日全部穿搭", "medium"]],
   diary_recent: [["carousel", "橫向相簿", "large"], ["grid2", "雙欄照片", "large"], ["list", "緊湊列表", "large"], ["hero", "單張大圖", "small"]],
-  diary_calendar: [["month", "本月月曆", "large"], ["dots", "小型月曆", "medium"], ["week", "本週", "large"], ["count", "本月記錄日數", "small"]],
+  diary_calendar: [["photo_month", "照片月曆", "large"], ["photo_week", "照片週曆", "large"], ["month", "緊湊月曆", "large"], ["dots", "小型月曆", "medium"], ["week", "本週", "large"], ["count", "本月記錄日數", "small"]],
   diary_usage: [["ratio", "使用率", "small"], ["numbers", "數字摘要", "medium"], ["bar", "進度條", "medium"], ["count", "穿過件數", "small"]],
   most_worn: [["list", "排行列表", "large"], ["grid", "圖片排行", "large"], ["carousel", "橫向圖片", "large"], ["hero", "第一名", "small"]],
   least_worn: [["list", "排行列表", "large"], ["grid", "圖片排行", "large"], ["carousel", "橫向圖片", "large"], ["hero", "最久未穿", "small"]],
@@ -130,7 +132,7 @@ export const WIDGETS: WidgetSpec[] = [
   { type: "random_look", label: "隨機穿搭", hint: "隨機顯示已保存的穿搭；按「重新推薦」才會更換", count: 1, maxCount: 3, onlyWhen: true, multi: true },
   { type: "diary_today", label: "今日穿搭", hint: "今天的穿搭紀錄及快速記錄" },
   { type: "diary_recent", label: "最近穿搭日誌", hint: "最近的穿搭紀錄及照片", count: 6, maxCount: 12, multi: true },
-  { type: "diary_calendar", label: "本月穿搭日曆", hint: "本月有穿搭紀錄的日子" },
+  { type: "diary_calendar", label: "穿搭日曆", hint: "照片月曆、照片週曆或緊湊月曆（可加入多個，例如月曆＋週曆）", multi: true },
   { type: "diary_usage", label: "本月衣櫃使用率", hint: "本月穿過的衣物佔衣櫃的比例", multi: true },
   { type: "most_worn", label: "最常穿衣物", hint: "按穿著日數排行（只計已穿著紀錄）", count: 5, maxCount: 10, multi: true },
   { type: "least_worn", label: "最近未穿衣物", hint: "已有紀錄但最久未穿的衣物", count: 5, maxCount: 10, multi: true },
@@ -199,6 +201,7 @@ export function normalizeOpts(spec: WidgetSpec, o: unknown): WidgetOpts {
   if (spec.type === "recent_looks" || spec.type === "fav_looks" || spec.type === "random_look") { if (src.look_kind === "outfit" || src.look_kind === "look") out.look_kind = src.look_kind; }
   if (spec.category) for (const k of ["show_name", "show_brand", "show_category"] as const) if (bool(src[k]) !== undefined) out[k] = src[k] as boolean;
   if (spec.type === "analysis" && bool(src.legend) !== undefined) out.legend = src.legend as boolean;
+  if ((spec.type === "diary_calendar" || spec.type === "diary_recent" || spec.type === "diary_today") && (src.cover === "photo" || src.cover === "look" || src.cover === "garment")) out.cover = src.cover;
   return out;
 }
 /** 驗證並修正布局：保留使用者次序；未知元件略去；同類（不可多個）只保留第一個；缺少的元件以隱藏狀態補在最後 */

@@ -8,9 +8,9 @@ const canvas = () => page.locator('[data-testid="doll-canvas"]').evaluate((c) =>
 const editorReady = () => page.waitForFunction(() => document.querySelector('[data-testid="doll-canvas"]')?.dataset.ready === "1", null, { timeout: 20000 });
 try {
   // ───── 穿搭工作室第四個入口 ─────
-  await page.goto(R.base + "/outfits");
+  await page.goto(R.base + "/outfits?tab=assets");
   await page.waitForSelector('[data-testid="entry-assets"]', { timeout: 8000 }).catch(() => undefined);
-  check("穿搭工作室有角色素材入口", (await page.locator('[data-testid="entry-assets"]').count()) === 1);
+  check("穿搭頁「素材管理」有角色素材入口", (await page.locator('[data-testid="entry-assets"]').count()) === 1);
   await page.goto(R.base + "/dressing/assets");
   await page.waitForSelector('[data-testid="studio-bodies"]');
   check("角色素材有四個分類", (await page.locator("[data-studio-tab]").count()) === 4);

@@ -165,7 +165,7 @@ try {
   await page.goto(A.base + "/wardrobe");
   await page.waitForSelector('[data-testid="wardrobe-list"]');
   const full = await page.locator('[data-testid="wardrobe-toolbar"]').boundingBox();
-  check("頂部完整頁首：有蕾絲、全站頁首可見", (await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed")) === "0" && (await page.getAttribute('[data-testid="wardrobe-toolbar"]', "class")).includes("lace-b") && !(await page.getAttribute("header.app-header", "class")).includes("lace-b"));
+  check("頂部完整頁首：有蕾絲，只有衣櫃專用頁首（不顯示全站頁首）", (await page.getAttribute('[data-testid="wardrobe-toolbar"]', "data-collapsed")) === "0" && (await page.getAttribute('[data-testid="wardrobe-toolbar"]', "class")).includes("lace-b") && (await page.locator("header.app-header").count()) === 0);
   await shot("05-wardrobe-full");
   const firstTop0 = await page.locator('[data-gid="gar_h010"]').evaluate((e) => e.getBoundingClientRect().top + scrollY);
   await page.mouse.wheel(0, 900); await page.waitForTimeout(400);

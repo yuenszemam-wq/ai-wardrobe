@@ -135,9 +135,9 @@ try {
   await shot("06-hair-studio");
 
   console.log("衣服設定工作室");
-  await page.goto(R.base + "/outfits");
+  await page.goto(R.base + "/outfits?tab=assets");
   await page.waitForSelector('[data-testid="entry-setup"]', { timeout: 8000 }).catch(() => undefined);
-  check("穿搭工作室有三個入口", (await page.locator('[data-testid="entry-setup"]').count()) === 1);
+  check("穿搭頁「素材管理」有衣服設定入口", (await page.locator('[data-testid="entry-setup"]').count()) === 1);
   await page.goto(R.base + "/dressing/setup");
   await page.waitForSelector("[data-setup-garment]");
   check("列出可換裝的衣物及各項設定狀態", (await page.locator("[data-setup-garment]").count()) === 2 && (await page.locator('[data-setup-garment="gar_set"] [data-item]').count()) === 4);

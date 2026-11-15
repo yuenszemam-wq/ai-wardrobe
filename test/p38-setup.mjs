@@ -7,7 +7,9 @@ import { makeEnv } from "./harness.mjs";
 import { ROOT, TMP, buildApp, buildWorker } from "./doll-build.mjs";
 
 const require = createRequire(import.meta.url);
-export const { chromium, devices } = require("playwright");
+export const { chromium, webkit, devices } = require("playwright");
+/** PW_BROWSER=webkit：以 Playwright WebKit 執行（接近 Safari 引擎，但仍不等於 iPhone 實機） */
+const engine = () => (process.env.PW_BROWSER === "webkit" ? webkit : chromium);
 export const sharp = require(process.env.SHARP_PATH || "sharp");
 export const hex = async (u8) => Buffer.from(await crypto.subtle.digest("SHA-256", u8)).toString("hex");
 export const now = () => new Date().toISOString();
@@ -74,8 +76,8 @@ export async function startApp(name = "p38") {
   });
   await new Promise((r) => server.listen(0, r));
   const base = `http://localhost:${server.address().port}`;
-  const browser = await chromium.launch();
-  const ctx = await browser.newContext({ ...devices["iPhone 13"], deviceScaleFactor: Number(process.env.DOLL_DPR || 1) });
+  const browser = await engine().launch();
+  const ctx = await browser.newContext({ ...devices[process.env.PW_DEVICE || "iPhone 13"], deviceScaleFactor: Number(process.env.DOLL_DPR || 1) });
   await ctx.addCookies([{ name: cookieName, value: cookieValue, url: base }]);
   const page = await ctx.newPage();
   const errors = [];

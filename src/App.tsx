@@ -4,8 +4,8 @@ import { ReactElement, ReactNode, useCallback, useEffect, useLayoutEffect, useRe
 import { api, AppSettings } from "./api";
 import { clearHomeLayoutCache } from "./homeLayoutStore";
 import { clearCachedLists } from "./wardrobeList";
-import { IconCrown, IconDress, IconGear, IconHome, IconPencil, IconPlus, IconSparkle } from "./components/icons";
-import { Link, Spinner, Toast, setSettingsCache } from "./components/ui";
+import { IconCamera, IconCrown, IconDress, IconGear, IconHome, IconPencil, IconPlus, IconSparkle } from "./components/icons";
+import { Link, Sheet, Spinner, Toast, setSettingsCache } from "./components/ui";
 import { match, navigate, usePath } from "./router";
 import GarmentDetail from "./pages/GarmentDetail";
 import Diary from "./pages/Diary";
@@ -48,6 +48,7 @@ export default function App() {
   const [offline,setOffline]=useState(!navigator.onLine);
   useEffect(()=>{const update=()=>setOffline(!navigator.onLine);window.addEventListener("online",update);window.addEventListener("offline",update);return()=>{window.removeEventListener("online",update);window.removeEventListener("offline",update);};},[]);
   const [auth, setAuth] = useState<AuthState | null>(null);
+  useKeyboardInset();
 
   useEffect(()=>{if(auth?.logged_in)return startThumbnailMaintenance();},[auth?.logged_in]);
   // 登入後讀取設定一次：介面主題及主頁布局若在另一部裝置更新，套用較新的版本
@@ -117,9 +118,11 @@ export default function App() {
   else if ((p = match("/settings/:section", path))) page = <Settings username={auth.username} onLogout={refresh} section={p.section} />;
   else page = <div className="py-20 text-center text-mauve">找不到這一頁</div>;
 
+  // Phase 3.9A.1.1：衣櫃頁使用衣櫃專用頁首（單一頁首），不顯示全站頁首
+  const ownHeader = !!match("/wardrobe", path);
   return (
     <div className="mx-auto min-h-screen max-w-5xl">
-      <AppHeader lace={!path.startsWith("/wardrobe")}>
+      {!ownHeader && <AppHeader>
         <div className="flex h-10 items-center justify-between px-4">
           <Link to="/" className="flex items-center gap-2 font-serif text-[18px] tracking-[0.16em] text-gold-soft">
             <IconSparkle className="text-[10px] text-gold" />
@@ -131,15 +134,10 @@ export default function App() {
               <IconPencil className="text-[13px]" />
               編輯
             </button>
-          ) : (
-            <Link to="/import" className="btn-dark flex items-center gap-1 rounded-full px-3.5 py-1 text-[13px]">
-              <IconPlus className="text-[13px]" />
-              上傳
-            </Link>
-          )}
+          ) : null}
         </div>
-      </AppHeader>
-      <main className="px-4 pb-32 pt-2">{offline&&<OfflineBanner />}{page}</main>
+      </AppHeader>}
+      <main className={`px-4 pb-32 ${ownHeader ? "" : "pt-2"}`}>{offline&&<OfflineBanner />}{page}</main>
       <TabBar path={path} />
       <Toast />
     </div>
@@ -147,10 +145,30 @@ export default function App() {
 }
 
 /**
- * 全站頁首（Phase 3.8B.1）：以 ResizeObserver 把實際高度寫入 --app-header-h（各頁的固定工具列以此定位，不再寫死高度）。
- * 衣櫃頁向下捲動時可收合（html[data-header-collapsed]），由衣櫃頁首接手；衣櫃頁不顯示頁首蕾絲，避免兩條重複蕾絲。
+ * Phase 3.9A.1.1：鍵盤及 VisualViewport。iOS 鍵盤彈出時固定在底部的操作欄（.action-bar）移到鍵盤之上，
+ * 收起時回到底部選單之上（--action-bottom）。不支援 visualViewport 時維持底部選單高度。
  */
-function AppHeader({ lace, children }: { lace: boolean; children: ReactNode }) {
+function useKeyboardInset() {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const root = document.documentElement.style;
+    if (!vv) return;
+    const on = () => {
+      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      root.setProperty("--kb-inset", kb + "px");
+      if (kb > 80) root.setProperty("--action-bottom", kb + "px"); else root.removeProperty("--action-bottom");
+    };
+    on(); vv.addEventListener("resize", on); vv.addEventListener("scroll", on);
+    return () => { vv.removeEventListener("resize", on); vv.removeEventListener("scroll", on); root.removeProperty("--action-bottom"); };
+  }, []);
+}
+
+/**
+ * 全站頁首（Phase 3.8B.1）：以 ResizeObserver 把實際高度寫入 --app-header-h（各頁的固定工具列以此定位，不再寫死高度）。
+ * 衣櫃頁不顯示全站頁首（衣櫃有自己的單一頁首），避免兩套頁首互相遮蓋及重複留白。
+ * 其他頁面不再放「上傳」快捷：統一使用底部中央「新增」選單，避免重複按鈕。
+ */
+function AppHeader({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -161,20 +179,25 @@ function AppHeader({ lace, children }: { lace: boolean; children: ReactNode }) {
     ob.observe(el);
     return () => ob.disconnect();
   }, []);
-  return <header ref={ref} className={`app-header safe-top sticky top-0 z-30 ${lace ? "lace-b" : ""}`} style={{ background: "var(--aw-header)" }}>{children}</header>;
+  return <header ref={ref} className="app-header lace-b safe-top sticky top-0 z-30" style={{ background: "var(--aw-header)" }}>{children}</header>;
 }
 
 const TABS = [
   { to: "/", label: "首頁", Icon: IconHome, test: (p: string) => p === "/" || p.startsWith("/analysis") },
   { to: "/wardrobe", label: "衣櫃", Icon: IconCrown, test: (p: string) => p.startsWith("/wardrobe") || p.startsWith("/g/") },
-  { to: "/import", label: "上傳", Icon: IconPlus, test: (p: string) => p.startsWith("/import") },
+  { to: "", label: "新增", Icon: IconPlus, test: (p: string) => p.startsWith("/import") },
   { to: "/outfits", label: "穿搭", Icon: IconDress, test: (p: string) => p.startsWith("/outfits") || p.startsWith("/dressing") || p.startsWith("/diary") },
   { to: "/settings", label: "設定", Icon: IconGear, test: (p: string) => p.startsWith("/settings") || p.startsWith("/taxonomy") },
 ];
 
-/** 底部選單：選中的項目在原位亮起（不再向上跳起） */
+/**
+ * 底部選單：選中的項目在原位亮起。中央「新增」不是頁面，而是打開小型底部選單（上傳衣物／記錄穿搭）：
+ * 保留目前頁面及捲動位置，不改變目前選中的分頁；點背景、取消或按返回都可關閉。
+ */
 function TabBar({ path }: { path: string }) {
   const bar = useRef<HTMLElement>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const pushed = useRef(false);
   useLayoutEffect(() => {
     const el = bar.current;
     if (!el) return;
@@ -184,24 +207,60 @@ function TabBar({ path }: { path: string }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+  // 返回鍵關閉選單：打開時加入一個相同網址的歷史紀錄，返回時只關閉選單（不離開目前頁面）
+  useEffect(() => {
+    if (!addOpen) return;
+    history.pushState({ awAddMenu: 1 }, "", location.pathname + location.search + location.hash);
+    pushed.current = true;
+    const on = () => { pushed.current = false; setAddOpen(false); };
+    window.addEventListener("popstate", on);
+    return () => window.removeEventListener("popstate", on);
+  }, [addOpen]);
+  const close = () => { setAddOpen(false); if (pushed.current) { pushed.current = false; history.back(); } };
+  const go = (to: string) => { pushed.current = false; setAddOpen(false); navigate(to, true); };
   const clean = path.split("?")[0];
   return (
-    <nav ref={bar} className="app-tabbar fixed inset-x-0 bottom-0 z-30" style={{ background: "var(--aw-nav)" }} aria-label="主選單">
-      <div>
-        <div className="mx-auto grid max-w-5xl grid-cols-5">
-          {TABS.map((t) => {
-            const active = t.test(clean);
-            return (
-              <Link key={t.to} to={t.to} className={`flex flex-col items-center gap-1 pb-2 pt-2 text-[11px] `}>
-                <span className={`grid h-9 w-9 place-items-center rounded-full text-[21px] ${active ? "btn-jewel" : t.to === "/import" ? "border border-gold/60 text-gold-soft" : "border border-transparent"}`} aria-hidden>
-                  <t.Icon />
-                </span>
-                <span aria-current={active ? "page" : undefined}>{t.label}</span>
-              </Link>
-            );
-          })}
+    <>
+      <nav ref={bar} className="app-tabbar fixed inset-x-0 bottom-0 z-30" style={{ background: "var(--aw-nav)" }} aria-label="主選單">
+        <div>
+          <div className="mx-auto grid max-w-5xl grid-cols-5">
+            {TABS.map((t) => {
+              if (!t.to) return (
+                <button key="add" type="button" data-testid="tab-add" aria-haspopup="dialog" aria-expanded={addOpen} onClick={() => setAddOpen(true)} className="flex flex-col items-center gap-1 pb-2 pt-2 text-[11px]">
+                  <span className="btn-jewel grid h-9 w-9 place-items-center rounded-full text-[21px]" aria-hidden><t.Icon /></span>
+                  <span>{t.label}</span>
+                </button>
+              );
+              const active = t.test(clean);
+              return (
+                <Link key={t.to} to={t.to} className="flex flex-col items-center gap-1 pb-2 pt-2 text-[11px]">
+                  <span className={`grid h-9 w-9 place-items-center rounded-full text-[21px] ${active ? "btn-jewel" : "border border-transparent"}`} aria-hidden>
+                    <t.Icon />
+                  </span>
+                  <span aria-current={active ? "page" : undefined}>{t.label}</span>
+                </Link>
+              );
+            })}
+          </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+      {addOpen && (
+        <Sheet title="新增" onClose={close}>
+          <div className="grid grid-cols-2 gap-2.5" data-testid="add-menu">
+            <button type="button" data-testid="add-garment" onClick={() => go("/import")} className="card-flat flex flex-col items-start gap-1 p-3.5 text-left">
+              <IconPlus className="text-[20px] text-gold-soft" />
+              <b className="text-[15px]">上傳衣物</b>
+              <span className="text-[11.5px] text-mauve">批量上傳，保留原圖；之後可手動去背</span>
+            </button>
+            <button type="button" data-testid="add-diary" onClick={() => go("/diary/new")} className="card-flat flex flex-col items-start gap-1 p-3.5 text-left">
+              <IconCamera className="text-[20px] text-gold-soft" />
+              <b className="text-[15px]">記錄穿搭</b>
+              <span className="text-[11.5px] text-mauve">今日穿搭：拍照、相簿、已有穿搭或衣物</span>
+            </button>
+          </div>
+          <button type="button" onClick={close} className="mt-3 h-10 w-full rounded-full text-[13px] text-mauve" data-testid="add-cancel">取消</button>
+        </Sheet>
+      )}
+    </>
   );
 }

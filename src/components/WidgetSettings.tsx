@@ -1,4 +1,5 @@
 // 主頁元件的獨立設定（Phase 3.8A／3.8A.1）。主頁原位編輯及設定頁列表編輯共用，資料由 shared/homeLayout 驗證。
+import { COVER_MODES } from "../diaryCover";
 import { DISPLAYS, OVERVIEW_DEFAULT, OVERVIEW_ITEMS, QUICK_DEFAULT, QUICK_ITEMS, SIZE_LABEL, Widget, WidgetOpts, WidgetSize, spanFor, widgetSpec } from "../../shared/homeLayout";
 import { useTaxonomy } from "../taxonomy";
 import { IconChevronDown, IconChevronUp, IconTrash } from "./icons";
@@ -56,6 +57,7 @@ export function WidgetSettings({ w, onPatch, onRemove, basic }: { w: Widget; onP
       {spec.category && <div className="flex flex-wrap items-center gap-3">
         {([["show_name", "名稱"], ["show_brand", "品牌"], ["show_category", "分類"]] as const).map(([k, l]) => <label key={k} className="flex items-center gap-1.5"><input type="checkbox" data-opt={k} checked={w.opts[k] !== false} onChange={(e) => opts({ [k]: e.target.checked })} />{l}</label>)}
       </div>}
+      {(w.type === "diary_calendar" || w.type === "diary_recent" || w.type === "diary_today") && <label className="flex items-center gap-2">封面<select value={w.opts.cover ?? "auto"} data-opt="cover" onChange={(e) => opts({ cover: e.target.value === "auto" ? undefined : (e.target.value as "photo") })} className={sel}>{COVER_MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>}
       {spec.onlyWhen && <label className="flex items-center gap-2"><input type="checkbox" checked={!!w.opts.only_when_content} onChange={(e) => opts({ only_when_content: e.target.checked })} />只在有內容時顯示</label>}
       {w.type === "overview" && <><p className="text-[11.5px] text-gold-soft">顯示的統計及次序</p><ItemPicker testid="overview-items" all={OVERVIEW_ITEMS} value={w.opts.items ?? OVERVIEW_DEFAULT} onChange={(v) => opts({ items: v })} /></>}
       {w.type === "quick" && <><p className="text-[11.5px] text-gold-soft">顯示的功能及次序</p><ItemPicker testid="quick-items" all={QUICK_ITEMS} value={w.opts.items ?? QUICK_DEFAULT} onChange={(v) => opts({ items: v })} /></>}

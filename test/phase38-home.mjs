@@ -18,7 +18,7 @@ try {
   const l0 = await layoutOf();
   check("預設主頁次序：封面→概覽→總價→快捷→最近加入→…", l0.startsWith("cover,overview,value,quick,recent"), l0);
   check("主頁右上角是「編輯」，不是上傳", (await page.locator('[data-testid="home-edit"]').count()) === 1 && (await page.locator('header a[href="/import"]').count()) === 0);
-  check("底部選單仍保留上傳", (await page.locator('nav a[href="/import"]').count()) === 1);
+  check("底部選單中央是「新增」（打開選單，可上傳衣物）", (await page.locator('nav [data-testid="tab-add"]').count()) === 1);
   check("衣櫃總數沒有在多個大型卡片重複", (await page.locator('[data-testid="w-overview"] .frame').count()) <= 7);
   await page.waitForSelector('[data-testid="w-recent"] [data-garment], [data-testid="w-recent"] a', { timeout: 8000 }).catch(() => undefined);
   await shot("01-home");
@@ -140,11 +140,14 @@ try {
   console.log("穿搭工作室及角色素材");
   await page.goto(A.base + "/outfits");
   await page.waitForSelector('[data-testid="studio-main"]');
-  const mainH = (await page.locator('[data-testid="studio-main"] a').first().boundingBox()).height;
+  const mainBoxes = await page.locator('[data-testid="studio-main"] a').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }));
+  check("兩個主要入口大小一致且緊湊", mainBoxes.length === 2 && mainBoxes[0][0] === mainBoxes[1][0] && mainBoxes[0][1] === mainBoxes[1][1] && mainBoxes[0][1] < 100, mainBoxes);
+  const listTop = (await page.locator("h2:has-text('已保存造型')").boundingBox()).y;
+  check("已保存造型更快出現在畫面", listTop < 330, listTop);
+  await page.click('[data-outfits-tab="assets"]');
+  await page.waitForSelector('[data-testid="studio-tools"]');
   const toolH = (await page.locator('[data-testid="studio-tools"] a').first().boundingBox()).height;
-  check("主要入口與管理入口大小明確區分", mainH > toolH + 8 && mainH < 90, [mainH, toolH]);
-  const listTop = (await page.locator("h2:has-text('我的穿搭')").boundingBox()).y;
-  check("我的穿搭更快出現在畫面", listTop < 330, listTop);
+  check("素材管理使用緊湊列表（不是大型卡片）", toolH < 70 && (await page.locator('[data-testid="studio-tools"] [data-testid="entry-setup"]').count()) === 1, toolH);
   await shot("06-studio");
   await page.evaluate(() => fetch("/api/doll/models", { method: "POST", headers: { "content-type": "application/json", "x-requested-with": "ai-wardrobe" }, body: JSON.stringify({ from: "avatar_v2", name: "測試身體" }) }));
   await page.goto(A.base + "/dressing/assets");
