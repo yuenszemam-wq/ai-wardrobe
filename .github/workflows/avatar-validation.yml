@@ -40,6 +40,7 @@ jobs:
       - run: node test/phase38c.mjs
       - run: node test/phase39b1.mjs
       - run: node test/phase39b2.mjs
+      - run: node test/phase37.mjs
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
         env:

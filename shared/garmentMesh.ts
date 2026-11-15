@@ -472,11 +472,66 @@ export function buildRig(inp: RigInput): GarmentRig {
 export function boneMatrices(mesh: Mesh, mats: Record<string, Mat>): Mat[] {
   return mesh.bones.map((b) => { const m = b.id === "world" ? [1, 0, 0, 1, 0, 0] as Mat : mats[b.id] ?? mats.root; return b.pre ? multiply(m, b.pre) : m; });
 }
-/** 把網格頂點變到目前姿勢（Linear Blend Skinning） */
-export function skinMesh(mesh: Mesh, mats: Record<string, Mat>, bm = boneMatrices(mesh, mats)): Float32Array {
+/**
+ * Phase 3.7：骨骼混合方式。
+ * - "linear"（預設）：Linear Blend Skinning（與以前完全相同）。
+ * - "dq"（實驗）：雙四元數混合（繞 z 軸，半角），按彎曲角度與線性結果混合。實測（test/phase37.mjs、doc/phase3.7）：
+ *   部分衣物及姿勢減少關節內側收縮，但另一些（例如叉腰的手肘）反而更差，效果視乎網格及權重，所以暫不設為預設；
+ *   骨骼有縮放或斜切時自動退回線性結果。
+ */
+export type SkinBlend = "dq" | "linear";
+let defaultBlend: SkinBlend = "linear";
+export const setSkinBlend = (b: SkinBlend) => { defaultBlend = b; };
+export const skinBlend = () => defaultBlend;
+/**
+ * 雙四元數與線性結果的混合比例（1＝純雙四元數）。按關節彎曲角度自動調整：彎曲 60° 以內用純雙四元數（保持體積、沒有收縮）；
+ * 更大的彎曲（例如叉腰時手肘 ~100°）逐漸混入線性結果至 dqMix，避免手肘外側被拉得過長。
+ */
+let dqMix = 0.65;
+export const setSkinMix = (v: number) => { dqMix = Math.min(1, Math.max(0, v)); };
+const rigidOf = (m: Mat): boolean => Math.abs(m[0] - m[3]) < 1e-4 && Math.abs(m[1] + m[2]) < 1e-4 && Math.abs(m[0] * m[0] + m[1] * m[1] - 1) < 2e-3;
+/**
+ * 剛體骨骼 → 雙四元數（繞 z 軸旋轉）：實部 (cos θ/2, sin θ/2)，雙部 ½·t·q 只有 x、y 兩個分量。
+ * 用半角表示，混合後才會是正確的螺旋插值（全角複數直接混合平移會令遠離原點的骨骼大幅擺動）。
+ */
+function dualOf(m: Mat): [number, number, number, number] | null {
+  if (!rigidOf(m)) return null;
+  const h = Math.atan2(m[1], m[0]) / 2, c = Math.cos(h), sn = Math.sin(h), tx = m[4], ty = m[5];
+  return [c, sn, (tx * c + ty * sn) / 2, (ty * c - tx * sn) / 2];
+}
+/** 把網格頂點變到目前姿勢 */
+export function skinMesh(mesh: Mesh, mats: Record<string, Mat>, bm = boneMatrices(mesh, mats), blend: SkinBlend = defaultBlend): Float32Array {
   const nb = mesh.bones.length, nv = mesh.rest.length / 2, out = new Float32Array(nv * 2);
+  const dq = blend === "dq" ? bm.map(dualOf) : [];
   for (let k = 0; k < nv; k++) {
     const x = mesh.rest[k * 2], y = mesh.rest[k * 2 + 1];
+    if (blend === "dq") {
+      let rw = 0, rz = 0, db = 0, dc = 0, ok = true, ref: [number, number, number, number] | null = null, minDot = 1;
+      for (let b = 0; b < nb; b++) {
+        const w = mesh.weights[k * nb + b];
+        if (w <= 0) continue;
+        const q = dq[b];
+        if (!q) { ok = false; break; }
+        // 對蹠：與第一節骨骼不在同一半球時取反（走較短的旋轉方向）
+        if (!ref) ref = q;
+        const dot = q[0] * ref[0] + q[1] * ref[1], sg = dot < 0 ? -w : w;
+        minDot = Math.min(minDot, Math.abs(dot));
+        rw += sg * q[0]; rz += sg * q[1]; db += sg * q[2]; dc += sg * q[3];
+      }
+      const len = Math.hypot(rw, rz);
+      if (ok && len > 1e-6) {
+        rw /= len; rz /= len; db /= len; dc /= len;
+        const tx = 2 * (db * rw - dc * rz), ty = 2 * (db * rz + dc * rw), cs = rw * rw - rz * rz, sn = 2 * rw * rz;
+        const qx = cs * x - sn * y + tx, qy = sn * x + cs * y + ty;
+        // |dot|＝cos(彎曲角度／2)：0.866＝60°，0.643＝100°
+        const mix = minDot >= 0.866 ? 1 : minDot <= 0.643 ? dqMix : dqMix + ((1 - dqMix) * (minDot - 0.643)) / (0.866 - 0.643);
+        if (mix >= 1) { out[k * 2] = qx; out[k * 2 + 1] = qy; continue; }
+        let lx = 0, ly = 0;
+        for (let b = 0; b < nb; b++) { const w = mesh.weights[k * nb + b]; if (w <= 0) continue; const m = bm[b]; lx += w * (m[0] * x + m[2] * y + m[4]); ly += w * (m[1] * x + m[3] * y + m[5]); }
+        out[k * 2] = lx + (qx - lx) * mix; out[k * 2 + 1] = ly + (qy - ly) * mix;
+        continue;
+      }
+    }
     let px = 0, py = 0;
     for (let b = 0; b < nb; b++) {
       const w = mesh.weights[k * nb + b];
