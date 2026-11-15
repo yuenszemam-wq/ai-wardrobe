@@ -23,6 +23,7 @@ import CharacterStudio from "./pages/CharacterStudio";
 import ModelEditor from "./pages/ModelEditor";
 import GarmentSetup from "./pages/GarmentSetup";
 import PublicUpload from "./pages/PublicUpload";
+import PublicShare from "./pages/PublicShare";
 import Settings from "./pages/Settings";
 import TaxonomyManager from "./pages/TaxonomyManager";
 import StudioAssets from "./pages/StudioAssets";
@@ -87,6 +88,9 @@ export default function App() {
   // 短效上傳連結不需要登入
   const upload = match("/u/:token", path);
   if (upload) return <PublicUpload token={upload.token} />;
+  // Phase 3.9B.1：公開衣櫃分享不需要登入，亦不使用本機私人資料
+  const shared = match("/s/:token", path);
+  if (shared) return <PublicShare token={shared.token} />;
 
   if (!auth) return <Spinner />;
   if (!auth.logged_in) return <Login setupRequired={auth.setup_required} onDone={refresh} />;

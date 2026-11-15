@@ -11,6 +11,7 @@ import { createUploadSession, getUploadSession, handleSlotUpload } from "./uploa
 import { processStaging } from "./staging";
 import { createOutfit, deleteOutfit, getOutfit, listOutfitsPage, serveOutfitThumb, updateOutfit } from "./outfits";
 import * as studio from "./studio";
+import * as share from "./share";
 import { drainPurge } from "./purge";
 import { pruneOps } from "./ops";
 import { addAssetFile, createAsset, createLook, deleteAsset, deleteAssetFile, deleteLook, deleteTemplate, getAssetThumb, getLook, getPalette, putPalette, getLookThumb, listAssets, listLooks, listTemplates, putAssetThumb, putLookThumb, putTemplate, batchTemplates, serveAssetFile, updateAsset, updateLook } from "./doll";
@@ -106,6 +107,13 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (aiImg && (method === "GET" || method === "HEAD")) return serveSignedImage(env, aiImg[1], url);
   const slotUp = path.match(/^\/api\/upload\/([A-Za-z0-9_-]{20,80})(?:\/(slt_[a-z2-7]+)(?:\/(thumbnail))?)?$/);
   if (slotUp) return handleSlotUpload(req, env, slotUp[1], slotUp[2], slotUp[3]);
+
+  // Phase 3.9B.1：公開唯讀分享（不需登入；只讀取公開投影）
+  const shareRoute = path.match(/^\/api\/share\/([A-Za-z0-9_-]{20,80})(?:\/(thumb|image)\/([\w-]{1,64}))?$/);
+  if (shareRoute && (method === "GET" || method === "HEAD")) {
+    if (!shareRoute[2]) return share.publicJson(await share.publicShare(env, shareRoute[1]));
+    return share.publicImage(req, env, shareRoute[1], shareRoute[3], shareRoute[2] as "thumb" | "image");
+  }
 
   const actor = await authenticate(req, env);
   if (!actor) throw new HttpError(401, "unauthorized", "請先登入");
@@ -477,6 +485,20 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (path === "/api/studio/assets") {
     if (method === "GET") { requireScope(actor, "read"); return json(await studio.listAssets(env, url.searchParams)); }
     if (method === "POST") { requireSession(actor); return json(await studio.createAsset(env, actor, req), 201); }
+  }
+  // Phase 3.9B.1：分享連結管理（只限登入的擁有者）
+  if (path === "/api/shares") {
+    if (method === "GET") { requireSession(actor); return json(await share.listShares(env)); }
+    if (method === "POST") { requireSession(actor); return json(await share.createShare(env, actor, await readJson(req), url.origin), 201); }
+  }
+  m = path.match(/^\/api\/shares\/(shr_[a-z2-7]+)(?:\/(revoke|rotate))?$/);
+  if (m) {
+    requireSession(actor);
+    if (!m[2] && method === "GET") return json(await share.getShare(env, m[1]));
+    if (!m[2] && method === "PATCH") return json(await share.updateShare(env, actor, m[1], await readJson(req)));
+    if (!m[2] && method === "DELETE") return json(await share.deleteShare(env, actor, m[1]));
+    if (m[2] === "revoke" && method === "POST") return json(await share.revokeShare(env, actor, m[1]));
+    if (m[2] === "rotate" && method === "POST") return json(await share.rotateShare(env, actor, m[1], url.origin));
   }
   if (path === "/api/studio/bg-presets") {
     if (method === "GET") { requireScope(actor, "read"); return json(await studio.listPresets(env)); }

@@ -19,7 +19,8 @@ self.addEventListener('install',event=>event.waitUntil(precache().then(()=>self.
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('aw-shell-')&&k!==SHELL).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('message',event=>{if(event.data?.type==='CLEAR_PRIVATE')event.waitUntil(purgePrivate());});
 // Only non-secret, authenticated display GETs are persisted. Tokens, signed URLs, MCP, uploads and HD are excluded.
-const offlinePath=(p)=>/^\/api\/(auth\/status|garments(?:\/[\w-]+)?|stats|taxonomy|settings(?:\/colors)?|outfits(?:\/[\w-]+)?|ai\/review|analysis|doll\/looks)$/.test(p);
+// Phase 3.8C：角色換裝離線包亦需要身體模型、衣服設定、角色素材清單、工作室素材清單及背景預設。公開分享（/api/share）永不保存。
+const offlinePath=(p)=>/^\/api\/(auth\/status|garments(?:\/[\w-]+)?|stats|taxonomy|settings(?:\/colors)?|outfits(?:\/[\w-]+)?|ai\/review|analysis|doll\/looks(?:\/[\w-]+)?|doll\/models(?:\/[\w-]+(?:\/revisions\/\d+)?)?|doll\/templates|doll\/assets|studio\/assets|studio\/bg-presets)$/.test(p);
 self.addEventListener('fetch',event=>{
   const req=event.request,url=new URL(req.url);
   if(url.origin!==location.origin)return;
@@ -38,7 +39,7 @@ self.addEventListener('fetch',event=>{
         if(loggedOut){await purgePrivate();return res;}
         if(res.ok&&start===generation) {
           await cache.put(req,res.clone());
-          const keys=await cache.keys();for(const old of keys.slice(0,Math.max(0,keys.length-96)))await cache.delete(old);
+          const keys=await cache.keys();for(const old of keys.slice(0,Math.max(0,keys.length-160)))await cache.delete(old);
         }
         return res;
       } catch(error) {
