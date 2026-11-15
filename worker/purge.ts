@@ -15,7 +15,6 @@ export const R2_REFS: [table: string, col: string][] = [
   ["garment_images", "r2_key"], ["outfit_images", "r2_key"], ["diary_photos", "r2_key"],
   ["studio_asset_versions", "r2_key"], ["studio_asset_versions", "cutout_key"],
   ["doll_asset_files", "r2_key"], ["doll_model_files", "r2_key"], ["upload_slots", "r2_key"],
-  ["package_files", "r2_key"],
 ];
 
 async function activeRefs(env: Env) {
