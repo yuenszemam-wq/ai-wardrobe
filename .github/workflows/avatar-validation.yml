@@ -111,6 +111,9 @@ jobs:
       - run: node test/phase39b2-ui.mjs
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/ai-lab-ui.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
       # Playwright WebKit（Safari 引擎；不等於 iPhone 實機）：結果如實記錄，暫不阻擋合併
       - run: npx playwright install --with-deps webkit
         continue-on-error: true

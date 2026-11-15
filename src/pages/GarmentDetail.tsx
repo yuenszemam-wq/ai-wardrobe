@@ -5,6 +5,7 @@ import { WardrobeImage } from "../components/WardrobeImage";
 import { AttributeChoices, BrandInput } from "../components/GarmentChoices";
 import { SplitSheet } from "../components/SplitSheet";
 import { CutoutSheet } from "../components/CutoutSheet";
+import { AiRecognizeButton } from "../components/AiRecognizeButton";
 import { cutoutSource } from "../cutoutFlow";
 import { useEffect, useState } from "react";
 import { attributesFor, attributeValues, isColumnAttribute, Taxonomy } from "../../shared/taxonomy";
@@ -236,6 +237,7 @@ export default function GarmentDetail({ id }: { id: string }) {
               合併同一件
             </button>
             <button type="button" onClick={() => setSplitting(true)} className="chip min-h-9 rounded-full px-3.5 text-[13px]">拆開圖片</button>
+            <AiRecognizeButton g={g} onDone={() => void load()} />
             {shown && !shown.is_primary && (
               <button
                 type="button"
