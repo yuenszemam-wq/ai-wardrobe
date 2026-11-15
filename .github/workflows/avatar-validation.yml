@@ -42,6 +42,7 @@ jobs:
       - run: node test/phase39b2.mjs
       - run: node test/phase37.mjs
       - run: node test/d1-limits.mjs
+      - run: node test/cutout-studio.mjs
       - run: npx playwright install --with-deps chromium
       - run: node test/doll-ui.mjs
         env:
@@ -110,6 +111,9 @@ jobs:
       - run: node test/phase39b2-ui.mjs
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots
+      - run: node test/cutout-studio-ui.mjs
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots
       # Playwright WebKit（Safari 引擎；不等於 iPhone 實機）：結果如實記錄，暫不阻擋合併
       - run: npx playwright install --with-deps webkit
         continue-on-error: true
@@ -124,6 +128,11 @@ jobs:
           DOLL_SHOTS: ${{ github.workspace }}/shots-webkit
           PW_BROWSER: webkit
       - run: node test/phase39a21-ui.mjs
+        continue-on-error: true
+        env:
+          DOLL_SHOTS: ${{ github.workspace }}/shots-webkit
+          PW_BROWSER: webkit
+      - run: node test/cutout-studio-ui.mjs
         continue-on-error: true
         env:
           DOLL_SHOTS: ${{ github.workspace }}/shots-webkit

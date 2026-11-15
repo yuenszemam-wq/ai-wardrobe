@@ -26,7 +26,7 @@ async function sniff(file: Blob): Promise<string> {
   return file.type || "application/octet-stream";
 }
 
-async function decode(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
+export async function decode(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   if ("createImageBitmap" in window) {
     try {
       return await createImageBitmap(file, { imageOrientation: "from-image" } as ImageBitmapOptions);

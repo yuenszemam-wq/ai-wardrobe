@@ -125,6 +125,7 @@ export function makeEnv(opts = {}) {
   if (!opts.withoutStudio) DB.migrate(new URL("../migrations/0014_studio_v2.sql", import.meta.url));
   if (!opts.withoutStudio && !opts.withoutStability) DB.migrate(new URL("../migrations/0015_studio_stability.sql", import.meta.url));
   if (!opts.withoutShare) DB.migrate(new URL("../migrations/0016_wardrobe_share.sql", import.meta.url));
+  if (!opts.withoutCutoutEdits) DB.migrate(new URL("../migrations/0017_cutout_edits.sql", import.meta.url));
   return {
     DB,
     IMAGES: new FakeR2(),

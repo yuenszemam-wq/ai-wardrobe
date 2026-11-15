@@ -4,6 +4,7 @@ import { authenticate, checkCsrf, handleAuth, handleTokens, meterCall } from "./
 import { analysis, createGarment, deleteGarment, getGarment, listGarments, mergeGarments, stats, syncManifest, syncRows, updateGarment } from "./garments";
 import { getCustomColors, addCustomColor, deleteHomeBg, getSettings, serveHomeBg, updateSettings, uploadHomeBg } from "./settings";
 import { cleanupOrphans, deleteImage, ImageType, Owner, readUploadBody, serveImage, setPrimary, storeImage } from "./images";
+import { getCutoutEdit, recordCutoutEdit } from "./cutoutEdits";
 import { actOnJob, addItems, createBatch, createUploadLink, failJob, finalizeBatch, getBatch, listBatches, loadTicket, onImageStored } from "./imports";
 import { handleMcp } from "./mcp";
 import { aiMaintenance, aiQueue, bulkIntake, claimGarments, decide, intakeUpload, recordOrigin, reviewList, serveSignedImage, setAiStatus, submitSuggestion } from "./ai";
@@ -324,6 +325,16 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       requireSession(actor);
       return deleteImage(env, actor, m[1]);
     }
+  }
+  // ───── Cutout Studio 去背圖來源關聯 ─────
+  if (path === "/api/cutout-edits" && method === "POST") {
+    requireScope(actor, "upload");
+    return json(await recordCutoutEdit(env, await readJson(req)));
+  }
+  m = path.match(/^\/api\/cutout-edits\/([\w-]+)$/);
+  if (m && method === "GET") {
+    requireScope(actor, "read");
+    return json(await getCutoutEdit(env, m[1]));
   }
   m = path.match(/^\/api\/images\/([\w-]+)\/primary$/);
   if (m && method === "POST") {

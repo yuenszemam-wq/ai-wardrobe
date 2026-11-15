@@ -4,6 +4,7 @@ import { CutoutResult, runCutout, saveCutout } from "../cutoutFlow";
 import { Button, Sheet, toast } from "./ui";
 import { WardrobeImage } from "./WardrobeImage";
 import { imageUrl } from "../api";
+import { CutoutStudio } from "../cutoutStudio/CutoutStudio";
 
 /** 手動去背：顯示結果、可對比原圖，確認後才保存透明圖片（原圖保留） */
 export function CutoutSheet({ g, image, onClose, onSaved }: { g: Garment; image: GarmentImage; onClose: () => void; onSaved: () => void }) {
@@ -12,6 +13,7 @@ export function CutoutSheet({ g, image, onClose, onSaved }: { g: Garment; image:
   const [compare, setCompare] = useState(false);
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState(0);
+  const [studio, setStudio] = useState<null | { auto: boolean }>(null);
   const urlRef = useRef("");
   useEffect(() => {
     const ac = new AbortController();
@@ -26,6 +28,7 @@ export function CutoutSheet({ g, image, onClose, onSaved }: { g: Garment; image:
     catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   }
+  if (studio) return <CutoutStudio target={{ kind: "garment", garment: g, image }} autoStart={studio.auto} onClose={() => setStudio(null)} onSaved={(i) => { onSaved(); if (!i.newGarment) onClose(); }} />;
   return (
     <Sheet title="去背" onClose={() => { if (!busy) onClose(); }}>
       <div className="p-4" data-testid="cutout-sheet">
@@ -40,9 +43,10 @@ export function CutoutSheet({ g, image, onClose, onSaved }: { g: Garment; image:
           {res?.ok && <Button variant="ghost" onClick={() => setCompare((v) => !v)}>{compare ? "顯示去背結果" : "對比原圖"}</Button>}
           {(err || (res && !res.ok && !res.transparent)) && <Button variant="ghost" onClick={() => setRun((n) => n + 1)}>重試</Button>}
           {res?.ok && <Button onClick={save} disabled={busy} data-testid="cutout-save">{busy ? "保存中…" : "保存去背圖"}</Button>}
+          <Button variant="ghost" onClick={() => setStudio({ auto: !!res?.ok })} disabled={busy} data-testid="cutout-manual">{res?.ok ? "以此結果手動修正" : "手動去背／選取衣物"}</Button>
           <Button variant="ghost" onClick={onClose} disabled={busy}>取消</Button>
         </div>
-        <p className="mt-3 text-center text-[11px] text-mauve">原始圖片永遠保留。去背失敗或取消不會改變現有主圖。</p>
+        <p className="mt-3 text-center text-[11px] text-mauve">原始圖片永遠保留。去背失敗或取消不會改變現有主圖。手動去背可擦除、還原、魔術棒、套索選取，及從完整穿搭相拆出多件衣物。</p>
       </div>
     </Sheet>
   );
