@@ -46,6 +46,9 @@ try {
   check("舊造型沒有背景＝null（維持原本預設）", r.body.background === null);
   const oldUpdated = r.body.updated_at;
 
+  r = await call("POST", "/api/outfits", { name: "舊版格式", items: [{ garment_id: "gar_jsk", position: 0, layer_order: 1, x: 10.5, y: 20, w: 60, h: 70 }, { garment_id: "gar_blouse", position: 1, layer_order: 0 }] });
+  check("舊版格式（AI 工具）：保存位置；沒有位置的單品仍為 null（App 用預設位置）", r.status === 201 && r.body.items.find((i) => i.garment_id === "gar_jsk").x === 10.5 && r.body.items.find((i) => i.garment_id === "gar_blouse").x === null && r.body.layers.find((l) => l.garment_id === "gar_blouse").y === 14, r.body.items);
+  check("舊版格式：圖層次序按 layer_order", r.body.layers.map((l) => l.garment_id).join() === "gar_blouse,gar_jsk");
   console.log("獨立圖層");
   const layers = [
     L("ly_shirt_back", "gar_blouse", { x: 20, y: 14 }),

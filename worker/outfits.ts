@@ -73,8 +73,12 @@ function decorate(layers: Layer[], im: Awaited<ReturnType<typeof layerImages>>) 
   });
 }
 
+/** 舊造型（沒有圖層資料）的原始衣物清單：位置可能是 null（App 按類別使用預設位置） */
+const legacyRaw = new WeakMap<Map<string, Layer[]>, Map<string, (LegacyItem & { outfit_id: string })[]>>();
 async function loadLayers(env: Env, ids: string[]): Promise<Map<string, Layer[]>> {
   const out = new Map<string, Layer[]>();
+  const raw = new Map<string, (LegacyItem & { outfit_id: string })[]>();
+  legacyRaw.set(out, raw);
   for (let i = 0; i < ids.length; i += 80) {
     const part = ids.slice(i, i + 80), ph = part.map(() => "?").join(",");
     const [layers, items] = await Promise.all([
@@ -84,7 +88,8 @@ async function loadLayers(env: Env, ids: string[]): Promise<Map<string, Layer[]>
     for (const id of part) {
       const own = layers.results.filter((r) => r.outfit_id === id);
       // 有新版圖層＝使用圖層；否則由舊版衣物清單生成（位置及次序不變）
-      out.set(id, own.length ? own.map(rowToLayer) : legacyLayers(items.results.filter((r) => r.outfit_id === id), (i) => slotFor(i.category)));
+      if (own.length) out.set(id, own.map(rowToLayer));
+      else { const li = items.results.filter((r) => r.outfit_id === id); raw.set(id, li); out.set(id, legacyLayers(li, (i) => slotFor(i.category))); }
     }
   }
   return out;
@@ -124,7 +129,9 @@ export async function listOutfits(env: Env, params: URLSearchParams) {
 export async function getOutfit(env: Env, id: string) {
   const o = await env.DB.prepare("SELECT * FROM outfits WHERE id = ?").bind(id).first<Record<string, unknown>>();
   if (!o) throw new HttpError(404, "outfit_not_found", "找不到這套穿搭");
-  const layers = (await loadLayers(env, [id])).get(id) ?? [];
+  const all = await loadLayers(env, [id]);
+  const layers = all.get(id) ?? [];
+  const raw = legacyRaw.get(all)?.get(id);
   const decorated = decorate(layers, await layerImages(env, layers));
   const { results: images } = await env.DB.prepare(
     "SELECT id, image_type, width, height, has_alpha, is_primary FROM outfit_images WHERE outfit_id = ? AND has_alpha = 1 AND image_type = 'processed' ORDER BY is_primary DESC, created_at",
@@ -134,7 +141,11 @@ export async function getOutfit(env: Env, id: string) {
     ...o, is_favorite: Number(o.is_favorite) === 1, background: normalizeBackground(parseJson(o.background as string | null)),
     layers: decorated,
     // 舊版欄位（衣物清單，由底至頂）
-    items: decorated.filter((l) => l.layer_type === "garment").map((l, i) => ({ garment_id: l.garment_id, name: l.name, category: (l as { category?: string | null }).category ?? null, image_id: (l as { image_id?: string | null }).image_id ?? null, thumb_image_id: (l as { image_id?: string | null }).image_id ?? null, position: i, layer_order: i, x: l.x, y: l.y, w: l.w, h: l.h })),
+    items: decorated.filter((l) => l.layer_type === "garment").map((l, i) => {
+      // 舊造型：保留原本 null 位置（舊版 App 及 AI 工具按類別使用預設位置）
+      const r = raw?.find((x) => "g:" + x.garment_id === l.layer_id);
+      return { garment_id: l.garment_id, name: l.name, category: (l as { category?: string | null }).category ?? null, image_id: (l as { image_id?: string | null }).image_id ?? null, thumb_image_id: (l as { image_id?: string | null }).image_id ?? null, position: i, layer_order: i, x: r ? r.x : l.x, y: r ? r.y : l.y, w: r ? r.w : l.w, h: r ? r.h : l.h };
+    }),
     images, thumb_url: thumb ? `/api/outfits/${id}/thumb?v=${encodeURIComponent(thumb.version)}` : null,
   };
 }
@@ -146,7 +157,7 @@ function pct(v: unknown, min: number, max: number): number | null {
   return Math.round(Math.min(max, Math.max(min, n)) * 100) / 100;
 }
 
-interface Prepared { layers: Layer[] | null; background: BackgroundSpec | null | undefined; thumb: { bytes: Uint8Array; mime: string; version: string } | null }
+interface Prepared { legacyItems?: { garment_id: string; position: number; layer_order: number; x: number | null; y: number | null; w: number | null; h: number | null }[]; layers: Layer[] | null; background: BackgroundSpec | null | undefined; thumb: { bytes: Uint8Array; mime: string; version: string } | null }
 /** 先完整驗證：圖層、引用存在性、背景、縮圖。任何錯誤都在寫入之前拋出 */
 async function prepare(env: Env, input: OutfitInput): Promise<Prepared> {
   let layers: Layer[] | null = null;
@@ -163,13 +174,18 @@ async function prepare(env: Env, input: OutfitInput): Promise<Prepared> {
       layers.push(l);
     }
   } else if (Array.isArray(input.items)) {
+    // 舊版格式（AI 工具、舊版 App）：只有衣物及位置，同一衣物只保留一次；照舊寫入 outfit_items（沒有位置＝null）
     if (input.items.length > 30) throw new HttpError(400, "bad_items", "items 格式錯誤（最多 30 件）");
-    // 舊版格式：同一衣物只保留一次（舊版行為）
     const seen = new Set<string>();
-    const items = input.items.filter((it) => { const g = String(it?.garment_id || ""); if (!g || seen.has(g)) return false; seen.add(g); return true; });
-    const cats = new Map<string, string | null>();
-    for (const it of items) cats.set(String(it.garment_id), (await env.DB.prepare("SELECT category FROM garments WHERE id = ?").bind(String(it.garment_id)).first<{ category: string | null }>())?.category ?? null);
-    layers = legacyLayers(items.map((it, i) => ({ garment_id: String(it.garment_id), position: Number.isFinite(it.position) ? Number(it.position) : i, layer_order: Number.isFinite(it.layer_order) ? Number(it.layer_order) : i, x: pct(it.x, -50, 150), y: pct(it.y, -50, 150), w: pct(it.w, 2, 300), h: pct(it.h, 2, 300) })), (i) => slotFor(cats.get(i.garment_id)));
+    const legacy = input.items.filter((it) => { const g = String(it?.garment_id || ""); if (!g || seen.has(g)) return false; seen.add(g); return true; })
+      .map((it, i) => ({ garment_id: String(it.garment_id), position: Number.isFinite(it.position) ? Number(it.position) : i, layer_order: Number.isFinite(it.layer_order) ? Number(it.layer_order) : i, x: pct(it.x, -50, 150), y: pct(it.y, -50, 150), w: pct(it.w, 2, 300), h: pct(it.h, 2, 300) }));
+    const gids = legacy.map((x) => x.garment_id);
+    for (let i = 0; i < gids.length; i += 80) {
+      const part = gids.slice(i, i + 80);
+      const n = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM garments WHERE id IN (${part.map(() => "?").join(",")})`).bind(...part).first<{ n: number }>())?.n ?? 0;
+      if (n !== part.length) throw new HttpError(400, "bad_garment", "有衣物不存在，未能儲存穿搭");
+    }
+    return { legacyItems: legacy, layers: null, background: undefined, thumb: null };
   }
   if (layers) {
     const gids = garmentIdsOf(layers);
@@ -210,6 +226,10 @@ async function prepare(env: Env, input: OutfitInput): Promise<Prepared> {
 
 function writeStatements(env: Env, outfitId: string, p: Prepared) {
   const stmts: D1PreparedStatement[] = [];
+  if (p.legacyItems) {
+    stmts.push(env.DB.prepare("DELETE FROM outfit_layers WHERE outfit_id = ?").bind(outfitId), env.DB.prepare("DELETE FROM outfit_items WHERE outfit_id = ?").bind(outfitId));
+    for (const it of p.legacyItems) stmts.push(env.DB.prepare("INSERT INTO outfit_items (outfit_id, garment_id, position, layer_order, x, y, w, h) VALUES (?,?,?,?,?,?,?,?)").bind(outfitId, it.garment_id, it.position, it.layer_order, it.x, it.y, it.w, it.h));
+  }
   if (p.layers) {
     stmts.push(env.DB.prepare("DELETE FROM outfit_layers WHERE outfit_id = ?").bind(outfitId));
     p.layers.forEach((l, i) => stmts.push(env.DB.prepare("INSERT INTO outfit_layers (layer_id, outfit_id, layer_type, garment_id, garment_part_id, asset_id, asset_version_id, group_id, name, layer_order, x, y, w, h, rotation, flip_x, flip_y, opacity, hidden, locked, mask, variant) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
